@@ -289,3 +289,14 @@ Une question à Marc prend toujours la forme d'une **carte**, jamais d'une quest
 | Instructions du projet (résumé du §0) | tout, pour chaque session |
 
 Ce qui n'est pas encore branché est suivi en tâches sous le chantier « Standardiser les tâches », dans ce dépôt.
+
+## 16. Économie de jetons
+
+Source : `commun/plans/2026-10-15_proposition-economie-tokens.md`. Chaque appel relit tout le contexte du fil : le coût vient de la longueur du fil, du modèle et du nombre de réveils.
+
+- **Une tâche = un fil neuf.** Un fil fini est fermé, pas réutilisé.
+- **Passer la main.** Un fil qui dépasse environ 150 k jetons écrit son état dans un fichier de `commun/` et un fil neuf reprend depuis ce fichier.
+- **Modèle.** Sonnet 5.5 par défaut, Haiku 5.5 pour le mécanique (tri, relais), Opus sur demande ou pour les tâches floues. Dernière génération seulement, jamais une plus ancienne.
+- **Routines.** Toute routine tourne en session neuve. Ce qui est mécanique ne passe pas par Claude (script, CI, workflow).
+- **CLAUDE.md.** 60 lignes au plus, sans import de `docs/COMPTE-RENDU.md` ; le détail vit dans `docs/`.
+- **Mesure.** Une mesure par semaine avec la même méthode ; le résultat va dans le rapport hebdomadaire (§12).
