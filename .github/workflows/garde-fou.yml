@@ -1,0 +1,48 @@
+name: Garde-fou
+
+# Contrôle des PR qui touchent un chemin protégé (oui écrit de Marc, 15/10/2026). Vert = Mergify peut
+# fusionner ; rouge = la PR attend Marc, un commentaire dit pourquoi et une issue `qui:marc` s'ouvre.
+# Hors chemins protégés il est vert d'office. La logique et ses tests vivent dans MoKarade/.github
+# (scripts/garde-fou.mjs) : un seul endroit à tenir à jour pour les dix dépôts.
+#
+# SÛRETÉ : `pull_request_target` lit CE fichier depuis la branche par défaut, que la PR ne peut pas
+# modifier ; le script vient de MoKarade/.github (branche main) et ne récupère JAMAIS le code de la
+# PR : il lit la liste des fichiers par l'API. Ne jamais ajouter d'étape qui extrait le code de la PR.
+# Ce fichier fait partie de ce que le garde-fou refuse de laisser modifier seul.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, closed]
+
+# Aucun `paths:` : un contrôle requis filtré ne tournerait pas.
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: garde-fou-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  garde-fou:
+    name: Garde-fou
+    # Plafond : le contrôle dure quelques secondes ; un job figé ne doit pas tourner six heures.
+    timeout-minutes: 5
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || fromJSON('["self-hosted","pc-marc"]') }} # dépôt public : machines GitHub (gratuites) ; privé : robot du PC
+    steps:
+      - name: Récupérer le script du garde-fou (jamais le code de la PR)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: MoKarade/.github
+          ref: main
+          path: .garde-fou
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      - name: Contrôler la PR
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # Mêmes chemins que la règle de .mergify.yml de ce dépôt.
+          CHEMINS_PROTEGES: '^(\.github/|scripts/hooks/|qualite/|vercel\.json|drizzle/|\.env|\.mergify\.yml)'
+        run: node .garde-fou/scripts/garde-fou.mjs

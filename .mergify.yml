@@ -1,0 +1,25 @@
+# Fusion automatique par Mergify pour MoKarade/.github (oui écrit de Marc, 15/10/2026, fil « fusion automatique »).
+# Une PR prête (pas en brouillon, sans l'étiquette « hold ») est fusionnée en squash quand le contrôle
+# « Garde-fou » et les tests du garde-fou sont verts. Hors chemins protégés (docs/, README) le garde-fou
+# est vert d'office ; sur .github/ il bloque les cas dangereux (test retiré, secret, ...) et ouvre une
+# issue `qui:marc`. Ce fichier et le garde-fou ne se modifient pas seuls : Marc les fusionne.
+queue_rules:
+  - name: default
+    merge_method: squash
+    batch_size: 1
+    queue_conditions:
+      - base = main
+      - -draft
+      - label != hold
+      - 'check-success = Garde-fou'
+      - 'check-success = Tests du garde-fou'
+    merge_conditions:
+      - label != hold
+      - 'check-success = Garde-fou'
+      - 'check-success = Tests du garde-fou'
+merge_protections_settings:
+  auto_merge_conditions:
+    - base = main
+    - -draft
+    - label != hold
+    - 'check-success = Garde-fou'
