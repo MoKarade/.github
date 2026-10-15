@@ -11,7 +11,7 @@
 1. Trois niveaux : **chantier** (objectif de plusieurs semaines) › **mission** (résultat livrable en une semaine au plus) › **tâche** (une PR, une journée au plus, environ 400 lignes modifiées hors tests). Chacun est une issue GitHub.
 2. Claude crée le travail. Le Coordinateur tient les chantiers et les missions, et les fils créent et ferment les tâches. Marc décide de la direction : il force une tâche avec `prio:1`.
 3. L'ordre suit une règle fixe : d'abord la panne et le rouge, puis la sécurité, puis le standard et les fonctions en alternance. La routine distribue toutes les 2 h, avec au plus un fil et une tâche Jules par dépôt.
-4. La CI décide, et Gemini commente sans bloquer. Chaque PR qui change un écran porte des captures avant/après, prises avec des données fictives. Mergify fusionne.
+4. La CI décide. Chaque PR qui change un écran porte des captures avant/après, prises avec des données fictives. Mergify fusionne.
 5. Une tâche est **acceptée** quand trois conditions sont remplies : elle est fusionnée, le déploiement est en ligne, et le « Fini quand » est prouvé en production par un commentaire de preuve. Si le test de fumée échoue, la version précédente revient seule et une PR d'annulation s'ouvre. Un rapport hebdomadaire mesure la vitesse, la qualité et les retours en arrière.
 
 ---
@@ -84,7 +84,6 @@ Un « Fini quand » non vérifiable (« c'est mieux ») est refusé. On le réé
 | **Jules** | Les tâches `jules` : simples, un fichier, sans chemin protégé, sans base, sans secret, sans donnée perso | Les chemins protégés ; une tâche sans « Fini quand » |
 | **Routine continue** (toutes les 2 h) | Fait le ménage, choisit la tâche suivante, la distribue (§6) | Inventer du travail |
 | **CI** | Décide si une PR peut fusionner | |
-| **Gemini Code Assist** | Commente chaque PR | Bloquer |
 | **Mergify** | Fusionne en squash une PR verte, hors brouillon, sans `hold`, une à la fois | Fusionner un chemin protégé |
 
 **Qui crée quoi** :
@@ -123,7 +122,7 @@ Une tâche n'est **prenable** que si elle remplit cinq conditions :
 | change un seul fichier de texte ou de code simple, sans chemin protégé, base, secret ni donnée perso | **Jules** (étiquette `jules`) |
 | demande le PC (robot de tests, Drive, NotebookLM, fichiers locaux) | **Fil PC** |
 | demande un compte, un secret, un paiement, une approbation de code owner ou une décision | **Marc** (`qui:marc` + le geste exact en commentaire). Sauf les exceptions que `.mergify.yml` fusionne seul (mises à jour mineures des actions par Dependabot, validées par Marc le 15/10) : rien à faire |
-| tout le reste | **Un fil** neuf, brief : « une tâche, une PR, ce document » |
+| tout le reste | **Un fil** neuf, brief : « une tâche, une PR, ce document ». **Une tâche = un fil neuf**, jamais une tâche de plus dans un fil existant : chaque appel relit tout le contexte du fil, donc un fil qui s'allonge coûte de plus en plus. Un fil fini est fermé, pas réutilisé |
 
 **Ménage, avant chaque choix**, pour toute issue `en-cours` ou `jules` liée à une PR :
 
@@ -179,10 +178,7 @@ La procédure pas à pas est la compétence `livrer-une-tache`. Elle applique ce
 ## 9. Relecture
 
 - **La CI décide.** Tous les contrôles requis sont verts, sinon pas de fusion. Une PR rouge est la priorité de son fil.
-- **Gemini Code Assist commente sans bloquer.** Le fil lit chaque commentaire :
-  - il corrige ce qui est vrai et dans le périmètre ;
-  - il répond en une ligne au reste ;
-  - un commentaire sécurité ou données perso est toujours traité avant la sortie du brouillon.
+- **Sécurité et données perso** : un commentaire de relecture qui les touche est toujours traité avant la sortie du brouillon. Le fil corrige ce qui est vrai et dans le périmètre, et répond en une ligne au reste.
 - **Marc** fusionne lui-même les chemins protégés : `.github/`, `scripts/hooks/`, `qualite/`, `vercel.json`, `drizzle/`, `.env*`, plus les extras de chaque `.mergify.yml`. Le fil le lui dit une fois, avec le lien, quand la PR est verte.
 
 ## 10. Mise en ligne et acceptation
@@ -293,3 +289,14 @@ Une question à Marc prend toujours la forme d'une **carte**, jamais d'une quest
 | Instructions du projet (résumé du §0) | tout, pour chaque session |
 
 Ce qui n'est pas encore branché est suivi en tâches sous le chantier « Standardiser les tâches », dans ce dépôt.
+
+## 16. Économie de jetons
+
+Source : `commun/plans/2026-10-15_proposition-economie-tokens.md`. Chaque appel relit tout le contexte du fil : le coût vient de la longueur du fil, du modèle et du nombre de réveils.
+
+- **Une tâche = un fil neuf.** Un fil fini est fermé, pas réutilisé.
+- **Passer la main.** Un fil qui dépasse environ 150 k jetons écrit son état dans un fichier de `commun/` et un fil neuf reprend depuis ce fichier.
+- **Modèle.** Sonnet 5.5 par défaut, Haiku 5.5 pour le mécanique (tri, relais), Opus sur demande ou pour les tâches floues. Dernière génération seulement, jamais une plus ancienne.
+- **Routines.** Toute routine tourne en session neuve. Ce qui est mécanique ne passe pas par Claude (script, CI, workflow).
+- **CLAUDE.md.** 60 lignes au plus, sans import de `docs/COMPTE-RENDU.md` ; le détail vit dans `docs/`.
+- **Mesure.** Une mesure par semaine avec la même méthode ; le résultat va dans le rapport hebdomadaire (§12).
