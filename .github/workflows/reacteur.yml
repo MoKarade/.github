@@ -1,0 +1,35 @@
+name: Réacteur
+
+# Réveille la routine « Réacteur » (projet Apps de Marc, session neuve) quand une PR est
+# fusionnée ou quand la CI d'une branche devient rouge, au lieu d'un relevé toutes les X heures.
+# Plan : MoKarade/.github#42. Le jeton ROUTINE_FIRE_TOKEN est un secret du dépôt (jamais dans le code).
+# Le message envoyé ne contient que des identifiants (dépôt, numéro de PR, empreinte), jamais un
+# titre ni un nom de branche : tout ce qui vient d'un tiers reste hors du texte.
+on:
+  pull_request:
+    types: [closed]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  reveiller:
+    name: Réveiller le Réacteur
+    # Plafond : un job figé ne doit pas tourner six heures. Dure quelques secondes.
+    timeout-minutes: 2
+    # PR fusionnée, ou CI rouge hors robots (Dependabot : c'est Marc qui fusionne).
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.actor.type != 'Bot')
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || fromJSON('["self-hosted","pc-marc"]') }} # dépôt public : machines GitHub (gratuites) ; privé : robot du PC
+    steps:
+      - name: Appeler la routine
+        # Ne fait JAMAIS échouer le job : un échec ici redéclencherait ce workflow. Pas de jeton
+        # (PR d'un fork) ou routine en pause : l'erreur s'affiche dans le journal, rien d'autre.
+        env:
+          ROUTINE_FIRE_TOKEN: ${{ secrets.ROUTINE_FIRE_TOKEN }}
+          EVENT_TEXT: ${{ github.event_name == 'pull_request' && format('pr_fusionnee depot={0} pr={1}', github.repository, github.event.pull_request.number) || format('ci_rouge depot={0} evenement={1} pr={2} sha={3} run={4}', github.repository, github.event.workflow_run.event, github.event.workflow_run.pull_requests[0].number, github.event.workflow_run.head_sha, github.event.workflow_run.id) }}
+        run: |
+          node -e "fetch('https://api.anthropic.com/v1/claude_code/routines/trig_01RJ4b3xK75iCV6upZ8JwgQ7/fire',{method:'POST',headers:{Authorization:'Bearer '+process.env.ROUTINE_FIRE_TOKEN,'anthropic-version':'2023-06-01','anthropic-beta':'experimental-cc-routine-2026-04-01','content-type':'application/json'},body:JSON.stringify({text:process.env.EVENT_TEXT})}).then(r=>console.log('Réacteur : HTTP '+r.status)).catch(e=>console.log('Réacteur : échec '+e.message))"
