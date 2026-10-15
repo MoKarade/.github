@@ -78,14 +78,14 @@ Un « Fini quand » non vérifiable (« c'est mieux ») est refusé. Un « Fini 
 
 | Rôle | Fait | Ne fait jamais |
 |---|---|---|
-| **Marc** | Fixe la direction ; répond aux cartes ; force une tâche (`prio:1`) ; fait les gestes `qui:marc` ; fusionne les PR des chemins protégés, hors exceptions de `.mergify.yml` | Fermer une issue à la main ; valider chaque tâche |
+| **Marc** | Fixe la direction ; répond aux cartes ; force une tâche (`prio:1`) ; fait les gestes `qui:marc` (dont fusionner à la main une PR que le garde-fou a bloquée) | Fermer une issue à la main ; valider chaque tâche |
 | **Coordinateur** (chat du projet) | Crée et modifie chantiers et missions ; lance les fils ; tient le texte de la routine ; relaie au fil propriétaire | Coder ; modifier les fichiers d'un fil |
 | **Fil** (une session par tâche) | Prend une tâche, la livre, prouve l'acceptation ; crée les tâches de sa mission ; ouvre une issue pour un bug trouvé en chemin | Toucher la structure (chantiers, missions) ; prendre une deuxième tâche dans un autre dépôt |
 | **Fil PC** | Tout ce qui ne tourne que sur le PC : robot de tests, Drive, NotebookLM, sauvegardes, bascule en public | Agir sur un oui relayé ; le oui de Marc est écrit dans ce fil |
-| **Jules** | Les tâches `jules` : simples, un fichier, sans chemin protégé, sans base, sans secret, sans donnée perso | Les chemins protégés ; une tâche sans « Fini quand » |
+| **Jules** | Les tâches `jules` : simples, un fichier, sans chemin protégé, sans base, sans secret, sans donnée perso | Les chemins protégés (le garde-fou les permettrait, mais une tâche simple n'en a pas besoin) ; une tâche sans « Fini quand » |
 | **Routine continue** (toutes les 2 h) | Fait le ménage, choisit la tâche suivante, la distribue (§6) | Inventer du travail |
 | **CI** | Décide si une PR peut fusionner | |
-| **Mergify** | Fusionne en squash une PR verte, hors brouillon, sans `hold`, une à la fois | Fusionner un chemin protégé |
+| **Mergify** | Fusionne en squash une PR verte, hors brouillon, sans `hold`, une à la fois ; les chemins protégés aussi, quand le contrôle « Garde-fou » est vert (§9) | Fusionner une PR dont le garde-fou est rouge |
 
 **Qui crée quoi** :
 - Claude crée le travail à partir des demandes de Marc, des audits et des bugs trouvés. Tout apparaît dans le Gantt, et Marc corrige la direction quand il le veut.
@@ -122,7 +122,7 @@ Une tâche n'est **prenable** que si elle remplit cinq conditions :
 |---|---|
 | change un seul fichier de texte ou de code simple, sans chemin protégé, base, secret ni donnée perso | **Jules** (étiquette `jules`) |
 | demande le PC (robot de tests, Drive, NotebookLM, fichiers locaux) | **Fil PC** |
-| demande un compte, un secret, un paiement, une approbation de code owner ou une décision | **Marc** (`qui:marc` + le geste exact en commentaire). Sauf les exceptions que `.mergify.yml` fusionne seul (mises à jour mineures des actions par Dependabot, validées par Marc le 15/10) : rien à faire |
+| demande un compte, un secret, un paiement, une approbation de code owner ou une décision | **Marc** (`qui:marc` + le geste exact en commentaire). Sauf ce que Mergify fusionne seul : les chemins protégés dont le garde-fou est vert (oui de Marc, 15/10), et les mises à jour mineures des actions par Dependabot : rien à faire |
 | tout le reste | **Un fil** neuf, brief : « une tâche, une PR, ce document ». **Une tâche = un fil neuf**, jamais une tâche de plus dans un fil existant : chaque appel relit tout le contexte du fil, donc un fil qui s'allonge coûte de plus en plus. Un fil fini est fermé, pas réutilisé |
 
 **Ménage, avant chaque choix**, pour toute issue `en-cours` ou `jules` liée à une PR :
@@ -182,7 +182,9 @@ La procédure pas à pas est la compétence `livrer-une-tache`. Elle applique ce
 
 - **La CI décide.** Tous les contrôles requis sont verts, sinon pas de fusion. Une PR rouge est la priorité de son fil.
 - **Sécurité et données perso** : un commentaire de relecture qui les touche est toujours traité avant la sortie du brouillon. Le fil corrige ce qui est vrai et dans le périmètre, et répond en une ligne au reste.
-- **Marc** fusionne lui-même les chemins protégés : `.github/`, `scripts/hooks/`, `qualite/`, `vercel.json`, `drizzle/`, `.env*`, plus les extras de chaque `.mergify.yml`. Le fil le lui dit une fois, avec le lien, quand la PR est verte.
+- **Chemins protégés** (`.github/`, `scripts/hooks/`, `qualite/`, `vercel.json`, `drizzle/`, `.env*`, plus les extras de chaque `.mergify.yml`) : Mergify les fusionne quand le contrôle **« Garde-fou »** est vert, comme le reste (oui écrit de Marc, 15/10/2026). Le garde-fou (`scripts/garde-fou.mjs`, tests dans `scripts/garde-fou.test.mjs`) est rouge si la PR : retire ou saute un test, ou affaiblit une étape de test de la CI ; baisse un seuil de `qualite/` ou touche au mécanisme du cliquet ; ajoute ou modifie une référence à un secret (CI, `.env*`, variable de code, scan de secrets) ; contient une migration destructive ou réécrit une migration existante ; modifie `.mergify.yml`, `CODEOWNERS`, le workflow ou le script du garde-fou lui-même.
+- **Garde-fou rouge** : la PR attend, un commentaire dit pourquoi et une issue `qui:marc` s'ouvre avec le geste (« Geste : ... »). Marc fusionne à la main si c'est voulu, sinon le fil corrige. Il n'existe aucune étiquette pour le contourner : une session pourrait la poser. Le garde-fou ne change que par PR sur ce dépôt, que Marc fusionne.
+- **Où il tourne** : `.github/workflows/garde-fou.yml` de chaque dépôt (`pull_request_target`, donc le workflow de la branche par défaut, que la PR ne peut pas changer). Il lit la liste des fichiers par l'API et ne récupère jamais le code de la PR.
 
 ## 10. Mise en ligne et acceptation
 

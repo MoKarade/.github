@@ -1,0 +1,29 @@
+name: Tests du garde-fou
+
+# Les tests du contrôle appelé par les dix dépôts (scripts/garde-fou.mjs). Aucune dépendance :
+# `node --test`. Aucun `paths:` : un contrôle requis filtré ne tournerait pas.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-garde-fou-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  tests:
+    name: Tests du garde-fou
+    timeout-minutes: 5
+    runs-on: ubuntu-latest # dépôt public : machines GitHub (gratuites)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+      - run: node --test scripts/garde-fou.test.mjs
