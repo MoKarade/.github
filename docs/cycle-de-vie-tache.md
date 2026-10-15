@@ -12,7 +12,7 @@
 2. Claude crée le travail. Le Coordinateur tient les chantiers et les missions, et les fils créent et ferment les tâches. Marc décide de la direction : il force une tâche avec `prio:1`.
 3. L'ordre suit une règle fixe : d'abord la panne et le rouge, puis la sécurité, puis le standard et les fonctions en alternance. La routine distribue toutes les 2 h, avec au plus un fil et une tâche Jules par dépôt.
 4. La CI décide. Chaque PR qui change un écran porte des captures avant/après, prises avec des données fictives. Mergify fusionne.
-5. Une tâche est **acceptée** quand trois conditions sont remplies : elle est fusionnée, le déploiement est en ligne, et le « Fini quand » est prouvé en production par un commentaire de preuve. Si le test de fumée échoue, la version précédente revient seule et une PR d'annulation s'ouvre. Un rapport hebdomadaire mesure la vitesse, la qualité et les retours en arrière.
+5. Une tâche est **acceptée** quand trois conditions sont remplies : elle est fusionnée, le déploiement est en ligne, et le « Fini quand » est prouvé en production par un commentaire de preuve, **posé dans l'heure qui suit la mise en ligne** (§10). Si le test de fumée échoue, la version précédente revient seule et une PR d'annulation s'ouvre. Un rapport hebdomadaire mesure la vitesse, la qualité et les retours en arrière.
 
 ---
 
@@ -53,12 +53,13 @@ Titre : un verbe et un objet, en mots simples. Le corps suit toujours ces gabari
 ```
 **Avant** : ce que Marc voit aujourd'hui.
 **Après** : ce qu'il verra quand c'est fait.
-**Fini quand** : critère vérifiable EN PRODUCTION (réponse HTTP, écran, contrôle CI, donnée).
+**Fini quand** : critère vérifiable EN PRODUCTION (réponse HTTP, écran, contrôle CI, donnée), **prouvable dans l'heure** qui suit la mise en ligne.
 **Source** : ligne, PR, fil ou audit d'où vient la tâche.
 **Attend** : #n — raison (seulement si la dépendance est prouvée).
+**Preuve attendue** : AAAA-MM-JJ HH:MM (heure du Québec) — événement (seulement si la preuve dépend d'un événement, voir §10).
 ```
 
-Un « Fini quand » non vérifiable (« c'est mieux ») est refusé. On le réécrit avant de prendre la tâche.
+Un « Fini quand » non vérifiable (« c'est mieux ») est refusé. Un « Fini quand » qui dépend d'un événement lent (un cron, une échéance) est refusé tel quel : on le réécrit pour qu'il soit prouvable dans l'heure, ou on applique la règle du §10. On le réécrit avant de prendre la tâche.
 
 ## 3. Étiquettes
 
@@ -107,7 +108,7 @@ Une tâche n'est **prenable** que si elle remplit cinq conditions :
 - elle n'a ni `qui:marc`, ni `bloqué`, ni `en-cours`, ni `jules` ;
 - toutes les tâches qu'elle attend sont fermées ;
 - aucune PR ouverte ne la cite ;
-- son « Fini quand » est vérifiable.
+- son « Fini quand » est vérifiable, et prouvable dans l'heure ou couvert par une preuve programmée (§10).
 
 ## 6. Répartition du travail
 
@@ -130,7 +131,7 @@ Une tâche n'est **prenable** que si elle remplit cinq conditions :
 |---|---|
 | ouverte | rien |
 | fusionnée, acceptation prouvée | fermer l'issue avec la preuve |
-| fusionnée, preuve absente depuis plus de 24 h | commenter ce qui manque, et la tâche revient en file |
+| fusionnée, preuve absente depuis plus de 2 h (hors preuve programmée dont l'heure n'est pas passée, §10) | commenter ce qui manque, et la tâche revient en file |
 | fermée sans fusion | retirer `en-cours` ou `jules`, commenter, et la tâche revient en file |
 
 Une issue `jules` sans PR depuis 24 h perd l'étiquette et redevient prenable.
@@ -146,7 +147,9 @@ Une issue `jules` sans PR depuis 24 h perd l'étiquette et redevient prenable.
 | En relecture | PR liée ouverte, hors brouillon | bleu rayé |
 | Attend Marc | `qui:marc` | orange, filtre « Toi » |
 | Bloquée | `bloqué` ou une tâche attendue ouverte | rouge clair |
-| Fusionnée, non prouvée | PR fusionnée, issue ouverte | vert clair |
+| Fusionnée, non prouvée | PR fusionnée, issue ouverte, moins de 2 h | vert clair |
+| Preuve programmée | PR fusionnée, issue ouverte, ligne `**Preuve attendue**` dont l'heure n'est pas passée | vert clair rayé |
+| Preuve en retard | PR fusionnée, issue ouverte depuis plus de 2 h (ou plus d'une heure après l'heure de la preuve programmée) | rouge clair |
 | **Acceptée** | issue fermée `completed` avec un commentaire de preuve | vert, fin à l'heure de fermeture |
 | Abandonnée | issue fermée `not_planned` avec la raison | gris barré |
 
@@ -183,6 +186,8 @@ La procédure pas à pas est la compétence `livrer-une-tache`. Elle applique ce
 
 ## 10. Mise en ligne et acceptation
 
+**Règle : valider vite.** Une tâche finie se valide tout de suite, pas quand on y repense (décision de Marc, 15/10/2026). Le commentaire « **Acceptée** » est posé **au plus 1 h après** le déploiement `READY` (ou après la fusion, quand rien de servi ne change). Au-delà de **2 h** sans preuve, la tâche est en retard : le ménage du §6 la remet en file et le Gantt la signale en rouge.
+
 1. La CI est verte : le fil sort la PR du brouillon, et Mergify fusionne.
 2. Le fil vérifie qu'un déploiement de production existe et est `READY` **sur le commit fusionné**. S'il n'y en a pas, il fait un nouveau push, jamais « Redeploy ».
 3. Le test de fumée commun tourne (§11).
@@ -192,6 +197,15 @@ La procédure pas à pas est la compétence `livrer-une-tache`. Elle applique ce
    **Acceptée** — PR #p fusionnée (<sha court>), déploiement READY (<id>), preuve : <ce qui a été vérifié et le résultat>.
    ```
 6. Cas d'une PR qui ne change rien de servi (doc, CI) : la preuve est le contrôle ou le fichier lui-même, et le commentaire le dit.
+
+**Le fil reste jusqu'à l'acceptation.** Il ne se ferme pas entre la fusion et la preuve. S'il approche de la limite de contexte (§16), il passe la main avec l'état dans un fichier, et la preuve reste due dans le même délai.
+
+**Quand la preuve dépend d'un événement** (un cron, une échéance, un premier passage de données), on ne laisse pas la tâche en attente sans date :
+
+1. **D'abord, déclencher l'événement soi-même** : lancement manuel du workflow ou du cron (`workflow_dispatch`, route protégée d'un cron, appel de la fonction). Si c'est possible, la preuve se fait dans l'heure, comme toute tâche.
+2. **Sinon, programmer le contrôle au plus tôt.** Le fil écrit la ligne `**Preuve attendue** : AAAA-MM-JJ HH:MM (heure du Québec) — événement` dans l'issue, avec l'heure de l'événement prévue plus 15 minutes. Il crée une routine à usage unique à cette heure, qui part en session neuve et fait la preuve. Il commente la PR et l'issue pour dire la date.
+3. **À l'heure dite**, la preuve est posée dans l'heure qui suit l'événement, avec le même commentaire « **Acceptée** ». Si l'événement n'a pas eu lieu ou la preuve échoue, l'issue est rouverte comme un échec de fumée : incident, pas silence.
+4. Un « Fini quand » qui exige plus d'une journée d'attente n'est pas une tâche. On sépare : la tâche s'accepte sur ce qui se prouve tout de suite, et le suivi long devient une tâche à part avec son propre « Fini quand ».
 
 Le Gantt marque une tâche **acceptée** seulement si l'issue est fermée avec ce commentaire. Sans commentaire, la pastille la signale.
 
@@ -214,6 +228,7 @@ Le workflow commun `fumee` tourne après chaque déploiement de production. Il c
 - **la vitesse** :
   - le délai entre la création d'une tâche et son acceptation (médiane et maximum) ;
   - les tâches acceptées, par dépôt et par exécutant (fil, Jules) ;
+  - le délai entre la mise en ligne (ou la fusion) et « Acceptée » (médiane et maximum), avec la part des tâches prouvées dans l'heure ;
 - **la qualité** :
   - les PR passées au rouge et le temps pour revenir au vert ;
   - les retours en arrière et les incidents ;
@@ -224,7 +239,7 @@ Le workflow commun `fumee` tourne après chaque déploiement de production. Il c
   - les tâches bloquées depuis plus de 7 jours ;
   - les gestes de Marc en attente, avec leur âge ;
   - les orphelines ;
-  - les tâches fusionnées mais pas encore prouvées.
+  - les tâches fusionnées mais pas encore prouvées, et les preuves programmées avec leur date.
 
 **Le premier lundi du mois**, la même issue porte aussi la revue de la grille de conformité. Ce que les incidents du mois ont appris devient des lignes neuves, proposées en tâches.
 
@@ -243,7 +258,7 @@ Le Gantt montre l'état réel du travail. Il ne contient **rien de tapé à la m
   - liens vers l'issue, la PR et le commentaire de preuve ;
   - dépendances.
 - Le filtre « Toi », qui montre les seules issues `qui:marc`, avec le geste exact.
-- L'heure du relevé et son âge, en rouge au-delà de 2 h.
+- L'heure du relevé (heure du Québec, §17) et son âge, en rouge au-delà de 2 h.
 
 **Ce qu'il vérifie** (la pastille, qui signale sans rien corriger) :
 - **Format et structure** :
@@ -254,7 +269,8 @@ Le Gantt montre l'état réel du travail. Il ne contient **rien de tapé à la m
 - **Liens et preuves** :
   - une PR de tâche sans `Tâche : #n` ;
   - une tâche fermée `completed` sans commentaire de preuve ;
-  - une tâche fusionnée mais non prouvée depuis plus de 24 h.
+  - une tâche fusionnée mais non prouvée depuis plus de 2 h (hors preuve programmée dont l'heure n'est pas passée) ;
+  - une preuve programmée dont l'heure est passée depuis plus d'une heure.
 - **Délais** :
   - une tâche `en-cours` sans PR depuis 24 h ;
   - une `jules` sans PR depuis 24 h ;
@@ -275,7 +291,7 @@ Une question à Marc prend toujours la forme d'une **carte**, jamais d'une quest
 - **Une recommandation**, avec sa raison et un label de confiance.
 - **Le travail continue** sur l'option recommandée pendant l'attente, sauf si le pas est irréversible : suppression, bascule en public, migration destructive, secret, dépense. Dans ce cas, la carte le dit et on attend.
 - **Plusieurs questions de cadrage** : un seul lot numéroté (« 1a 2b 3c… »), une recommandation par question, déposé en fichier quand il dépasse 15 lignes.
-- **La réponse est consignée** dans l'issue concernée, en commentaire : « Décision de Marc (AAAA-MM-JJ HH:MM UTC) : … ». Pour le chantier, elle va dans le plan.
+- **La réponse est consignée** dans l'issue concernée, en commentaire : « Décision de Marc (AAAA-MM-JJ HH:MM, heure du Québec) : … ». Pour le chantier, elle va dans le plan.
 - **Un geste de Marc** n'est pas une carte : c'est une issue `qui:marc` avec les étapes exactes. Le fil le dit une fois, et le Gantt le montre dans « Toi ».
 
 ## 15. Qui applique ce document
@@ -300,3 +316,11 @@ Source : `commun/plans/2026-10-15_proposition-economie-tokens.md`. Chaque appel 
 - **Routines.** Toute routine tourne en session neuve. Ce qui est mécanique ne passe pas par Claude (script, CI, workflow).
 - **CLAUDE.md.** 60 lignes au plus, sans import de `docs/COMPTE-RENDU.md` ; le détail vit dans `docs/`.
 - **Mesure.** Une mesure par semaine avec la même méthode ; le résultat va dans le rapport hebdomadaire (§12).
+
+## 17. Heures
+
+Décision de Marc, 15/10/2026 : **toute heure donnée à Marc est en heure du Québec** (fuseau `America/Toronto`, été et hiver gérés), jamais en UTC.
+
+- Ça vaut partout où il lit : réponses dans le chat et les fils, cartes, commentaires et corps d'issues et de PR, fichiers de `commun/`, rapports, Gantt et pastilles. Format : `HH:MM`, avec la date en `AAAA-MM-JJ` quand elle compte, et la mention « heure du Québec » quand le contexte ne la donne pas.
+- L'UTC reste permis là où seule une machine lit : expressions cron (une routine porte `CRON_TZ=America/Toronto` quand c'est possible), horodatages ISO des fichiers de données, journaux des workflows. Dès qu'une de ces heures est dite à Marc, on la convertit.
+- Une preuve programmée (§10) est écrite en heure du Québec ; la routine à usage unique qui la porte est créée avec l'équivalent UTC ou `CRON_TZ=America/Toronto`.
