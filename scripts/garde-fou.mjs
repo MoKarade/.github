@@ -9,7 +9,7 @@
 //   4. contient une migration destructive (ou réécrit une migration existante) ;
 //   5. modifie le garde-fou lui-même (script, workflow, .mergify.yml, CODEOWNERS) : sans cela
 //      une PR pourrait desserrer ses propres règles puis se fusionner seule.
-// Rouge = la PR attend, un commentaire dit pourquoi et une issue `qui:marc` s'ouvre.
+// Rouge = la PR attend, une issue `qui:marc` s'ouvre (d'abord) et un commentaire dit pourquoi (non bloquant).
 //
 // Sûreté : lancé par `pull_request_target`, donc depuis le workflow de la branche par défaut, que
 // la PR ne peut pas modifier. Il ne récupère JAMAIS le code de la PR : il lit la liste des
@@ -391,9 +391,7 @@ async function main() {
   const echec = resultat.violations.length > 0;
 
   if (echec) {
-    const corps = `${MARQUEUR}\n${texte}`;
-    if (ancien) await api('PATCH', `/repos/${GITHUB_REPOSITORY}/issues/comments/${ancien.id}`, { body: corps });
-    else await api('POST', `/repos/${GITHUB_REPOSITORY}/issues/${numero}/comments`, { body: corps });
+    // L'issue d'abord : c'est elle qui prévient Marc, et elle ne demande que `issues: write`.
     if (!issueOuverte) {
       const issue = await api('POST', `/repos/${GITHUB_REPOSITORY}/issues`, {
         title: titreIssue,
@@ -401,8 +399,17 @@ async function main() {
         body: `La PR #${numero} touche un chemin protégé et le garde-fou la bloque.\n\n${texte}`,
       });
       await api('POST', `/repos/${GITHUB_REPOSITORY}/issues/${issue.number}/comments`, {
-        body: `Geste : ouvrir la PR #${numero}, lire le commentaire du garde-fou, puis la fusionner à la main si c’est voulu. Sinon dire au fil de la corriger.`,
+        body: `Geste : ouvrir la PR #${numero}, lire le rapport du garde-fou (contrôle « Garde-fou » de la PR), puis la fusionner à la main si c’est voulu. Sinon dire au fil de la corriger.`,
       });
+    }
+    // Le commentaire de la PR est un confort : sans `pull-requests: write` il est refusé (403),
+    // et ce refus ne doit ni cacher l'issue ni changer le verdict (la PR reste bloquée).
+    try {
+      const corps = `${MARQUEUR}\n${texte}`;
+      if (ancien) await api('PATCH', `/repos/${GITHUB_REPOSITORY}/issues/comments/${ancien.id}`, { body: corps });
+      else await api('POST', `/repos/${GITHUB_REPOSITORY}/issues/${numero}/comments`, { body: corps });
+    } catch (erreur) {
+      console.warn(`Garde-fou : commentaire de la PR non posté (l'issue qui:marc, elle, est ouverte). ${erreur.message}`);
     }
   } else {
     if (ancien) {
