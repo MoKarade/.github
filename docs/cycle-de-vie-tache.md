@@ -164,6 +164,7 @@ La procédure pas à pas est la compétence `livrer-une-tache`. Elle applique ce
   - **Fini quand :** ;
   - les captures, si un écran change.
 - **Pas de `Closes #n`** : la fusion ne ferme plus l'issue. C'est la preuve d'acceptation qui la ferme (§10).
+  *Transition* : tant que le Gantt ne relie pas encore une PR par `Tâche : #n`, la PR garde `Closes #n`. Le commentaire de preuve est alors posté juste après la fusion, et l'issue est rouverte si la preuve échoue. La bascule est annoncée dans le fil « Standardisation des projets ».
 - Taille : environ 400 lignes modifiées au plus, hors tests et fichiers générés. Au-delà, on découpe.
 - Commit et titre préfixés selon le dépôt : `feat:`, `fix:`, `docs:`… ou `[ID]`.
 - Doc touchée mise à jour dans la même PR.
