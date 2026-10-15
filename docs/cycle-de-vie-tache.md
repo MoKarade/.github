@@ -56,7 +56,7 @@ Titre : un verbe et un objet, en mots simples. Le corps suit toujours ces gabari
 **Fini quand** : critère vérifiable EN PRODUCTION (réponse HTTP, écran, contrôle CI, donnée), **prouvable dans l'heure** qui suit la mise en ligne.
 **Source** : ligne, PR, fil ou audit d'où vient la tâche.
 **Attend** : #n — raison (seulement si la dépendance est prouvée).
-**Preuve attendue** : AAAA-MM-JJ HH:MM UTC — événement (seulement si la preuve dépend d'un événement, voir §10).
+**Preuve attendue** : AAAA-MM-JJ HH:MM (heure du Québec) — événement (seulement si la preuve dépend d'un événement, voir §10).
 ```
 
 Un « Fini quand » non vérifiable (« c'est mieux ») est refusé. Un « Fini quand » qui dépend d'un événement lent (un cron, une échéance) est refusé tel quel : on le réécrit pour qu'il soit prouvable dans l'heure, ou on applique la règle du §10. On le réécrit avant de prendre la tâche.
@@ -203,7 +203,7 @@ La procédure pas à pas est la compétence `livrer-une-tache`. Elle applique ce
 **Quand la preuve dépend d'un événement** (un cron, une échéance, un premier passage de données), on ne laisse pas la tâche en attente sans date :
 
 1. **D'abord, déclencher l'événement soi-même** : lancement manuel du workflow ou du cron (`workflow_dispatch`, route protégée d'un cron, appel de la fonction). Si c'est possible, la preuve se fait dans l'heure, comme toute tâche.
-2. **Sinon, programmer le contrôle au plus tôt.** Le fil écrit la ligne `**Preuve attendue** : AAAA-MM-JJ HH:MM UTC — événement` dans l'issue, avec l'heure de l'événement prévue plus 15 minutes. Il crée une routine à usage unique à cette heure, qui part en session neuve et fait la preuve. Il commente la PR et l'issue pour dire la date.
+2. **Sinon, programmer le contrôle au plus tôt.** Le fil écrit la ligne `**Preuve attendue** : AAAA-MM-JJ HH:MM (heure du Québec) — événement` dans l'issue, avec l'heure de l'événement prévue plus 15 minutes. Il crée une routine à usage unique à cette heure, qui part en session neuve et fait la preuve. Il commente la PR et l'issue pour dire la date.
 3. **À l'heure dite**, la preuve est posée dans l'heure qui suit l'événement, avec le même commentaire « **Acceptée** ». Si l'événement n'a pas eu lieu ou la preuve échoue, l'issue est rouverte comme un échec de fumée : incident, pas silence.
 4. Un « Fini quand » qui exige plus d'une journée d'attente n'est pas une tâche. On sépare : la tâche s'accepte sur ce qui se prouve tout de suite, et le suivi long devient une tâche à part avec son propre « Fini quand ».
 
@@ -258,7 +258,7 @@ Le Gantt montre l'état réel du travail. Il ne contient **rien de tapé à la m
   - liens vers l'issue, la PR et le commentaire de preuve ;
   - dépendances.
 - Le filtre « Toi », qui montre les seules issues `qui:marc`, avec le geste exact.
-- L'heure du relevé et son âge, en rouge au-delà de 2 h.
+- L'heure du relevé (heure du Québec, §17) et son âge, en rouge au-delà de 2 h.
 
 **Ce qu'il vérifie** (la pastille, qui signale sans rien corriger) :
 - **Format et structure** :
@@ -291,7 +291,7 @@ Une question à Marc prend toujours la forme d'une **carte**, jamais d'une quest
 - **Une recommandation**, avec sa raison et un label de confiance.
 - **Le travail continue** sur l'option recommandée pendant l'attente, sauf si le pas est irréversible : suppression, bascule en public, migration destructive, secret, dépense. Dans ce cas, la carte le dit et on attend.
 - **Plusieurs questions de cadrage** : un seul lot numéroté (« 1a 2b 3c… »), une recommandation par question, déposé en fichier quand il dépasse 15 lignes.
-- **La réponse est consignée** dans l'issue concernée, en commentaire : « Décision de Marc (AAAA-MM-JJ HH:MM UTC) : … ». Pour le chantier, elle va dans le plan.
+- **La réponse est consignée** dans l'issue concernée, en commentaire : « Décision de Marc (AAAA-MM-JJ HH:MM, heure du Québec) : … ». Pour le chantier, elle va dans le plan.
 - **Un geste de Marc** n'est pas une carte : c'est une issue `qui:marc` avec les étapes exactes. Le fil le dit une fois, et le Gantt le montre dans « Toi ».
 
 ## 15. Qui applique ce document
@@ -316,3 +316,11 @@ Source : `commun/plans/2026-10-15_proposition-economie-tokens.md`. Chaque appel 
 - **Routines.** Toute routine tourne en session neuve. Ce qui est mécanique ne passe pas par Claude (script, CI, workflow).
 - **CLAUDE.md.** 60 lignes au plus, sans import de `docs/COMPTE-RENDU.md` ; le détail vit dans `docs/`.
 - **Mesure.** Une mesure par semaine avec la même méthode ; le résultat va dans le rapport hebdomadaire (§12).
+
+## 17. Heures
+
+Décision de Marc, 15/10/2026 : **toute heure donnée à Marc est en heure du Québec** (fuseau `America/Toronto`, été et hiver gérés), jamais en UTC.
+
+- Ça vaut partout où il lit : réponses dans le chat et les fils, cartes, commentaires et corps d'issues et de PR, fichiers de `commun/`, rapports, Gantt et pastilles. Format : `HH:MM`, avec la date en `AAAA-MM-JJ` quand elle compte, et la mention « heure du Québec » quand le contexte ne la donne pas.
+- L'UTC reste permis là où seule une machine lit : expressions cron (une routine porte `CRON_TZ=America/Toronto` quand c'est possible), horodatages ISO des fichiers de données, journaux des workflows. Dès qu'une de ces heures est dite à Marc, on la convertit.
+- Une preuve programmée (§10) est écrite en heure du Québec ; la routine à usage unique qui la porte est créée avec l'équivalent UTC ou `CRON_TZ=America/Toronto`.
