@@ -77,7 +77,7 @@ Un « Fini quand » non vérifiable (« c'est mieux ») est refusé. On le réé
 
 | Rôle | Fait | Ne fait jamais |
 |---|---|---|
-| **Marc** | Fixe la direction ; répond aux cartes ; force une tâche (`prio:1`) ; fait les gestes `qui:marc` ; fusionne les PR des chemins protégés | Fermer une issue à la main ; valider chaque tâche |
+| **Marc** | Fixe la direction ; répond aux cartes ; force une tâche (`prio:1`) ; fait les gestes `qui:marc` ; fusionne les PR des chemins protégés, hors exceptions de `.mergify.yml` | Fermer une issue à la main ; valider chaque tâche |
 | **Coordinateur** (chat du projet) | Crée et modifie chantiers et missions ; lance les fils ; tient le texte de la routine ; relaie au fil propriétaire | Coder ; modifier les fichiers d'un fil |
 | **Fil** (une session par tâche) | Prend une tâche, la livre, prouve l'acceptation ; crée les tâches de sa mission ; ouvre une issue pour un bug trouvé en chemin | Toucher la structure (chantiers, missions) ; prendre une deuxième tâche dans un autre dépôt |
 | **Fil PC** | Tout ce qui ne tourne que sur le PC : robot de tests, Drive, NotebookLM, sauvegardes, bascule en public | Agir sur un oui relayé ; le oui de Marc est écrit dans ce fil |
@@ -122,7 +122,7 @@ Une tâche n'est **prenable** que si elle remplit cinq conditions :
 |---|---|
 | change un seul fichier de texte ou de code simple, sans chemin protégé, base, secret ni donnée perso | **Jules** (étiquette `jules`) |
 | demande le PC (robot de tests, Drive, NotebookLM, fichiers locaux) | **Fil PC** |
-| demande un compte, un secret, un paiement, une approbation de code owner ou une décision | **Marc** (`qui:marc` + le geste exact en commentaire) |
+| demande un compte, un secret, un paiement, une approbation de code owner ou une décision | **Marc** (`qui:marc` + le geste exact en commentaire). Sauf les exceptions que `.mergify.yml` fusionne seul (mises à jour mineures des actions par Dependabot, validées par Marc le 15/10) : rien à faire |
 | tout le reste | **Un fil** neuf, brief : « une tâche, une PR, ce document » |
 
 **Ménage, avant chaque choix**, pour toute issue `en-cours` ou `jules` liée à une PR :
