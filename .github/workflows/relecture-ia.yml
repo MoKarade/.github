@@ -1,0 +1,74 @@
+name: Relecture IA
+
+# Relit les PR dont le Garde-fou est rouge pour une raison que le jugement peut trancher (références à
+# un secret de la CI, nombre de cas de test ; liste dans scripts/relecture-regles.mjs). Choix de Marc,
+# 16/10/2026 (carte « Action Claude »). Si l'IA approuve, le statut « Relecture IA » est posé sur le
+# commit et le Garde-fou est rejoué : il passe au vert, Mergify fusionne. Sinon la PR attend Marc.
+# Détail, limites et pose des deux secrets : docs/relecture-ia.md.
+#
+# SÛRETÉ :
+# - trois étapes, deux jetons qui ne se croisent jamais : l'étape « Relire » n'a QUE le jeton Claude
+#   et l'IA n'a aucun outil (--tools ""), l'étape qui touche GitHub n'a QUE le jeton GitHub ;
+# - le script vient de la branche main de ce dépôt, jamais du code d'une PR ;
+# - ce fichier et scripts/relecture* font partie de ce que le garde-fou refuse de laisser modifier seul.
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+# Aucun `paths:` : ce n'est pas un contrôle requis, mais la règle vaut partout ici.
+permissions:
+  contents: read
+
+concurrency:
+  group: relecture-ia
+  cancel-in-progress: false
+
+jobs:
+  relecture:
+    name: Relecture IA
+    # Plafond : une passe relit au plus 5 PR ; un job figé ne doit pas tourner six heures.
+    timeout-minutes: 20
+    runs-on: ubuntu-latest # dépôt public : machines GitHub (gratuites)
+    env:
+      DOSSIERS: ${{ runner.temp }}/relecture/dossiers
+      VERDICTS: ${{ runner.temp }}/relecture/verdicts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+
+      - name: Chercher les PR à relire (jeton GitHub seulement)
+        env:
+          GH_PAT: ${{ secrets.RELECTURE_PAT }}
+        run: node scripts/relecture-ia.mjs preparer
+
+      - name: Relire (jeton Claude seulement, aucun outil, aucun jeton GitHub)
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          mkdir -p "$VERDICTS"
+          shopt -s nullglob
+          dossiers=("$DOSSIERS"/*.json)
+          if [ ${#dossiers[@]} -eq 0 ]; then
+            echo "Rien à relire."
+            exit 0
+          fi
+          npm install --global @anthropic-ai/claude-code@2.1.301
+          racine="$PWD"
+          cd "$RUNNER_TEMP" # hors du dépôt : l'IA ne lit que la consigne, pas les fichiers du dépôt
+          for dossier in "${dossiers[@]}"; do
+            base="$(basename "$dossier" .json)"
+            node "$racine/scripts/relecture-ia.mjs" consigne "$dossier" > "$RUNNER_TEMP/consigne.txt"
+            # Une réponse manquante (jeton expiré, panne) laisse la PR sans statut : la passe suivante réessaie.
+            claude -p --model sonnet --tools "" --no-session-persistence --output-format text \
+              < "$RUNNER_TEMP/consigne.txt" > "$VERDICTS/$base.txt" || rm -f "$VERDICTS/$base.txt"
+          done
+
+      - name: Publier les avis et rejouer le Garde-fou (jeton GitHub seulement)
+        env:
+          GH_PAT: ${{ secrets.RELECTURE_PAT }}
+        run: node scripts/relecture-ia.mjs publier
