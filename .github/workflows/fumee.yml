@@ -1,0 +1,77 @@
+name: Fumée de production (workflow commun)
+
+# Test de fumée commun aux dix dépôts, écrit UNE fois ici (plan de standardisation, décision 5).
+# Il vérifie qu'une app DÉPLOYÉE répond vraiment : CI verte ne prouve pas que le site est en ligne.
+# La logique est dans scripts/fumee.mjs (testée, sans dépendance) ; ce fichier ne fait que l'appeler.
+#
+# Appel depuis un dépôt, après un déploiement de production réussi :
+#
+#   on:
+#     deployment_status:
+#   jobs:
+#     fumee:
+#       if: github.event.deployment_status.state == 'success' && github.event.deployment_status.environment == 'Production'
+#       uses: MoKarade/.github/.github/workflows/fumee.yml@main
+#       with:
+#         url-base: https://carai.hubperso.com
+#         chemin-summary: /hub/summary   # vide si l'app n'en a pas (Hubperso)
+#       secrets:
+#         hub-token: le secret HUB_TOKEN du dépôt appelant (la syntaxe est celle de tout `secrets:` d'appel)
+#
+# Contrôles (rouge si l'un échoue après 3 essais) : santé { ok: true } ; summary REFUSÉ sans jeton ;
+# summary valide avec le jeton (200, no-store, forme du contrat) ; page de connexion qui répond.
+# Le journal ne contient jamais un corps de réponse ni le jeton. Le retour arrière en cas de rouge est
+# une étape à part, propre à chaque appelant (Vercel) : ce workflow se contente de dire rouge.
+on:
+  workflow_call:
+    inputs:
+      url-base:
+        description: 'URL de production, en https (ex. https://carai.hubperso.com).'
+        type: string
+        required: true
+      chemin-sante:
+        type: string
+        default: /api/sante
+      chemin-summary:
+        description: 'Route du summary du hub (/hub/summary, ou /api/hub/summary chez JobAI). Vide : pas de contrôle summary.'
+        type: string
+        default: /hub/summary
+      chemin-connexion:
+        type: string
+        default: /login
+    secrets:
+      hub-token:
+        description: 'Jeton du hub (HUB_TOKEN de l’app). Obligatoire quand chemin-summary est renseigné.'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  fumee:
+    name: Fumée de production
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      # Le script vient de ce dépôt, jamais du code de l'appelant.
+      - name: Récupérer le script de fumée
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: MoKarade/.github
+          ref: main
+          path: .fumee
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Sonder l'app de production
+        env:
+          FUMEE_BASE: ${{ inputs.url-base }}
+          FUMEE_SANTE: ${{ inputs.chemin-sante }}
+          FUMEE_SUMMARY: ${{ inputs.chemin-summary }}
+          FUMEE_CONNEXION: ${{ inputs.chemin-connexion }}
+          HUB_TOKEN: ${{ secrets.hub-token }}
+        run: node .fumee/scripts/fumee.mjs
