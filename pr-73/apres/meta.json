@@ -1,0 +1,12 @@
+{
+  "/": {
+    "fichier": "accueil.png",
+    "statut": 200,
+    "sha256": "b1a366c08651fa325d9ac353864db53542688bc353c10be436d96d4322bc404c"
+  },
+  "/a-propos.html": {
+    "fichier": "a-propos-html.png",
+    "statut": 200,
+    "sha256": "4808061a6b04ea2a9cd11535f5cdd5a751fd955316913bba62bfcfb791a4d667"
+  }
+}
