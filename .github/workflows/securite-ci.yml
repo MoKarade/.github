@@ -1,0 +1,23 @@
+name: Sécurité
+
+# Ce dépôt applique à lui-même son contrôle commun (workflows/securite.yml) : c'est aussi l'essai en réel
+# de ce workflow avant que les autres dépôts l'appellent. Aucun `paths:` : un contrôle exigé filtré ne tournerait pas.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: securite-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  securite:
+    uses: ./.github/workflows/securite.yml
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
