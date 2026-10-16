@@ -4,7 +4,7 @@
 //   I1 cohérence : défauts de la pastille (donnés par l'appelant, `--defauts N`)
 //   I2 fidélité : écarts entre le relevé et GitHub (état, étiquettes, PR liée) sur les tâches ouvertes et les fermées
 //      depuis 48 h ; une tâche modifiée APRÈS le relevé n'est pas un écart (comptée à part)
-//   I3 prise tracée : PR de tâche dont l'issue portait `en-cours` avant l'ouverture ; PR fusionnées sans tâche (hors
+//   I3 prise tracée : PR de tâche dont l'issue a reçu `en-cours` au plus 10 min après l'ouverture (posé par le balayage) ; PR fusionnées sans tâche (hors
 //      robots) ; branches `claude/*` sans tâche ; `en-cours` posé depuis des heures sans PR. Mesuré depuis `--depuis`
 //      (par défaut la fusion du contrôle « tâche liée »), pour ne pas juger l'avant-règle
 //   I4 accord file/agents (mesuré depuis `--depuis-i4`, par défaut `--depuis` : la date où la boucle du Gantt est fiable ; un lancement sur
@@ -22,6 +22,7 @@ export const DEPUIS_DEFAUT = '2026-10-16T18:00:13Z'; // fusion de .github#125 (r
 export const FENETRE_H = 48;
 export const BORNE_RELEVE = '2026-10-15T00:00:00Z'; // fetch.py ne lit que les issues modifiées depuis ce jour
 export const SEUIL_PRISE_H = 3;
+export const TOLERANCE_PRISE_MIN = 10; // `en-cours` peut être posé jusqu'à 10 min après l'ouverture de la PR (balayage par événement, MoKarade/.github#157)
 export const CIBLE_RELEVES = 20;
 const FENETRE_LANCEMENT_MIN = 60;
 export const SEUIL_PERIME_MIN = 40; // au-delà, la file qui a servi au lancement était périmée (la routine l'ignore aussi)
@@ -114,7 +115,7 @@ function mesurerI3(releve, vivant, toutes, depuis, seuilPriseH) {
       const r = ref(depot.repo, n.n);
       if (n.pr && n.pr.created >= depuis) {
         total += 1;
-        if (!n.start || n.start > n.pr.created) nonTracees.push(r);
+        if (!n.start || (Date.parse(n.start) - Date.parse(n.pr.created)) / 60000 > TOLERANCE_PRISE_MIN) nonTracees.push(r);
       }
       const sansPr = !n.pr || n.pr.state !== 'open';
       if (n.state === 'open' && n.labels.includes('en-cours') && !n.labels.includes('jules') && sansPr && n.start && heures(releve.asof, n.start) > seuilPriseH) prises.push(r);

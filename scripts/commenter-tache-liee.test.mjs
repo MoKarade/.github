@@ -5,7 +5,7 @@ import { MARQUEUR_TACHE } from './tache-liee.mjs';
 
 // Fausse API GitHub en mémoire : PR ouvertes, issues, commentaires ; toutes les écritures sont gardées.
 const humain = { login: 'MoKarade', type: 'User' };
-const tache = { number: 120, state: 'open', parent_issue_url: 'https://api.github.com/repos/MoKarade/Hubperso/issues/100', labels: [{ name: 'niveau:tâche' }] };
+const tache = { number: 120, state: 'open', parent_issue_url: 'https://api.github.com/repos/MoKarade/Hubperso/issues/100', labels: [{ name: 'niveau:tâche' }, { name: 'en-cours' }] };
 function faux({ pulls, issues = {}, commentaires = {}, echec = {} }) {
   const ecritures = [];
   const api = async (methode, chemin, corps) => {
@@ -113,4 +113,46 @@ test('avecCache : une même issue citée par plusieurs PR n\u2019est lue qu\u201
   await api('GET', '/repos/MoKarade/a/issues/5/comments');
   await api('POST', '/repos/MoKarade/a/issues/5/comments', { body: 'x' });
   assert.deepEqual(appels, ['GET /repos/MoKarade/a/issues/5', 'GET /repos/MoKarade/a/issues/5/comments', 'POST /repos/MoKarade/a/issues/5/comments']);
+});
+
+test('PR ouverte qui cite une tâche sans état de prise : `en-cours` est posé, avec un commentaire d’une ligne, une seule fois par passage', async () => {
+  const libre = { ...tache, labels: [{ name: 'niveau:tâche' }] };
+  const { api, ecritures } = faux({ pulls: [pr(1, 'Tâche : #120', { draft: true }), pr(2, 'Tâche : #120')], issues: { 'Hubperso#120': libre } });
+  const r = await commenterDepot({ api, depot: 'Hubperso' });
+  assert.deepEqual(r.erreurs, []);
+  assert.deepEqual(r.actions, ['Hubperso#1 : Hubperso#120 marquée en-cours']);
+  assert.equal(ecritures.length, 2);
+  assert.deepEqual(ecritures[0], { methode: 'POST', chemin: '/repos/MoKarade/Hubperso/issues/120/labels', corps: { labels: ['en-cours'] } });
+  assert.equal(ecritures[1].chemin, '/repos/MoKarade/Hubperso/issues/120/comments');
+  assert.match(ecritures[1].corps.body, /posé automatiquement.*Hubperso#1/);
+});
+
+test('`en-cours`, `jules` ou `preuve-attendue` déjà posés : rien n’est écrit ; une tâche citée dans un autre dépôt est marquée dans ce dépôt-là', async () => {
+  for (const etat of ['en-cours', 'jules', 'preuve-attendue']) {
+    const deja = { ...tache, labels: [{ name: 'niveau:tâche' }, { name: etat }] };
+    const { api, ecritures } = faux({ pulls: [pr(1, 'Tâche : #120')], issues: { 'Hubperso#120': deja } });
+    await commenterDepot({ api, depot: 'Hubperso' });
+    assert.deepEqual(ecritures, [], etat);
+  }
+  const libre = { ...tache, labels: [{ name: 'niveau:tâche' }] };
+  const { api, ecritures } = faux({ pulls: [pr(3, 'Tâche : MoKarade/.github#157')], issues: { '.github#157': libre } });
+  const r = await commenterDepot({ api, depot: 'CarAI' });
+  assert.deepEqual(r.actions, ['CarAI#3 : .github#157 marquée en-cours']);
+  assert.equal(ecritures[0].chemin, '/repos/MoKarade/.github/issues/157/labels');
+});
+
+test('les robots, une tâche fermée ou introuvable ne sont jamais marqués ; l’échec du marquage est noté sans empêcher le commentaire de la PR', async () => {
+  const libre = { ...tache, labels: [{ name: 'niveau:tâche' }] };
+  const robot = faux({ pulls: [pr(1, 'Tâche : #120', { user: { login: 'dependabot[bot]', type: 'Bot' } })], issues: { 'Hubperso#120': libre } });
+  await commenterDepot({ api: robot.api, depot: 'Hubperso' });
+  assert.deepEqual(robot.ecritures, []);
+  const fermee = faux({ pulls: [pr(2, 'Tâche : #120')], issues: { 'Hubperso#120': { ...libre, state: 'closed' } } });
+  await commenterDepot({ api: fermee.api, depot: 'Hubperso' });
+  assert.ok(!fermee.ecritures.some((e) => e.chemin.endsWith('/labels')));
+
+  const base = faux({ pulls: [pr(3, 'Tâche : #120')], issues: { 'Hubperso#120': { ...libre, parent_issue_url: null } } });
+  const api = async (methode, chemin, corps) => { if (chemin.endsWith('/labels')) throw new Error('HTTP 403'); return base.api(methode, chemin, corps); };
+  const r = await commenterDepot({ api, depot: 'Hubperso' });
+  assert.match(r.erreurs[0], /étiquette en-cours non posée \(HTTP 403\)/);
+  assert.deepEqual(r.actions, ['Hubperso#3 : posé']); // l'avertissement « sans parent » est tout de même posé
 });
