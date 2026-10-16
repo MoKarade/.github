@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { lireApps } from './surveillance.mjs';
-import { choisirCible, clientVercel, corpsIncident, lireProjet, normaliser, tableau, titreIncident, traiter } from './retour-arriere.mjs';
+import { appsRetour, choisirCible, clientVercel, corpsIncident, lireProjet, normaliser, tableau, titreIncident, traiter } from './retour-arriere.mjs';
 
 const MAINTENANT = new Date('2026-10-16T12:00:00Z');
 const dep = (id, minutes, sha, message = 'feat: truc (#12)') => ({
@@ -157,4 +157,17 @@ test('lireApps : le champ vercel est gardé et validé', () => {
   assert.equal(lireApps([{ ...base, vercel: 'mon-projet' }])[0].vercel, 'mon-projet');
   assert.equal('vercel' in lireApps([base])[0], false);
   assert.throws(() => lireApps([{ ...base, vercel: 'Mauvais Nom' }]), /vercel doit être/);
+});
+
+test('appsRetour : surveillance normale = apps avec sonde ET projet Vercel', () => {
+  const liste = [app, { nom: 'sans-vercel', depot: 'x/y', sante: 'https://z.example/api/sante' }, { nom: 'sans-sante', depot: 'x/y', vercel: 'p' }];
+  assert.deepEqual(appsRetour({}, liste), [app]);
+});
+
+test('appsRetour : lancement d\u2019essai = une seule app simulée, jamais une vraie', () => {
+  const env = { SURVEILLANCE_ESSAI_URL: 'https://essai.example/api/sante', SURVEILLANCE_ESSAI_NOM: 'essai-retour', RETOUR_ESSAI_VERCEL: 'essai-retour', GITHUB_REPOSITORY: 'MoKarade/.github' };
+  assert.deepEqual(appsRetour(env, [app]), [{ nom: 'essai-retour', depot: 'MoKarade/.github', sante: 'https://essai.example/api/sante', vercel: 'essai-retour' }]);
+  // URL d'essai sans projet Vercel d'essai (ou nom invalide) : rien n'est traité.
+  assert.deepEqual(appsRetour({ ...env, RETOUR_ESSAI_VERCEL: '' }, [app]), []);
+  assert.deepEqual(appsRetour({ ...env, RETOUR_ESSAI_VERCEL: '../x' }, [app]), []);
 });
