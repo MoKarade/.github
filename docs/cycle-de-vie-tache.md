@@ -225,12 +225,12 @@ Le workflow commun `fumee` tourne après chaque déploiement de production. Il c
 - **Fumée rouge**, dans cet ordre :
   1. le workflow remet en ligne le déploiement de production précédent (retour en arrière Vercel) ;
   2. il refait la fumée sur la version remise, et le dit ;
-  3. il ouvre une PR d'annulation (revert) du commit fautif, hors brouillon, que Mergify fusionne quand elle est verte ;
-  4. il ouvre une issue `incident` dans le dépôt, liée à la tâche d'origine, qui repasse « à faire ».
+  3. il ouvre une issue `incident` dans ce dépôt, avec le commit fautif et sa tâche d'origine, qui repasse « à faire » ;
+  4. le fil lancé par la routine sur cet incident ouvre la PR d'annulation (revert) du commit fautif, hors brouillon, que Mergify fusionne quand elle est verte (décision de Marc du 16/10/2026, #85 : pas de jeton d'écriture de plus).
 - La routine voit l'incident (priorité 1 du §5) et lance un fil, qui trouve la cause et refait la tâche proprement.
 - Marc est prévenu par une ligne dans le chat du projet, envoyée par le Coordinateur au passage suivant de la routine.
 
-**Comment c'est branché (état au 16/10/2026, tâche #30).** Le jeton Vercel est rangé UNE fois, dans le secret `VERCEL_TOKEN` de MoKarade/.github (pas dans les dix dépôts). Le retour en arrière tourne donc dans la surveillance de ce dépôt (`scripts/retour-arriere.mjs`, toutes les 15 minutes), pas dans l'appel du workflow de fumée : quand la sonde de santé d'une app est rouge et que son déploiement de production en ligne a moins de 2 h, la version précédente est remise en ligne, la sonde est refaite, et une issue `incident` est ouverte dans ce dépôt (commit fautif, tâche d'origine, résultat de la sonde). Un seul retour par déploiement fautif. Sans le secret, tout est inactif et le résumé du job le dit. Limite : la PR d'annulation (point 3) n'est pas ouverte par ce pas, parce que le jeton d'un job de ce dépôt n'écrit pas chez les apps et qu'une PR ouverte ainsi ne déclenche aucun contrôle ; la routine l'ouvre à partir de l'issue `incident`.
+**Comment c'est branché (état au 16/10/2026, tâche #30).** Le jeton Vercel est rangé UNE fois, dans le secret `VERCEL_TOKEN` de MoKarade/.github (pas dans les dix dépôts). Le retour en arrière tourne donc dans la surveillance de ce dépôt (`scripts/retour-arriere.mjs`, toutes les 15 minutes), pas dans l'appel du workflow de fumée : quand la sonde de santé d'une app est rouge et que son déploiement de production en ligne a moins de 2 h, la version précédente est remise en ligne, la sonde est refaite, et une issue `incident` est ouverte dans ce dépôt (commit fautif, tâche d'origine, résultat de la sonde). Un seul retour par déploiement fautif. Sans le secret, tout est inactif et le résumé du job le dit. La PR d'annulation (point 4) n'est pas ouverte par ce pas : le jeton d'un job de ce dépôt n'écrit pas chez les apps et une PR ouverte ainsi ne déclenche aucun contrôle ; c'est le fil lancé sur l'issue `incident` qui l'ouvre.
 
 ## 12. Audit régulier
 
