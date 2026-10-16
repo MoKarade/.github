@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { calculer, ECARTS_ETIQUETTE } from './prochaine-tache.mjs';
+import { calculer, calculerFrein, permiseParFrein, freinDepuisFichiers, FREIN, ECARTS_ETIQUETTE } from './prochaine-tache.mjs';
 
 // Un relevé en mémoire : données fictives, aucun réseau. Même forme que backlog.json (fetch.py).
 const tache = (n, o = {}) => ({
@@ -264,4 +264,169 @@ test('en ligne de commande : lit un relevé, écrit prochaines.json', () => {
   assert.ok(ecrit.calcule_le);
   const sansArgument = spawnSync(process.execPath, [script], { encoding: 'utf8' });
   assert.equal(sansArgument.status, 2);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Frein de quota (MoKarade/.github#184) : un nombre, deux seuils, une hystérésis ; aucun réseau, aucune IA.
+const MAINTENANT = new Date('2026-10-16T12:00:00Z');
+const FRAIS = '2026-10-16T11:30Z'; // 0,5 h
+const frein = (pct, precedent, mesureUtc = FRAIS) => calculerFrein({ pct, mesureUtc, precedent, maintenant: MAINTENANT });
+
+test('frein : 79 normal, 80 palier 1, 89 palier 1, 90 palier 2, 91 palier 2', () => {
+  assert.deepEqual([79, 80, 89, 90, 91].map((pct) => frein(pct).palier), ['normal', 1, 1, 2, 2]);
+  assert.deepEqual(FREIN, { seuil1: 80, seuil2: 90, hysteresis: 2, perimeHeures: 3 }, 'les seuils vivent à un seul endroit');
+});
+
+test('frein : hystérésis de 2 points, on descend un palier à la fois', () => {
+  assert.equal(frein(79, 1).palier, 1, 'sous 80 mais pas sous 78 : on reste au palier 1');
+  assert.equal(frein(78, 1).palier, 1);
+  assert.equal(frein(77, 1).palier, 'normal', 'sous 78 : retour à normal');
+  assert.equal(frein(89, 2).palier, 2);
+  assert.equal(frein(88, 2).palier, 2);
+  assert.equal(frein(87, 2).palier, 1, 'sous 88 : palier 1, pas normal');
+  assert.equal(frein(79, 2).palier, 1);
+  assert.equal(frein(70, 2).palier, 'normal');
+  assert.equal(frein(80, 'normal').palier, 1, 'la montée est immédiate');
+  assert.equal(frein(95, 'normal').palier, 2);
+});
+
+test('frein : un relevé de plus de 3 h garde le dernier palier connu et le dit périmé, jamais un faux normal', () => {
+  const vieux = '2026-10-16T08:30Z'; // 3,5 h
+  const garde = frein(50, 1, vieux);
+  assert.equal(garde.palier, 1, 'le pourcentage périmé ne fait pas redescendre');
+  assert.equal(garde.detail.perime, true);
+  assert.match(garde.detail.raison, /périmé/);
+  assert.equal(frein(50, 2, vieux).palier, 2);
+  assert.equal(frein(95, 'normal', vieux).palier, 'normal', 'palier précédent connu = normal : il est gardé, pas deviné');
+  assert.equal(frein(50, 1, '2026-10-16T09:00Z').detail.perime, false, 'pile 3 h : encore frais');
+  // Sans palier précédent, un vieux pourcentage reste la meilleure connaissance.
+  assert.equal(frein(85, undefined, vieux).palier, 1);
+  assert.equal(frein(85, undefined, vieux).detail.perime, true);
+});
+
+test('frein : aucun relevé exploitable = palier précédent, sinon normal MAIS marqué inconnu', () => {
+  for (const sansReleve of [{}, { pct: null }, { pct: 'beaucoup', mesureUtc: FRAIS }, { pct: 85, mesureUtc: 'hier' }, { pct: -1, mesureUtc: FRAIS }]) {
+    const r = calculerFrein({ ...sansReleve, precedent: 2, maintenant: MAINTENANT });
+    assert.equal(r.palier, 2, JSON.stringify(sansReleve));
+    assert.equal(r.detail.perime, true);
+    assert.equal(r.detail.inconnu, false);
+    const premiere = calculerFrein({ ...sansReleve, maintenant: MAINTENANT });
+    assert.equal(premiere.palier, 'normal');
+    assert.equal(premiere.detail.inconnu, true, 'ce « normal » n’est pas une mesure');
+  }
+});
+
+// Une tâche de chaque sorte : la file à chaque palier.
+const sorte = () => depot('a', [
+  tache(1, { labels: ['prio:1'] }), tache(2, { labels: ['prio:2'] }), tache(3, { labels: ['sécurité'] }),
+  tache(4, { labels: ['preuve-manquante'] }), tache(5, { labels: ['incident', 'prio:3'] }), tache(6),
+]);
+const fileA = (r) => etat(r).file.map((f) => f.ref).sort();
+
+test('palier 1 : seules passent prio:1, sécurité, incident et preuve due', () => {
+  const r = calculer(releve(sorte()), { frein: frein(80) });
+  assert.deepEqual(fileA(r), ['a#1', 'a#3', 'a#4', 'a#5']);
+  assert.deepEqual(etat(r).exclues['a#2'], { code: 'frein-quota', detail: 'palier 1' });
+  assert.deepEqual(etat(r).exclues['a#6'], { code: 'frein-quota', detail: 'palier 1' });
+  assert.equal(etat(r).statut, 'libre');
+  assert.equal(r.frein, 1);
+});
+
+test('palier 2 : plus de nouvelle tâche, sécurité, incident et preuve due exceptés (prio:1 attend)', () => {
+  const r = calculer(releve(sorte()), { frein: frein(90) });
+  assert.deepEqual(fileA(r), ['a#3', 'a#4', 'a#5']);
+  assert.equal(etat(r).exclues['a#1'].code, 'frein-quota');
+  assert.equal(etat(r).exclues['a#1'].detail, 'palier 2');
+  assert.equal(r.frein, 2);
+});
+
+test('normal : rien n’est retenu ; sans frein passé au calcul, le résultat est celui d’avant', () => {
+  const normal = calculer(releve(sorte()), { frein: frein(79) });
+  assert.equal(fileA(normal).length, 6);
+  assert.equal(normal.alertes.length, 0);
+  const sans = calculer(releve(sorte()));
+  assert.equal(sans.frein, 'normal');
+  assert.equal(sans.frein_detail, null);
+  assert.deepEqual(fileA(sans), fileA(normal));
+});
+
+test('un dépôt dont toute la file est retenue passe à l’état frein, sans tâche suivante', () => {
+  const r = calculer(releve(depot('a', [tache(1, { labels: ['prio:2'] })])), { frein: frein(85) });
+  assert.equal(etat(r).statut, 'frein');
+  assert.equal(etat(r).suivante, null);
+  assert.equal(etat(r).exclues['a#1'].code, 'frein-quota');
+  // Un dépôt sans aucune tâche reste « rien », un dépôt occupé reste « occupe » : le frein ne les maquille pas.
+  const vide = calculer(releve(depot('a', [])), { frein: frein(85) });
+  assert.equal(etat(vide).statut, 'rien');
+  const occupe = calculer(releve(depot('a', [tache(1, { labels: ['en-cours'] }), tache(2)])), { frein: frein(85) });
+  assert.equal(etat(occupe).statut, 'occupe');
+});
+
+test('un incident à 95 % reste lancé : l’état incident et les tâches incident passent, le frein ne les retient pas', () => {
+  const incident = { n: 9, t: 'Production en panne', url: 'https://github.com/exemple/depot/issues/9' };
+  const r = calculer(releve(depot('a', [tache(5, { labels: ['incident'] }), tache(6)], { incidents: [incident] })), { frein: frein(95) });
+  assert.equal(etat(r).statut, 'incident');
+  assert.deepEqual(etat(r).incidents.map((i) => i.n), [9]);
+  assert.deepEqual(etat(r).file.map((f) => f.ref), ['a#5']);
+  assert.equal(r.frein, 2);
+});
+
+test('l’ordre de la file ne change pas pour ce qui passe, et les rangs se suivent sans trou', () => {
+  const r = calculer(releve(sorte()), { frein: frein(80) });
+  assert.deepEqual(etat(r).file.map((f) => f.rang), [1, 2, 3, 4]);
+  assert.deepEqual(etat(r).file.map((f) => f.tier), [...etat(r).file.map((f) => f.tier)].sort((a, b) => a - b));
+  assert.equal(etat(r).suivante.ref, etat(r).file[0].ref);
+});
+
+test('une alerte du script dit le palier, et le quota périmé', () => {
+  assert.match(calculer(releve(sorte()), { frein: frein(80) }).alertes.join(' '), /Frein de quota, palier 1 : quota à 80 %/);
+  assert.match(calculer(releve(sorte()), { frein: frein(50, 1, '2026-10-16T08:00Z') }).alertes.join(' '), /palier 1 : quota périmé/);
+  assert.deepEqual(calculer(releve(sorte()), { frein: frein(50) }).alertes, []);
+});
+
+test('permiseParFrein : table complète des cas', () => {
+  const cas = (labels, tier = 7) => ({ labels, tier });
+  for (const palier of ['normal', 1, 2]) assert.equal(permiseParFrein(cas([]), palier), palier === 'normal', `reste, palier ${palier}`);
+  for (const palier of ['normal', 1, 2]) {
+    assert.equal(permiseParFrein(cas(['incident']), palier), true);
+    assert.equal(permiseParFrein(cas(['sécurité']), palier), true);
+    assert.equal(permiseParFrein(cas(['securite']), palier), true);
+    assert.equal(permiseParFrein(cas([], 1), palier), true, 'preuve due');
+  }
+  assert.equal(permiseParFrein(cas(['prio:1'], 2), 1), true);
+  assert.equal(permiseParFrein(cas(['prio:1'], 2), 2), false);
+});
+
+test('en ligne de commande : lit quota.json et le prochaines.json précédent à côté du relevé, sans option', () => {
+  const dossier = mkdtempSync(join(tmpdir(), 'frein-'));
+  const entree = join(dossier, 'backlog.json');
+  const sortie = join(dossier, 'prochaines.json');
+  const quota = join(dossier, 'quota.json');
+  writeFileSync(entree, JSON.stringify(releve(sorte())));
+  const script = fileURLToPath(new URL('./prochaine-tache.mjs', import.meta.url));
+  const maintenantIso = () => new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const lancer = (pct, mesure = maintenantIso()) => {
+    writeFileSync(quota, JSON.stringify({ jauges: { claude: { utilise: pct, mesure_utc: mesure } } }));
+    const tmp = `${sortie}.tmp`; // comme build.py : sortie temporaire, le précédent est lu dans prochaines.json
+    const p = spawnSync(process.execPath, [script, entree, '--sortie', tmp], { encoding: 'utf8' });
+    assert.equal(p.status, 0, p.stderr);
+    writeFileSync(sortie, readFileSync(tmp));
+    return JSON.parse(readFileSync(sortie, 'utf8'));
+  };
+  const palier = (pct) => lancer(pct).frein;
+  assert.deepEqual([79, 80, 89, 90, 91].map(palier), ['normal', 1, 1, 2, 2]);
+  assert.equal(palier(89), 2, 'précédent 2 (91) : 89 reste au palier 2 par hystérésis');
+  assert.equal(palier(87), 1);
+  assert.equal(palier(77), 'normal');
+  // Relevé périmé : le palier précédent est gardé et dit périmé.
+  assert.equal(palier(95), 2);
+  const perime = lancer(10, new Date(Date.now() - 5 * 3600 * 1000).toISOString());
+  assert.equal(perime.frein, 2);
+  assert.equal(perime.frein_detail.perime, true);
+  // Quota.json absent : même chose, jamais un faux normal.
+  writeFileSync(quota, 'pas du json');
+  const tmp = `${sortie}.tmp`;
+  assert.equal(spawnSync(process.execPath, [script, entree, '--sortie', tmp], { encoding: 'utf8' }).status, 0);
+  assert.equal(JSON.parse(readFileSync(tmp, 'utf8')).frein, 2);
+  assert.equal(freinDepuisFichiers(dossier, { quota: join(dossier, 'absent.json'), precedent: join(dossier, 'absent.json') }).detail.inconnu, true);
 });

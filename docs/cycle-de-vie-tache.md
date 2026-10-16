@@ -100,7 +100,7 @@ Un « Fini quand » non vérifiable (« c'est mieux ») est refusé. Un « Fini 
 
 ## 5. Ordre (règle fixe)
 
-**La file est calculée par UN script** : `scripts/prochaine-tache.mjs` (ce dépôt) lit le relevé du Gantt et écrit `prochaines.json` : pour chaque dépôt, son état (`libre`, `occupe`, `incident`, `rien`), la tâche suivante, la file complète et la raison de chaque tâche écartée. Le Gantt l'affiche, la routine continue le lit. Ce texte décrit ce que le script calcule ; en cas de divergence, on corrige le script (et ses tests), jamais une routine ni une page.
+**La file est calculée par UN script** : `scripts/prochaine-tache.mjs` (ce dépôt) lit le relevé du Gantt et écrit `prochaines.json` : pour chaque dépôt, son état (`libre`, `occupe`, `incident`, `frein`, `rien`), la tâche suivante, la file complète et la raison de chaque tâche écartée. Le Gantt l'affiche, la routine continue le lit. Ce texte décrit ce que le script calcule ; en cas de divergence, on corrige le script (et ses tests), jamais une routine ni une page.
 
 Pour chaque dépôt, la tâche suivante est la première de cette liste :
 
@@ -121,6 +121,23 @@ Une tâche n'est **prenable** que si elle remplit cinq conditions :
 - toutes les tâches qu'elle attend sont fermées ;
 - aucune PR ouverte ne la cite ;
 - son « Fini quand » est vérifiable, et prouvable dans l'heure ou couvert par une preuve programmée (§10).
+
+## 5 bis. Frein de quota (décision de Marc, 16/10/2026, MoKarade/.github#184)
+
+Le même script lit le pourcentage hebdomadaire du quota Claude (`quota.json`, relevé chaque heure par la tâche du PC, .github#45, latence d'une heure au plus) et écrit le palier dans `prochaines.json` : `frein` vaut `normal`, `1` ou `2`, et `frein_detail` dit le pourcentage, la date de la mesure et la raison. Aucune IA dans ce calcul.
+
+| Palier | Seuil | Ce qui part |
+|---|---|---|
+| `normal` | moins de 80 % | tout |
+| `1` | 80 % et plus | `prio:1`, `sécurité`, `incident`, preuve due ; les fils et PR en cours se terminent |
+| `2` | 90 % et plus | `sécurité`, `incident`, preuve due ; plus aucune nouvelle tâche |
+
+- Une tâche retenue n'est pas proposée : elle sort de la file et porte le code `frein-quota` dans `exclues`. Un dépôt dont toute la file est retenue passe à l'état `frein`. Un incident ouvert garde l'état `incident` à tout palier, et la preuve due (fin d'un travail déjà fait) n'est jamais retenue.
+- **Hystérésis de 2 points** : on monte tout de suite, on ne redescend d'un palier que 2 points sous son seuil (sous 78 % pour quitter le palier 1, sous 88 % pour quitter le palier 2).
+- **Relevé périmé** (plus de 3 heures) : le dernier palier connu est gardé, `frein_detail.perime` vaut `true` et une alerte le dit ; jamais un faux `normal`. Sans relevé ni palier précédent, le palier est `normal` avec `frein_detail.inconnu` à `true` : ce n'est pas une mesure.
+- **Réglage** : seuils, hystérésis et durée de péremption sont dans `FREIN`, en tête de `scripts/prochaine-tache.mjs`, et nulle part ailleurs. Le script lit `quota.json` et le `prochaines.json` précédent dans le dossier du relevé, sans option.
+- **Limite assumée** : le palier a jusqu'à une heure de retard, et les fils déjà lancés continuent. Le frein retarde le mur, il ne le supprime pas.
+- Lecteurs : le coordinateur et la routine continue lisent `frein` avant de lancer un fil ; la page de suivi affiche le palier (alerte « Frein de quota » du script, et état `frein` à ajouter à sa table des raisons).
 
 ## 6. Répartition du travail
 

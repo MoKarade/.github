@@ -2,7 +2,7 @@
 // Tâche suivante de chaque dépôt (docs/cycle-de-vie-tache.md §5 et §6) : UN seul calcul, lu par le Gantt ET par la routine.
 //
 // Rôle : lit le relevé `backlog.json` (écrit par fetch.py) et écrit `prochaines.json` : pour chaque dépôt, son état
-// (`libre`, `occupe`, `incident`, `rien`), la tâche suivante, la file complète dans l'ordre, et pour chaque tâche
+// (`libre`, `occupe`, `incident`, `frein`, `rien`), la tâche suivante, la file complète dans l'ordre, et pour chaque tâche
 // ouverte écartée la raison. Rien n'est lu sur le réseau : le fichier peut dater de quelques dizaines de minutes,
 // donc l'appelant revérifie EN DIRECT la tâche choisie (ouverte, sans `en-cours`, sans PR ouverte) avant de la lancer.
 //
@@ -14,11 +14,17 @@
 //   6 alternance : le chantier de l'autre type (`chantier:standard` / `chantier:fonction`)   7 le reste
 // Prenable : ouverte et `niveau:tâche` ; sans `qui:marc`, `bloqué`, `en-cours`, `jules`, `preuve-attendue` ;
 // toutes les tâches attendues fermées ; aucune PR ouverte ne la cite ; un « Fini quand » écrit.
+// Frein de quota (palier `frein` en tête du fichier) : retient les tâches non permises, état `frein` si c'est tout ce qui reste.
 // Capacité : un seul travail par dépôt. Le dépôt est occupé par une tâche `en-cours` ou `jules` ouverte, une PR de
 // tâche ouverte, ou un fil actif passé en option. Une tâche `preuve-attendue` n'occupe pas le dépôt.
 //
-// Fonctions pures d'un côté (`calculer`), I/O de l'autre (`main`) : les tests n'ont besoin ni de réseau ni de fichier.
-import { readFileSync, writeFileSync } from 'node:fs';
+// Frein de quota (MoKarade/.github#184, docs/cycle-de-vie-tache.md §5 bis) : le pourcentage hebdomadaire du quota Claude,
+// relevé par la tâche du PC (`quota.json`, .github#45), fixe un palier `frein` (`normal`, `1`, `2`) qui ne laisse passer
+// que les tâches permises. Aucune IA, aucun réseau : un nombre, deux seuils, une hystérésis.
+//
+// Fonctions pures d'un côté (`calculer`, `calculerFrein`), I/O de l'autre (`main`) : les tests n'ont besoin ni de réseau ni de fichier.
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export const VERSION = 1;
@@ -49,6 +55,56 @@ const TIERS = {
   6: 'alternance (autre type de chantier)',
   7: 'le reste, par prio puis numéro',
 };
+
+// Frein de quota : LE seul endroit où régler les seuils (en % du quota hebdomadaire). Palier 1 dès `seuil1`, palier 2 dès `seuil2` ;
+// on ne redescend d'un palier que `hysteresis` points sous son seuil (évite d'osciller autour de 80 %) ; un relevé de plus de
+// `perimeHeures` heures n'est plus une mesure : on garde le dernier palier connu.
+export const FREIN = { seuil1: 80, seuil2: 90, hysteresis: 2, perimeHeures: 3 };
+
+const niveauDe = (palier) => (palier === 1 || palier === 2 ? palier : 0);
+const libelleDe = (niveau) => (niveau === 0 ? 'normal' : niveau);
+
+/**
+ * Palier du frein pour un relevé de quota.
+ * @param pct pourcentage hebdomadaire utilisé (nombre), @param mesureUtc date de la mesure (ISO)
+ * @param precedent palier du calcul précédent (`normal`, 1 ou 2) ou undefined s'il est inconnu
+ * Rend { palier: 'normal'|1|2, detail }. Jamais un faux « normal » : relevé absent ou périmé = dernier palier connu, dit tel quel ;
+ * sans relevé ni palier précédent, `normal` MAIS `detail.inconnu` vaut true (ce n'est pas une mesure).
+ */
+export function calculerFrein({ pct, mesureUtc, precedent, maintenant = new Date(), seuils = FREIN } = {}) {
+  const seuilDe = (niveau) => (niveau === 2 ? seuils.seuil2 : seuils.seuil1);
+  const avant = niveauDe(precedent);
+  const mesure = Date.parse(mesureUtc);
+  const valide = typeof pct === 'number' && Number.isFinite(pct) && pct >= 0 && Number.isFinite(mesure);
+  const ageHeures = valide ? (maintenant.getTime() - mesure) / 3.6e6 : null;
+  const perime = !valide || ageHeures > seuils.perimeHeures;
+  const inconnu = perime && precedent === undefined && !valide;
+  let niveau;
+  if (perime && precedent !== undefined) niveau = avant;
+  else if (!valide) niveau = 0;
+  else {
+    // Montée immédiate ; descente d'un palier à la fois, seulement sous (seuil - hystérésis).
+    niveau = avant;
+    while (niveau > 0 && pct < seuilDe(niveau) - seuils.hysteresis) niveau -= 1;
+    niveau = Math.max(niveau, pct >= seuils.seuil2 ? 2 : pct >= seuils.seuil1 ? 1 : 0);
+  }
+  const quota = valide ? `${pct} % le ${mesureUtc}` : 'aucun relevé exploitable';
+  const raison = inconnu ? 'aucun relevé de quota ni palier précédent : palier normal par défaut, ce n’est pas une mesure'
+    : perime ? `quota périmé (${quota}${valide ? `, ${Math.round(ageHeures * 10) / 10} h` : ''}) : dernier palier connu gardé`
+    : niveau === 0 ? `quota à ${pct} % : rien ne change`
+    : `quota à ${pct} % : ${niveau === 2 ? 'plus aucune nouvelle tâche (sécurité, incident et preuve due exceptés)' : 'seules les tâches prio:1, sécurité, incident et preuve due partent'}`;
+  return {
+    palier: libelleDe(niveau),
+    detail: { pct: valide ? pct : null, mesure_utc: valide ? mesureUtc : null, age_heures: valide ? Math.round(ageHeures * 10) / 10 : null, perime, inconnu, precedent: libelleDe(avant), seuils: { palier1: seuils.seuil1, palier2: seuils.seuil2, hysteresis: seuils.hysteresis, perime_heures: seuils.perimeHeures }, raison },
+  };
+}
+
+/** Une tâche passe-t-elle le frein ? Les incidents, la sécurité et la preuve due (fin d'un travail déjà fait) passent toujours. */
+export function permiseParFrein({ labels, tier }, palier) {
+  if (palier === 'normal') return true;
+  if (labels.includes('incident') || securite(labels) || tier === 1) return true;
+  return palier === 1 && labels.includes('prio:1');
+}
 
 const minuscule = (s) => String(s).toLowerCase();
 const ref = (depot, n) => `${minuscule(depot)}#${n}`;
@@ -128,11 +184,14 @@ function ecart(n, depot, idx) {
  * Calcule la file de chaque dépôt.
  * @param backlog le contenu de backlog.json
  * @param options.filsActifs dépôts (nom ou clé) où un fil de ce projet travaille déjà
+ * @param options.frein résultat de `calculerFrein` (absent : palier normal, rien n'est retenu)
  */
-export function calculer(backlog, { filsActifs = [] } = {}) {
+export function calculer(backlog, { filsActifs = [], frein = null } = {}) {
   const idx = indexer(backlog);
   const actifs = new Set(filsActifs.map(minuscule));
+  const palier = frein?.palier ?? 'normal';
   const alertes = [];
+  if (frein && (palier !== 'normal' || frein.detail.perime)) alertes.push(`Frein de quota, palier ${palier} : ${frein.detail.raison}`);
   const depots = backlog.repos.map((depot) => {
     const taches = Object.values(depot.nodes).filter((n) => n.lvl === 'tâche' && n.state === 'open');
     const exclues = {};
@@ -157,6 +216,7 @@ export function calculer(backlog, { filsActifs = [] } = {}) {
     const chantiersSansType = new Set();
     let alternanceEnJeu = false;
 
+    let retenues = 0;
     const file = prenables.map((n) => {
       const r = ref(depot.repo, n.n);
       const haut = ascendants(r, idx);
@@ -172,15 +232,21 @@ export function calculer(backlog, { filsActifs = [] } = {}) {
         alternanceEnJeu = true;
         if (haut.chantier && !type) chantiersSansType.add(haut.chantier);
       }
+      // Frein de quota : une tâche retenue sort de la file (jamais proposée) et dit pourquoi dans `exclues`.
+      if (!permiseParFrein({ labels: n.labels, tier }, palier)) {
+        exclues[r] = { code: 'frein-quota', detail: `palier ${palier}` };
+        retenues += 1;
+        return null;
+      }
       return { ref: r, n: n.n, titre: n.title, url: n.url, prio: prioDe(n.labels), tier, raison: TIERS[tier], mission: haut.mission, chantier: haut.chantier };
-    });
+    }).filter(Boolean);
     file.sort((a, b) => a.tier - b.tier || a.prio - b.prio || a.n - b.n);
     file.forEach((f, i) => { f.rang = i + 1; });
     if (alternanceEnJeu && hautDerniere.chantier && !typeDerniere) chantiersSansType.add(hautDerniere.chantier);
     if (chantiersSansType.size) alertes.push(`${depot.name} : alternance standard/fonction non calculable (chantier sans étiquette chantier:standard ou chantier:fonction : ${[...chantiersSansType].join(', ')})`);
 
     const incidents = depot.incidents ?? [];
-    const statut = incidents.length ? 'incident' : occupePar.length ? 'occupe' : file.length ? 'libre' : 'rien';
+    const statut = incidents.length ? 'incident' : occupePar.length ? 'occupe' : file.length ? 'libre' : retenues ? 'frein' : 'rien';
     return {
       depot: depot.name,
       cle: depot.key,
@@ -194,26 +260,43 @@ export function calculer(backlog, { filsActifs = [] } = {}) {
       exclues,
     };
   });
-  return { version: VERSION, source_asof: backlog.asof, non_calcule: NON_CALCULE, alertes, depots };
+  return { version: VERSION, source_asof: backlog.asof, non_calcule: NON_CALCULE, frein: palier, frein_detail: frein?.detail ?? null, alertes, depots };
 }
 
 function lireArguments(argv) {
-  const options = { filsActifs: [], sortie: null, entree: null };
+  const options = { filsActifs: [], sortie: null, entree: null, quota: null, precedent: null };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--fils-actifs') options.filsActifs = (argv[++i] ?? '').split(',').filter(Boolean);
     else if (argv[i] === '--sortie') options.sortie = argv[++i];
+    else if (argv[i] === '--quota') options.quota = argv[++i];
+    else if (argv[i] === '--precedent') options.precedent = argv[++i];
     else if (!options.entree) options.entree = argv[i];
   }
   return options;
 }
 
+/** Lit un JSON s'il existe ; rend null s'il est absent ou illisible (le frein le dit « périmé », il ne devine rien). */
+function lireJsonOuNull(chemin) {
+  try { return existsSync(chemin) ? JSON.parse(readFileSync(chemin, 'utf8')) : null; } catch { return null; }
+}
+
+/** Le frein d'après `quota.json` (à côté du relevé par défaut) et le palier du `prochaines.json` précédent (idem). */
+export function freinDepuisFichiers(dossier, { quota = null, precedent = null, maintenant = new Date() } = {}) {
+  const q = lireJsonOuNull(quota ?? join(dossier, 'quota.json'));
+  const av = lireJsonOuNull(precedent ?? join(dossier, 'prochaines.json'));
+  const claude = q?.jauges?.claude;
+  return calculerFrein({ pct: claude?.utilise, mesureUtc: claude?.mesure_utc ?? claude?.source_asof, precedent: av?.frein, maintenant });
+}
+
 function main() {
-  const { entree, sortie, filsActifs } = lireArguments(process.argv.slice(2));
+  const { entree, sortie, filsActifs, quota, precedent } = lireArguments(process.argv.slice(2));
   if (!entree) {
-    console.error('usage : node scripts/prochaine-tache.mjs backlog.json [--fils-actifs depot,depot] [--sortie prochaines.json]');
+    console.error('usage : node scripts/prochaine-tache.mjs backlog.json [--fils-actifs depot,depot] [--sortie prochaines.json] [--quota quota.json] [--precedent prochaines.json]');
     process.exit(2);
   }
-  const resultat = { ...calculer(JSON.parse(readFileSync(entree, 'utf8')), { filsActifs }), calcule_le: new Date().toISOString() };
+  // Sans option, le frein lit `quota.json` et `prochaines.json` dans le dossier du relevé : le relevé du PC n'a rien à changer.
+  const frein = freinDepuisFichiers(dirname(entree), { quota, precedent });
+  const resultat = { ...calculer(JSON.parse(readFileSync(entree, 'utf8')), { filsActifs, frein }), calcule_le: new Date().toISOString() };
   const texte = `${JSON.stringify(resultat, null, 1)}\n`;
   if (sortie) writeFileSync(sortie, texte);
   else process.stdout.write(texte);
