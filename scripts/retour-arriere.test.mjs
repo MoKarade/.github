@@ -123,7 +123,7 @@ test('traiter : mode contrôle → lecture seule, dit si la version précédente
 
 test('clientVercel : jeton en en-tête, équipe en paramètre, erreur sans jeton', async () => {
   let vu;
-  const ok = clientVercel({ jeton: 'SECRET-123', equipe: 'eq', appel: async (url, init) => ((vu = { url, init }), { ok: true, status: 200, json: async () => ({ a: 1 }) }) });
+  const ok = clientVercel({ jeton: 'SECRET-123', equipe: 'eq', appel: async (url, init) => ((vu = { url, init }), { ok: true, status: 200, text: async () => '{"a":1}' }) });
   assert.deepEqual(await ok('GET', '/v6/deployments', { limit: 5 }), { a: 1 });
   assert.equal(vu.init.headers.authorization, 'Bearer SECRET-123');
   assert.equal(vu.url.searchParams.get('slug'), 'eq');
@@ -170,4 +170,11 @@ test('appsRetour : lancement d\u2019essai = une seule app simulée, jamais une v
   // URL d'essai sans projet Vercel d'essai (ou nom invalide) : rien n'est traité.
   assert.deepEqual(appsRetour({ ...env, RETOUR_ESSAI_VERCEL: '' }, [app]), []);
   assert.deepEqual(appsRetour({ ...env, RETOUR_ESSAI_VERCEL: '../x' }, [app]), []);
+});
+
+test('clientVercel : un corps vide (retour en arrière) n’est pas une erreur', async () => {
+  const api = clientVercel({ jeton: 'J', appel: async () => ({ ok: true, status: 200, text: async () => '' }) });
+  assert.deepEqual(await api('POST', '/v1/projects/p/rollback/d'), {});
+  const api204 = clientVercel({ jeton: 'J', appel: async () => ({ ok: true, status: 204, text: async () => '' }) });
+  assert.deepEqual(await api204('POST', '/x'), {});
 });

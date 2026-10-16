@@ -69,7 +69,10 @@ export const clientVercel = ({ jeton, equipe, appel = fetch }) =>
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
     const r = await appel(url, { method: methode, headers: { authorization: `Bearer ${jeton}` }, signal: AbortSignal.timeout(15_000) });
     if (!r.ok) throw new Error(`Vercel ${methode} ${chemin} : HTTP ${r.status}`);
-    return r.status === 204 ? {} : await r.json();
+    // Le retour en arrière (POST .../rollback/...) rend un corps VIDE : constaté sur essai-retour le 16/10 (run 38905043516),
+    // où le retour avait réussi mais le script a échoué avant de refaire la sonde et d'ouvrir l'issue.
+    const texte = await r.text();
+    return texte.trim() ? JSON.parse(texte) : {};
   };
 
 /**
