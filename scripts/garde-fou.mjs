@@ -7,8 +7,11 @@
 //   2. baisse un seuil de qualite/ (ou touche au mécanisme du cliquet) ;
 //   3. ajoute ou modifie une référence à un secret ;
 //   4. contient une migration destructive (ou réécrit une migration existante) ;
-//   5. modifie le garde-fou lui-même (script, workflow, .mergify.yml, CODEOWNERS) : sans cela
-//      une PR pourrait desserrer ses propres règles puis se fusionner seule.
+//   5. modifie le garde-fou lui-même (script, workflow, .mergify.yml, CODEOWNERS) ou la relecture IA :
+//      sans cela une PR pourrait desserrer ses propres règles puis se fusionner seule.
+// Exception (choix de Marc, 16/10/2026) : si TOUTES les violations sont de celles que la relecture IA
+// peut lever (références à un secret, nombre de cas de test : scripts/relecture-regles.mjs) ET qu'une
+// relecture IA a approuvé CE commit (statut « Relecture IA »), le contrôle est vert.
 // Rouge = la PR attend, une issue `qui:marc` s'ouvre (d'abord) et un commentaire dit pourquoi (non bloquant).
 //
 // Sûreté : lancé par `pull_request_target`, donc depuis le workflow de la branche par défaut, que
@@ -19,12 +22,18 @@
 // (scripts/garde-fou.test.mjs) n'ont besoin ni de réseau ni de jeton.
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import {
+  CONTEXTE as CONTEXTE_RELECTURE,
+  PROPRIETAIRE,
+  WORKFLOW_RELECTURE,
+  toutesSurmontables,
+} from './relecture-regles.mjs';
 
 export const MARQUEUR = '<!-- garde-fou -->';
 
 // Le garde-fou ne se modifie pas seul, et la fusion automatique non plus.
 const AUTOPROTEGES =
-  /(^|\/)(\.mergify\.yml|CODEOWNERS|\.github\/workflows\/[^/]*garde-fou[^/]*\.ya?ml|scripts\/garde-fou[^/]*)$/;
+  /(^|\/)(\.mergify\.yml|CODEOWNERS|\.github\/workflows\/[^/]*(?:garde-fou|relecture)[^/]*\.ya?ml|scripts\/(?:garde-fou|relecture)[^/]*)$/;
 
 const EST_TEST = /(^|\/)(tests?|__tests__|e2e|spec)\/|\.(test|spec)\.[cm]?[jt]sx?$/;
 const EST_WORKFLOW = /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/;
@@ -269,6 +278,32 @@ export async function evaluer({ fichiers, proteges, contenu }) {
   return { protege: true, concernes, violations };
 }
 
+/**
+ * Vrai si une relecture IA a approuvé CE commit. Le statut doit venir du propriétaire ET pointer vers
+ * une exécution du workflow de relecture de MoKarade/.github sur sa branche main : un statut posé à
+ * la main ne suffit pas. `api(méthode, chemin)` rend null sur 404.
+ */
+export async function relectureApprouvee({ api, depot, sha }) {
+  const statuts = (await api('GET', `/repos/${depot}/commits/${sha}/statuses?per_page=100`)) ?? [];
+  const dernier = statuts.find((s) => s.context === CONTEXTE_RELECTURE);
+  const etat = dernier?.state ?? 'absent';
+  if (!dernier || dernier.state !== 'success' || dernier.creator?.login !== PROPRIETAIRE) {
+    return { ok: false, etat };
+  }
+  const id = /^https:\/\/github\.com\/MoKarade\/\.github\/actions\/runs\/(\d+)$/.exec(dernier.target_url ?? '')?.[1];
+  if (!id) return { ok: false, etat };
+  const run = await api('GET', `/repos/MoKarade/.github/actions/runs/${id}`);
+  const valide =
+    run &&
+    run.path === WORKFLOW_RELECTURE &&
+    run.head_branch === 'main' &&
+    (run.event === 'schedule' || run.event === 'workflow_dispatch') &&
+    run.repository?.full_name === 'MoKarade/.github' &&
+    run.conclusion !== 'failure' &&
+    run.conclusion !== 'cancelled';
+  return valide ? { ok: true, etat, raison: (dernier.description ?? '').slice(0, 140) } : { ok: false, etat };
+}
+
 const TITRES = {
   test: 'Test retiré ou sauté',
   seuil: 'Seuil de qualité desserré',
@@ -278,7 +313,10 @@ const TITRES = {
   illisible: 'Diff illisible',
 };
 
-export function rapport({ concernes, violations }) {
+export function rapport({ concernes, violations, relecture }) {
+  if (relecture) {
+    return `Garde-fou : vert grâce à la relecture IA (${relecture}). ${concernes.length} fichier(s) protégé(s) touché(s).`;
+  }
   if (violations.length === 0) {
     return `Garde-fou : vert. ${concernes.length} fichier(s) protégé(s) touché(s), aucune des règles n'a joué.`;
   }
@@ -368,10 +406,24 @@ async function main() {
       'application/vnd.github.raw+json',
     );
 
-  const resultat = await evaluer({ fichiers, proteges, contenu });
-  const texte = resultat.protege
+  let resultat = await evaluer({ fichiers, proteges, contenu });
+  // Rouge mais levable par la relecture IA, qui n'a pas encore rendu d'avis sur ce commit : la PR
+  // attend la relecture (quelques minutes), pas Marc. L'issue `qui:marc` ne s'ouvre qu'après un refus.
+  let attenteRelecture = false;
+  if (resultat.protege && toutesSurmontables(resultat.violations)) {
+    const relue = await relectureApprouvee({ api, depot: GITHUB_REPOSITORY, sha: pr.head.sha });
+    if (relue.ok) resultat = { ...resultat, violations: [], relecture: relue.raison || 'approuvé' };
+    else attenteRelecture = relue.etat === 'absent';
+  }
+  let texte = resultat.protege
     ? rapport(resultat)
     : 'Garde-fou : rien de protégé dans cette PR, rien à contrôler.';
+  if (attenteRelecture) {
+    texte = texte.replace(
+      'la PR attend Marc.',
+      'la PR attend la relecture IA (quelques minutes) ; si elle refuse, elle attend Marc.',
+    );
+  }
   console.log(texte);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${texte}\n`);
   if (dry) {
@@ -392,7 +444,7 @@ async function main() {
 
   if (echec) {
     // L'issue d'abord : c'est elle qui prévient Marc, et elle ne demande que `issues: write`.
-    if (!issueOuverte) {
+    if (!issueOuverte && !attenteRelecture) {
       const issue = await api('POST', `/repos/${GITHUB_REPOSITORY}/issues`, {
         title: titreIssue,
         labels: ['qui:marc'],
