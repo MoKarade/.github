@@ -1,0 +1,69 @@
+name: Conformité (workflow commun)
+
+# Grille de conformité commune aux dix dépôts (plan de standardisation, décision 1) : une ligne par règle,
+# 15 lignes, lues dans le dépôt appelant. Le tableau s'affiche dans le résumé du job. La grille, ce que chaque
+# ligne lit et les états possibles sont décrits dans docs/conformite.md ; la logique est dans scripts/conformite.mjs.
+#
+# Appel depuis un dépôt :
+#
+#   jobs:
+#     conformite:
+#       uses: MoKarade/.github/.github/workflows/conformite.yml@main
+#       with:
+#         bloquant: true      # rouge si une ligne est rouge ; false (défaut) : le tableau seul
+#         racine: web         # dossier de l'app si elle n'est pas à la racine (batchchef-)
+#
+# Le script vient de ce dépôt, jamais du code de l'appelant.
+on:
+  workflow_call:
+    inputs:
+      bloquant:
+        description: 'true : le job échoue si une ligne est rouge. false : le tableau seul.'
+        type: boolean
+        default: false
+      racine:
+        description: 'Dossier de l’app dans le dépôt (« web » chez batchchef-).'
+        type: string
+        default: .
+      depot:
+        description: 'Dépôt public à lire (propriétaire/nom) ; vide : le dépôt appelant. Sert aux essais.'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  conformite:
+    name: Conformité
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le dépôt à contrôler
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.depot || github.repository }}
+          path: depot
+          persist-credentials: false
+
+      - name: Récupérer le script de conformité
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: MoKarade/.github
+          ref: main
+          path: .conformite
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Lire la grille
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DEPOT: ${{ inputs.depot || github.repository }}
+          CONFORMITE_RACINE: ${{ inputs.racine }}
+          CONFORMITE_BLOQUANT: ${{ inputs.bloquant }}
+          CONFORMITE_TITRE_PR: ${{ github.event.pull_request.title }}
+        run: node .conformite/scripts/conformite.mjs depot "$DEPOT"

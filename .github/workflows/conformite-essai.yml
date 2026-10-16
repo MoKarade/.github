@@ -1,0 +1,19 @@
+name: Essai de la conformité
+
+# Lancement à la main de la grille contre un dépôt public donné (ex. MoKarade/app-template) : sert à vérifier
+# le tableau sans attendre qu'un dépôt appelle le workflow commun.
+on:
+  workflow_dispatch:
+    inputs:
+      depot:
+        description: 'Dépôt public à lire (propriétaire/nom)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  conformite:
+    uses: ./.github/workflows/conformite.yml
+    with:
+      depot: ${{ inputs.depot }}
