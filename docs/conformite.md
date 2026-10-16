@@ -36,7 +36,7 @@ Le tableau ligne par ligne s'écrit dans le résumé du job. Le workflow « Essa
 | 6 | Sécurité | `securite.yml` appelé (ou gitleaks, CodeQL et OSV-Scanner chacun présents) ; Dependabot ; `npm audit` en CI ; scan de secrets et protection au push (réglage administrateur : « à relire » si la CI ne le voit pas) |
 | 7 | Versions | Next ≥ 16, React ≥ 19, vitest ≥ 5, zod ≥ 4, TypeScript ≥ 5.9 et `strict`, Node 24, contrat hub au dernier tag. La version INSTALLÉE (`package-lock.json`) fait foi |
 | 8 | Vercel | `vercel.json` : seule la branche par défaut se déploie, le motif générique est désactivé |
-| 9 | Surveillance | dépendance `@sentry/*`, route `app/api/sante`, appel de `surveillance.yml` |
+| 9 | Surveillance | dépendance `@sentry/*`, route `app/api/sante`, dépôt listé avec une route de santé dans `surveillance/apps.json` (MoKarade/.github) |
 | 10 | Base | `lib/migrations.ts` ou `db:migrate` dans `vercel-build` ; la sauvegarde vit sur le PC : toujours « à relire » |
 | 11 | Docs | `CLAUDE.md` ≤ 60 lignes, `HANDOVER.md`, `docs/adr/`, `BACKLOG.md` ≤ 20 lignes avec un renvoi vers les issues, `docs/COMPTE-RENDU.md` |
 | 12 | Socle visuel | `app/globals.css` en variables, thème sombre, verrou `tests/theme.test.*` |

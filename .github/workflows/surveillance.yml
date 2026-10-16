@@ -1,0 +1,54 @@
+name: Surveillance des apps
+
+# Alerte quand une app tombe (plan de standardisation, décision 11). Toutes les 15 minutes, sonde `/api/sante`
+# de chaque app listée dans surveillance/apps.json. Une app muette après 3 essais ouvre UNE issue `panne`
+# dans ce dépôt (notification GitHub) ; son retour la ferme avec un commentaire. Les journaux Vercel Hobby
+# ne vivent qu'1 h : cette sonde externe est la seule trace d'une panne de nuit.
+# Le jeton du job (github.token, droits limités à ce dépôt) sert au seul CLI `gh` ; aucun secret du dépôt.
+#
+# Lancement d'essai (preuve « une panne ouvre l'issue, le retour la ferme ») : « Run workflow » avec
+# un nom et une URL de santé ; seule cette app simulée est sondée.
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      nom-essai:
+        description: 'Nom de l’app simulée (minuscules, chiffres, tirets)'
+        required: false
+        default: essai
+      url-essai:
+        description: 'URL https de santé de l’app simulée (vide : surveillance normale)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  issues: write
+
+# Un seul passage à la fois : deux passages en parallèle ouvriraient deux issues pour la même panne.
+concurrency:
+  group: surveillance
+  cancel-in-progress: false
+
+jobs:
+  surveillance:
+    name: Surveillance
+    timeout-minutes: 10
+    runs-on: ubuntu-latest # dépôt public : machines GitHub (gratuites)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Sonder les apps et tenir les issues de panne
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SURVEILLANCE_ESSAI_NOM: ${{ inputs.nom-essai }}
+          SURVEILLANCE_ESSAI_URL: ${{ inputs.url-essai }}
+        run: node scripts/surveillance.mjs
