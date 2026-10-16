@@ -318,6 +318,38 @@ export async function relectureApprouvee({ api, depot, numero, sha }) {
   return { ok: true, etat, raison: (lignes[1] ?? '').slice(0, 140) };
 }
 
+/** PR de la file d'attente de Mergify : créée par lui (brouillon), sur une branche `mergify/merge-queue/…`. */
+export const estPrFileMergify = (pr) =>
+  pr?.user?.login === 'mergify[bot]' && String(pr?.head?.ref ?? '').startsWith('mergify/merge-queue/');
+
+/**
+ * La file de Mergify vérifie une copie de la PR (brouillon, nouveau commit) avant de fusionner : le
+ * Garde-fou y rejoue les mêmes règles, et la relecture IA, qui ne relit jamais un brouillon, n'a pas
+ * d'avis sur ce commit. On remonte donc à la PR d'origine (le seul numéro du titre « merge queue :
+ * checking #N … », file de taille 1) : la copie est acceptée seulement si elle porte EXACTEMENT les
+ * mêmes fichiers et les mêmes lignes modifiées que la PR d'origine, ouverte, hors brouillon, ET si la
+ * relecture IA a approuvé le commit actuel de cette PR d'origine. Tout écart : refus (échec fermé).
+ */
+export async function relectureDeLaFile({ api, depot, pr, fichiers }) {
+  const numeros = [...new Set([...String(pr.title ?? '').matchAll(/#(\d+)/g)].map((m) => Number(m[1])))];
+  if (numeros.length !== 1) return { ok: false, etat: 'file-illisible' };
+  const origine = await api('GET', `/repos/${depot}/pulls/${numeros[0]}`);
+  if (!origine || origine.state !== 'open' || origine.draft || origine.head?.repo?.full_name !== depot) {
+    return { ok: false, etat: 'file-origine' };
+  }
+  const fichiersOrigine = [];
+  for (let page = 1; page <= 30; page += 1) {
+    const lot = (await api('GET', `/repos/${depot}/pulls/${numeros[0]}/files?per_page=100&page=${page}`)) ?? [];
+    fichiersOrigine.push(...lot);
+    if (lot.length < 100) break;
+  }
+  const empreinte = (liste) => JSON.stringify(liste.map((f) => [f.filename, f.status, f.patch ?? null]).sort());
+  if (fichiersOrigine.length === 0 || empreinte(fichiersOrigine) !== empreinte(fichiers)) {
+    return { ok: false, etat: 'file-different' };
+  }
+  return relectureApprouvee({ api, depot, numero: numeros[0], sha: origine.head.sha });
+}
+
 const TITRES = {
   test: 'Test retiré ou sauté',
   seuil: 'Seuil de qualité desserré',
@@ -425,7 +457,9 @@ async function main() {
   // attend la relecture (quelques minutes), pas Marc. L'issue `qui:marc` ne s'ouvre qu'après un refus.
   let attenteRelecture = false;
   if (resultat.protege && toutesSurmontables(resultat.violations)) {
-    const relue = await relectureApprouvee({ api, depot: GITHUB_REPOSITORY, numero: PR_NUMBER, sha: pr.head.sha });
+    const relue = estPrFileMergify(pr)
+      ? await relectureDeLaFile({ api, depot: GITHUB_REPOSITORY, pr, fichiers })
+      : await relectureApprouvee({ api, depot: GITHUB_REPOSITORY, numero: PR_NUMBER, sha: pr.head.sha });
     if (relue.ok) resultat = { ...resultat, violations: [], relecture: relue.raison || 'approuvé' };
     else attenteRelecture = relue.etat === 'absent';
   }

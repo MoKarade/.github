@@ -37,6 +37,12 @@ Jamais par le chat.
 - Le Garde-fou est lu par l'API des exécutions de workflow (droit Actions), pas par celle des contrôles : aucun droit « Checks » à donner au jeton.
 - Tout workflow dont le nom de fichier contient `garde-fou` ou `relecture` est traité comme le garde-fou lui-même : jamais levé par l'IA, fusion de Marc.
 
+## La file de Mergify
+Quand la PR est en retard sur `main`, Mergify la teste sur une copie : une PR brouillon `mergify/merge-queue/…`, titre « merge queue: checking #N … », nouveau commit. Le Garde-fou y rejoue les mêmes règles, mais la relecture ne relit jamais un brouillon. Le Garde-fou accepte donc la copie seulement si ses fichiers et ses lignes modifiées sont EXACTEMENT ceux de la PR d'origine (ouverte, hors brouillon) ET si la relecture a approuvé le commit actuel de cette PR d'origine (`relectureDeLaFile`). Tout écart : rouge, la PR attend Marc. Constaté le 16/10/2026 sur app-template#76/#83 (copie sortie de la file faute d'avis).
+
+## Un refus prévient Marc
+`publier` rejoue le Garde-fou aussi après un refus : il reste rouge et ouvre l'issue `qui:marc`. Sans cela, une PR refusée attendrait sans que personne le sache.
+
 ## Avant de modifier le workflow
 Lancer `actionlint` sur `relecture-ia.yml` : un workflow invalide ne s'exécute pas et n'affiche qu'une exécution « push » à zéro tâche (cas du 16/10/2026 : `runner.temp` n'existe pas dans `env:` du job).
 
