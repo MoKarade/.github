@@ -3,7 +3,7 @@
 // JAMAIS lever, et le fait qu'une réponse douteuse est un refus.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { evaluer, rapport, relectureApprouvee } from './garde-fou.mjs';
+import { estPrFileMergify, evaluer, rapport, relectureApprouvee, relectureDeLaFile } from './garde-fou.mjs';
 import { dejaJugee, gardeFouRouge, lireProteges } from './relecture-ia.mjs';
 import {
   composerConsigne,
@@ -235,6 +235,45 @@ test('déjà jugée : seulement un verdict du propriétaire sur ce commit', () =
   assert.equal(dejaJugee([verdict({ user: { login: 'autre' } })], SHA), false);
   assert.equal(dejaJugee([], SHA), false);
   assert.equal(dejaJugee(undefined, SHA), false);
+});
+
+// ── La copie de contrôle de la file de Mergify ─────────────────────────────────────
+
+const FICHIERS = [{ filename: '.github/workflows/essai.yml', status: 'added', patch: '@@ -0,0 +1,2 @@\n+a\n+b' }];
+const PR_FILE = { user: { login: 'mergify[bot]' }, head: { ref: 'mergify/merge-queue/abc' }, title: 'merge queue: checking #76 on main (cf27f76)' };
+const ORIGINE = { state: 'open', draft: false, head: { sha: SHA, repo: { full_name: 'MoKarade/Hubperso' } } };
+const apiFile = ({ origine = ORIGINE, fichiers = FICHIERS, commentaires = [verdict()], run = RUN_OK } = {}) =>
+  async (_m, chemin) =>
+    chemin.endsWith('/pulls/76') ? origine : chemin.includes('/pulls/76/files') ? fichiers : chemin.includes('/comments') ? commentaires : chemin.includes('/actions/runs/') ? run : null;
+const lireFile = (opts = {}, pr = PR_FILE, fichiers = FICHIERS) =>
+  relectureDeLaFile({ api: apiFile(opts), depot: 'MoKarade/Hubperso', pr, fichiers });
+
+test('file de Mergify : seule une PR du robot sur sa branche de file compte', () => {
+  assert.equal(estPrFileMergify(PR_FILE), true);
+  assert.equal(estPrFileMergify({ ...PR_FILE, user: { login: 'MoKarade' } }), false);
+  assert.equal(estPrFileMergify({ ...PR_FILE, head: { ref: 'claude/x' } }), false);
+  assert.equal(estPrFileMergify(undefined), false);
+});
+
+test('file de Mergify : copie identique à la PR approuvée = acceptée', async () => {
+  const r = await lireFile();
+  assert.equal(r.ok, true);
+});
+
+test('file de Mergify : tout écart est refusé', async () => {
+  const autre = [{ ...FICHIERS[0], patch: '@@ -0,0 +1,2 @@\n+a\n+SECRET' }];
+  assert.equal((await lireFile({}, PR_FILE, autre)).ok, false); // lignes différentes
+  assert.equal((await lireFile({}, PR_FILE, [...FICHIERS, { filename: 'x', status: 'added', patch: '@@' }])).ok, false); // fichier en plus
+  assert.equal((await lireFile({ fichiers: [] })).ok, false); // origine vide
+  assert.equal((await lireFile({ commentaires: [] })).ok, false); // pas d'avis sur l'origine
+  assert.equal((await lireFile({ origine: { ...ORIGINE, state: 'closed' } })).ok, false);
+  assert.equal((await lireFile({ origine: { ...ORIGINE, draft: true } })).ok, false);
+  assert.equal((await lireFile({ origine: { ...ORIGINE, head: { sha: 'b'.repeat(40), repo: { full_name: 'MoKarade/Hubperso' } } } })).ok, false); // avis d'un autre commit
+  assert.equal((await lireFile({ origine: null })).ok, false);
+  assert.equal((await lireFile({}, { ...PR_FILE, title: 'merge queue: checking #76 and #77' })).ok, false); // plusieurs PR
+  assert.equal((await lireFile({}, { ...PR_FILE, title: 'sans numero' })).ok, false);
+  const refus = verdict({ body: verdict().body.replace('decision=approuve', 'decision=refuse') });
+  assert.equal((await lireFile({ commentaires: [refus] })).ok, false);
 });
 
 test('rapport : vert grâce à la relecture, rouge sinon', () => {

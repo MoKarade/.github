@@ -207,13 +207,12 @@ async function publier() {
     });
     console.log(`${dossier.depot}#${dossier.numero} : ${verdict.decision}`);
 
-    if (approuve) {
-      // Rejouer le Garde-fou du commit : il lira le commentaire et passera au vert.
-      const lot = await api('GET', `/repos/${dossier.depot}/actions/workflows/garde-fou.yml/runs?head_sha=${dossier.sha}&per_page=5`);
-      const run = lot?.workflow_runs?.[0];
-      if (!run) throw new Error(`${dossier.depot}#${dossier.numero} : aucune exécution du Garde-fou à rejouer`);
-      await api('POST', `/repos/${dossier.depot}/actions/runs/${run.id}/rerun`);
-    }
+    // Rejouer le Garde-fou du commit dans les deux cas : approuvé, il lit le commentaire et passe au
+    // vert ; refusé, il reste rouge et ouvre l'issue `qui:marc` (sans cela Marc ne serait pas prévenu).
+    const lot = await api('GET', `/repos/${dossier.depot}/actions/workflows/garde-fou.yml/runs?head_sha=${dossier.sha}&per_page=5`);
+    const run = lot?.workflow_runs?.[0];
+    if (!run) throw new Error(`${dossier.depot}#${dossier.numero} : aucune exécution du Garde-fou à rejouer`);
+    await api('POST', `/repos/${dossier.depot}/actions/runs/${run.id}/rerun`);
   }
   let erreurs = '';
   try {
