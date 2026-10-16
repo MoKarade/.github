@@ -16,7 +16,7 @@ name: Fumée de production (workflow commun)
 #         url-base: https://carai.hubperso.com
 #         chemin-summary: /hub/summary   # vide si l'app n'en a pas (Hubperso)
 #       secrets:
-#         hub-token: ${{ secrets.HUB_TOKEN }}
+#         hub-token: le secret HUB_TOKEN du dépôt appelant (la syntaxe est celle de tout `secrets:` d'appel)
 #
 # Contrôles (rouge si l'un échoue après 3 essais) : santé { ok: true } ; summary REFUSÉ sans jeton ;
 # summary valide avec le jeton (200, no-store, forme du contrat) ; page de connexion qui répond.
