@@ -1,0 +1,317 @@
+# Relevé GitHub en lecture seule : backlog (issues niveau:*) de chaque dépôt -> backlog.json
+# v6 (15/10/2026) : applique le cahier des charges du §13 de MoKarade/.github docs/cycle-de-vie-tache.md
+# (PR reliée par « Tâche : #n » ou Closes, états du §7, preuve d'acceptation, geste de Marc, contrôles de la pastille).
+# v7 (16/10/2026) : deux modes qui rendent les MÊMES données.
+#   PLEIN (défaut)  : relit tout. Sert de référence.
+#   LÉGER (--leger) : relit les listes (PR ouvertes, PR fermées, issues) et ne recalcule que les issues dont la SIGNATURE a changé
+#                     (dernière modification, état, sous-issues, dépendances, PR reliée) ; les autres viennent du relevé précédent.
+#                     Retard maximal du léger sur le plein : le délai entre deux plein. Équivalence vérifiée par test_leger.py.
+# v8 (16/10/2026) : trois corrections du rapport des défauts du backlog (2026-10-16_defauts-backlog.md) et une donnée de plus.
+#   « Preuve attendue » est aussi lue dans les commentaires (le dernier avec une date lisible l'emporte sur le corps) ;
+#   « **Attend** : rien (PR #n) » n'attend rien ; `jules_at` = les instants où l'étiquette `jules` a été posée (mesure des lancements Jules) ;
+#   les scripts de MoKarade/.github que la page fait tourner (`prochaine-tache.mjs`, `verif-fidelite.mjs`) sont relus à chaque relevé (build.py et refresh.sh les lancent).
+# Usage : python3 fetch.py [--leger] [--sans-quota] [--prev=fichier.json] [--depots=a,b] [sortie.json]
+import json, subprocess, sys, datetime, re, os, time, threading, base64, hashlib
+from concurrent.futures import ThreadPoolExecutor
+ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
+OPT = {a.split('=', 1)[0]: (a.split('=', 1) + [''])[1] for a in sys.argv[1:] if a.startswith('--')}
+LEGER = '--leger' in OPT
+D = os.path.dirname(os.path.abspath(__file__)) + '/'
+OUT = ARGS[0] if ARGS else 'backlog.json'
+T0 = time.time()
+REPOS = [('.github','eco','Écosystème'),('FinanceAI','fin','FinanceAI'),('JobAI','job','JobAI'),('batchchef-','batch','BatchChef'),('driveai','drive','DriveAI'),
+         ('Hubperso','hub','Hubperso'),('carai','car','CarAI'),('memoryai','mem','MemoryAI'),('app-template','tpl','app-template'),('hub-contract','hc','hub-contract')]
+if OPT.get('--depots'):          # sous-ensemble de dépôts : pour les tests seulement (les liens entre dépôts seraient incomplets)
+    REPOS = [r for r in REPOS if r[0] in OPT['--depots'].split(',')]
+
+import ghcache      # lecture avec ETag : un 304 ne compte pas dans la limite de GitHub (mesuré le 16/10/2026)
+def _un(path, *args): return ghcache.lire(path, *args)
+def gh(path, *args):
+    # pagination à la main (page=N) : le lien « suivant » de --paginate passe par repositories/{id}, refusé par le relais
+    if 'per_page=' not in path: return _un(path, *args)
+    out = []
+    for p in range(1, 60):
+        d = _un(path + ('&' if '?' in path else '?') + f'page={p}', *args)
+        if not isinstance(d, list): return d
+        out += d
+        if len(d) < int(re.search(r'per_page=(\d+)', path).group(1)): break
+    return out
+def gh1(path):
+    # une seule page (sans --paginate) : pour les listes longues dont seules les plus récentes servent
+    return _un(path)
+def flat(x): return [i for page in x for i in page] if x and isinstance(x[0], list) else x
+asof = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+# Relevé précédent (mode léger) : sans lui, ou s'il est d'une ancienne version ou trop vieux, on relit tout.
+PREV, PREV_PRLOG = {}, []
+if LEGER:
+    try:
+        prev = json.load(open(OPT['--prev'] if OPT.get('--prev') else D + OUT))
+        age = time.time() - datetime.datetime.fromisoformat(prev['asof'].replace('Z', '+00:00')).timestamp()
+        if prev.get('v', 0) < 8: raise ValueError('relevé précédent d\'une ancienne version')
+        if age > 45 * 60: raise ValueError(f'relevé précédent trop ancien ({age / 60:.0f} min)')
+        for r in prev['repos']:
+            for k, nd in r['nodes'].items(): PREV[(r['repo'], int(k))] = nd
+        PREV_PRLOG = prev.get('prlog') or []
+    except Exception as e:
+        print('léger impossible, relevé plein :', e, file=sys.stderr); LEGER = False; PREV = {}
+res = {'v': 8, 'asof': asof, 'mode': 'leger' if LEGER else 'plein', 'repos': []}
+
+# Lien PR -> tâche : « Closes/Fixes/Resolves #n » (transition) et « Tâche : #n » / « Tâche : MoKarade/<dépôt>#n » (standard, §8)
+CLOSES = r'(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:MoKarade/([\w.-]+))?#(\d+)\b'
+TACHE_LIGNE = re.compile(r'^[\s>*_-]*T[âa]che[\s*_]*:(.*)$', re.I | re.M)
+REF = r'(?:MoKarade/([\w.-]+))?#(\d+)\b'
+def liens(body, repo):
+    out = []
+    for m in TACHE_LIGNE.finditer(body or ''):
+        for r2, num in re.findall(REF, m.group(1)):
+            out.append(((r2 or repo).lower(), int(num), 'tache'))
+    for r2, num in re.findall(CLOSES, body or ''):
+        out.append(((r2 or repo).lower(), int(num), 'closes'))
+    return out
+
+# Taille d'une PR hors tests et fichiers générés (§1 : environ 400 lignes au plus)
+HORS_TAILLE = re.compile(r'(^|/)(tests?|__tests__|e2e|fixtures?|__snapshots__|dist|captures)/|\.(test|spec)\.[cm]?[jt]sx?$|\.snap$|(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$|\.lock$', re.I)
+def taille(repo, n):
+    files = flat(gh(f'repos/MoKarade/{repo}/pulls/{n}/files?per_page=100'))
+    return sum(f['additions'] + f['deletions'] for f in files if not HORS_TAILLE.search(f['filename']))
+
+# Gabarits des corps (§2) et extraction des champs affichés dans la fiche
+GAB = {'chantier': ['Objectif', 'Pourquoi', 'Fini quand', 'Source'], 'mission': ['Résultat', 'Fini quand', 'Source'],
+       'tâche': ['Avant', 'Après', 'Fini quand', 'Source']}
+def champ(body, nom):
+    m = re.search(r'^\s*\*\*\s*' + re.escape(nom) + r'\s*(?:\*\*\s*:|:\s*\*\*)\s*(.*?)(?=^\s*\*\*[^*\n]{1,40}?(?:\*\*\s*:|:\s*\*\*)|\Z)', body or '', re.M | re.S | re.I)
+    if not m: return None
+    t = re.sub(r'\s+', ' ', m.group(1)).strip()
+    return t[:280] + ('…' if len(t) > 280 else '')
+GESTE = re.compile(r'^\s*\**\s*Geste\s*\**\s*:\s*\**\s*', re.I)
+PREUVE = re.compile(r'^\s*\*\*\s*Accept[ée]e\s*\*\*', re.I)
+# « Preuve attendue : AAAA-MM-JJ HH:MM (heure du Québec) — événement », écrite dans l'issue ET commentée (§10 du cycle de vie)
+PA_LIGNE = re.compile(r'^[\s>*_-]*Preuve attendue[\s*_]*:\s*\**\s*(.*)$', re.I | re.M)
+PA_DATE = re.compile(r'\s*\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}')
+def deps_attend(body, repo):
+    """Dépendances écrites : « **Attend** : #12, MoKarade/x#3 — raison ». « **Attend** : rien (PR #n fusionnée) » n'attend rien (le #n est une remarque)."""
+    deps = []
+    for line in (body or '').splitlines():
+        if line.startswith('**Attend**'):
+            avant = line.split('—')[0]
+            if re.match(r'^\*\*Attend\*\*[\s:*]*(?:rien|aucune?|néant)\b', avant, re.I): continue
+            for r2, num in re.findall(r'(?:MoKarade/([\w.-]+))?#(\d+)', avant):
+                deps.append(f"{(r2 or repo).lower()}#{num}")
+    return deps
+def pa_commentaires(com):
+    """(texte, url) de la dernière ligne « Preuve attendue » d'un commentaire de personne, une date lisible avant un texte libre ; sinon (None, None)."""
+    lus = []
+    for c in sorted(com, key=lambda c: c['created_at']):
+        if (c.get('user') or {}).get('type') != 'User': continue        # un robot qui rappelle le format n'est pas une échéance
+        for m in PA_LIGNE.finditer(c.get('body') or ''):
+            t = re.sub(r'\s+', ' ', m.group(1)).strip()
+            if t: lus.append((bool(PA_DATE.match(t)), t[:280] + ('…' if len(t) > 280 else ''), c['html_url']))
+    datees = [x for x in lus if x[0]]
+    pick = datees[-1] if datees else lus[-1] if lus else None
+    return (pick[1], pick[2]) if pick else (None, None)
+
+# 1. Listes de chaque dépôt, lues en parallèle : PR ouvertes, 100 dernières PR fermées, issues, incidents.
+# Vitesse de sortie (onglet « Vitesse ») : toutes les PR fusionnées depuis 8 jours, liées à une tâche ou non
+CUTOFF = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=8)).strftime('%Y-%m-%dT%H:%M:%SZ')
+def fusionnees(repo, premiere):
+    # la page de 100 déjà lue, puis les suivantes tant que la liste (triée par dernière modification) remonte encore dans la fenêtre
+    out, last, page = list(premiere), premiere, 1
+    while len(last) == 100 and out[-1]['updated_at'] >= CUTOFF and page < 8:
+        page += 1
+        last = gh1(f'repos/MoKarade/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page={page}')
+        out += last
+    return [p for p in out if p.get('merged_at') and p['merged_at'] >= CUTOFF]
+def listes(rk):
+    repo = rk[0]
+    ouvertes = flat(gh(f'repos/MoKarade/{repo}/pulls?state=open&per_page=100'))
+    fermees = gh1(f'repos/MoKarade/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100')
+    # léger : la première page suffit (les plus récemment modifiées) ; les fusions plus anciennes viennent du relevé précédent
+    fus = [p for p in fermees if p.get('merged_at') and p['merged_at'] >= CUTOFF] if LEGER else fusionnees(repo, fermees)
+    issues = flat(gh(f'repos/MoKarade/{repo}/issues?state=all&per_page=100&since=2026-10-15T00:00:00Z'))
+    incidents = flat(gh(f'repos/MoKarade/{repo}/issues?state=open&labels=incident&per_page=100'))
+    return ouvertes, fermees, fus, issues, incidents
+with ThreadPoolExecutor(5) as ex:
+    LISTES = dict(zip([r[0] for r in REPOS], ex.map(listes, REPOS)))
+
+LIEN = {}
+PRLOG = []
+for repo, key, name in REPOS:
+    ouvertes, fermees, fus, _, _ = LISTES[repo]
+    nouveaux = [{'r': key, 'n': p['number'], 'c': p['created_at'], 'm': p['merged_at'],
+                 'k': 'tache' if liens(p.get('body'), repo) else 'robot' if (p.get('user') or {}).get('type') == 'Bot' else 'autre'} for p in fus]
+    if LEGER:
+        vus = {x['n'] for x in nouveaux}
+        nouveaux += [x for x in PREV_PRLOG if x['r'] == key and x['n'] not in vus and x['m'] >= CUTOFF]
+    PRLOG += nouveaux
+    for p in ouvertes + fermees:
+        for rl, num, kind in liens(p.get('body'), repo):
+            d = {'n': p['number'], 'repo': repo, 'created': p['created_at'], 'url': p['html_url'], 'state': p['state'], 'draft': p.get('draft', False),
+                 'merged': p.get('merged_at'), 'closed': p.get('closed_at'), 'upd': p.get('updated_at'), 'kind': kind}
+            L = LIEN.setdefault(f'{rl}#{num}', {})
+            # une PR citée deux fois (Tâche et Closes) garde le lien « tache »
+            if (repo, p['number']) not in L or kind == 'tache': L[(repo, p['number'])] = d
+def pr_de(ref):
+    # la PR qui compte : ouverte d'abord, sinon la dernière fusionnée, sinon la dernière fermée
+    ps = list(LIEN.get(ref, {}).values())
+    if not ps: return None
+    ps.sort(key=lambda p: (p['state'] == 'open', bool(p['merged']), p['merged'] or p['created']), reverse=True)
+    return ps[0]
+
+# Enfants de chaque issue d'après le champ « parent » des enfants (déjà dans les listes) : sans appel, ça dit si les sous-issues ont changé
+ENFANTS = {}
+for repo, key, name in REPOS:
+    for i in LISTES[repo][3]:
+        m = re.search(r'/repos/[^/]+/([^/]+)/issues/(\d+)$', i.get('parent_issue_url') or '')
+        if m and 'pull_request' not in i: ENFANTS.setdefault(f'{m.group(1).lower()}#{m.group(2)}', set()).add(f'{repo.lower()}#{i["number"]}')
+ECARTS_ENFANTS = []
+
+VIEILLE = re.compile(r'PR déjà ouverte\*\* : #(\d+)')
+def signature(i, pr, body):
+    # tout ce qui, dans l'issue ou sa PR, peut changer ce que calcule calculer() ; None = toujours recalculer
+    if VIEILLE.search(body) and not pr: return None          # PR nommée dans le corps : son état ne se voit pas dans les listes
+    sub, dep = i.get('sub_issues_summary') or {}, i.get('issue_dependencies_summary') or {}
+    return [i['updated_at'], i['state'], sub.get('total'), sub.get('completed'), dep.get('total_blocked_by'),
+            None if not pr else [pr['n'], pr['repo'], pr['state'], pr['draft'], pr['merged'], pr['closed'], pr['upd']]]
+def refs_enfants(rl, kids): return {f'{rl}#{k}' if isinstance(k, int) else str(k).lower() for k in kids}
+
+def calculer(repo, rl, i, pr):
+    labels = [l['name'] for l in i['labels']]
+    lvl = next(l.split(':')[1] for l in labels if l.startswith('niveau:'))
+    body = i.get('body') or ''
+    n = {'n': i['number'], 'title': i['title'], 'lvl': lvl, 'labels': labels, 'state': i['state'], 'reason': i.get('state_reason'),
+         'created': i['created_at'], 'closed': i['closed_at'], 'url': i['html_url'], 'kids': [], 'start': None, 'pr': None,
+         'gab': [c for c in GAB.get(lvl, []) if champ(body, c) is None],
+         'av': champ(body, 'Avant'), 'ap': champ(body, 'Après'), 'fq': champ(body, 'Fini quand'),
+         'res': champ(body, 'Résultat') or champ(body, 'Objectif'),
+         'pa': champ(body, 'Preuve attendue')}
+    m = VIEILLE.search(body)
+    if not pr and m:
+        # ancienne forme : la PR est nommée dans le corps de l'issue, sans lien depuis la PR
+        p = gh(f'repos/MoKarade/{repo}/pulls/{m.group(1)}')
+        pr = {'n': p['number'], 'repo': repo, 'created': p['created_at'], 'url': p['html_url'], 'state': p['state'], 'draft': p.get('draft', False),
+              'merged': p.get('merged_at'), 'kind': 'corps'}
+    if pr and pr['state'] == 'open' and lvl == 'tâche':
+        pr['lignes'] = taille(pr['repo'], pr['n'])
+    if pr and lvl == 'tâche' and 'c0' not in pr:
+        # le travail réel : première et dernière modification (commits) de la PR
+        cs = flat(gh(f"repos/MoKarade/{pr['repo']}/pulls/{pr['n']}/commits?per_page=100"))
+        da = sorted(c['commit']['author']['date'] for c in cs if c.get('commit'))
+        dc = sorted(c['commit']['committer']['date'] for c in cs if c.get('commit'))
+        if da: pr['c0'], pr['c1'], pr['nc'] = da[0], max(dc[-1], da[-1]), len(cs)
+        # heures exactes de chaque modification (auteur) : le Gantt en tire les plages de travail réel
+        pr['cs'] = sorted(set(da + dc))[-60:]
+    n['pr'] = pr
+    n['upd'] = i.get('updated_at')
+    # dépendances : ligne « **Attend** : #12, MoKarade/x#3 — raison » + dépendances natives GitHub (« Blocked by »)
+    deps = deps_attend(body, repo)
+    if (i.get('issue_dependencies_summary') or {}).get('total_blocked_by'):
+        for b in flat(gh(f'repos/MoKarade/{repo}/issues/{i["number"]}/dependencies/blocked_by?per_page=100')):
+            deps.append(f"{b['repository_url'].rsplit('/', 1)[1].lower()}#{b['number']}")
+    n['deps'] = sorted(set(deps))
+    if lvl != 'tâche':
+        # enfant du même dépôt : son numéro ; d'un autre dépôt (mission commune dans .github) : « dépôt#n »
+        n['kids'] = [s['number'] if s['repository_url'].rsplit('/', 1)[1].lower() == rl
+                     else f"{s['repository_url'].rsplit('/', 1)[1].lower()}#{s['number']}"
+                     for s in flat(gh(f'repos/MoKarade/{repo}/issues/{i["number"]}/sub_issues?per_page=100'))]
+    if lvl == 'tâche' and ({'en-cours', 'jules', 'bloqué'} & set(labels) or i['state'] == 'closed'):
+        ev = flat(gh(f'repos/MoKarade/{repo}/issues/{i["number"]}/events?per_page=100'))
+        lab = lambda nom: [e['created_at'] for e in ev if e['event'] == 'labeled' and e.get('label', {}).get('name') == nom]
+        t = sorted(lab('en-cours') + lab('jules'))
+        n['start'] = t[0] if t else None
+        n['jules'] = bool(lab('jules'))
+        n['jules_at'] = lab('jules')
+        b = lab('bloqué')
+        n['bloque_depuis'] = b[-1] if b and 'bloqué' in labels else None
+    geste_ou_ferme = lvl == 'tâche' and (('qui:marc' in labels and i['state'] == 'open') or (i['state'] == 'closed' and i.get('state_reason') == 'completed'))
+    # une échéance de preuve peut n'être écrite que dans un commentaire : on lit les commentaires des tâches ouvertes qui l'attendent
+    pa_possible = lvl == 'tâche' and i['state'] == 'open' and ('preuve-attendue' in labels or bool(pr and pr.get('merged')) or 'preuve attendue' in body.lower())
+    if geste_ou_ferme or pa_possible or (lvl == 'tâche' and n['pa']):
+        com = flat(gh(f'repos/MoKarade/{repo}/issues/{i["number"]}/comments?per_page=100'))
+        if geste_ou_ferme:
+            g = [c for c in com if GESTE.match(c.get('body') or '')]
+            if g:
+                t = re.sub(r'\s+', ' ', GESTE.sub('', g[-1]['body'], count=1)).strip()
+                n['geste'] = {'t': t[:400] + ('…' if len(t) > 400 else ''), 'u': g[-1]['html_url']}
+            # même règle que le garde-fou (.github, scripts/preuve.mjs, humain()) : une personne ou Claude, jamais un robot ni Jules
+            a = [c for c in com if PREUVE.match(c.get('body') or '') and (c.get('user') or {}).get('type') == 'User' and 'jules' not in ((c.get('user') or {}).get('login') or '').lower()]
+            if a:
+                n['preuve'] = {'u': a[-1]['html_url'], 'c': a[-1]['created_at']}
+        pa, pa_u = pa_commentaires(com)
+        if pa and (PA_DATE.match(pa) or not n['pa']):        # le commentaire l'emporte sur le corps seulement s'il porte une date lisible (ou si le corps n'a rien)
+            n['pa'], n['pa_u'] = pa, pa_u
+    return n
+
+def traiter(rk):
+    repo, key, name = rk
+    rl = repo.lower()
+    ouvertes, fermees, _, issues_all, incidents_all = LISTES[repo]
+    issues = [i for i in issues_all if 'pull_request' not in i and any(l['name'].startswith('niveau:') for l in i['labels'])]
+    incidents = [{'n': i['number'], 't': i['title'], 'url': i['html_url']} for i in incidents_all if 'pull_request' not in i]
+    nodes, reutilises = {}, 0
+    for i in issues:
+        pr = pr_de(f'{rl}#{i["number"]}')
+        sig = signature(i, pr, i.get('body') or '')
+        ancien = PREV.get((repo, i['number']))
+        if LEGER and ancien and sig is not None and ancien.get('sig') == sig:
+            # non-tâche : ses sous-issues ont-elles changé ? (les enfants disent qui est leur parent)
+            if ancien['lvl'] == 'tâche' or refs_enfants(rl, ancien['kids']) == ENFANTS.get(f'{rl}#{i["number"]}', set()):
+                nodes[i['number']] = ancien; reutilises += 1
+                continue
+        n = calculer(repo, rl, i, pr)
+        n['sig'] = sig
+        if not LEGER and n['lvl'] != 'tâche' and refs_enfants(rl, n['kids']) != ENFANTS.get(f'{rl}#{n["n"]}', set()):
+            ECARTS_ENFANTS.append(f'{rl}#{n["n"]}')
+        nodes[i['number']] = n
+    # PR ouvertes qui ne relient aucune tâche : hors backlog (signalées, jamais corrigées ici)
+    hors = [{'n': p['number'], 't': p['title'], 'url': p['html_url'], 'bot': p['user']['type'] == 'Bot', 'draft': p['draft'], 'c': p['created_at']}
+            for p in ouvertes if not liens(p.get('body'), repo)]
+    print(name, len(nodes), 'issues', f'({reutilises} reprises)' if LEGER else '', file=sys.stderr)
+    return {'repo': repo, 'key': key, 'name': name, 'nodes': nodes, 'hors': hors, 'incidents': incidents}, reutilises
+with ThreadPoolExecutor(5) as ex:
+    sorties = list(ex.map(traiter, REPOS))
+res['repos'] = [s[0] for s in sorties]
+res['prlog'] = sorted(PRLOG, key=lambda x: x['m'])
+CPT = ghcache.compteurs()
+# appels = requêtes comptées par GitHub (hors 304) ; reqs = toutes les requêtes ; n304 = celles qui n'ont rien coûté
+res['appels'], res['reqs'], res['n304'] = CPT['comptees'], CPT['req'], CPT['n304']
+res['duree_s'], res['reutilises'] = round(time.time() - T0, 1), sum(s[1] for s in sorties)
+if not LEGER: res['ecarts_enfants'] = ECARTS_ENFANTS     # plein : les enfants vus par « parent » diffèrent-ils de sub_issues ? (attendu : aucun)
+print(f"{res['mode']} : {res['appels']} appels comptés ({res['n304']} en 304 gratuits sur {res['reqs']}), {res['duree_s']} s, {res['reutilises']} reprises" + (f", écarts enfants {len(ECARTS_ENFANTS)}" if not LEGER else ''), file=sys.stderr)
+# Miroir local des scripts de MoKarade/.github que la page fait tourner : UN calcul de la file (prochaine-tache.mjs) et UNE mesure de fidélité
+# (verif-fidelite.mjs), les mêmes pour la page et pour la routine. Relus à chaque relevé (un 304 ne coûte rien) ; leurs imports relatifs suivent.
+SCRIPTS_ENTREES = ['prochaine-tache.mjs', 'verif-fidelite.mjs']
+SCRIPTS_DIR = D + 'scripts-github/'
+def git_sha(b): return hashlib.sha1(b'blob %d\0' % len(b) + b).hexdigest()
+def miroir_scripts():
+    os.makedirs(SCRIPTS_DIR, exist_ok=True)
+    out, file = {}, list(SCRIPTS_ENTREES)
+    while file:
+        nom = file.pop(0)
+        if nom in out: continue
+        loc = SCRIPTS_DIR + nom
+        local = open(loc, 'rb').read() if os.path.exists(loc) else None
+        try:
+            m = _un(f'repos/MoKarade/.github/contents/scripts/{nom}')
+            texte = base64.b64decode(m['content'])
+            if git_sha(texte) != m['sha']: raise RuntimeError('contenu reçu incohérent avec sa somme de contrôle')
+            if local != texte:
+                open(loc + '.tmp', 'wb').write(texte); os.replace(loc + '.tmp', loc)
+            out[nom] = {'sha': m['sha']}
+        except Exception as e:
+            print('script', nom, 'non relu :', e, file=sys.stderr)
+            texte = local
+            out[nom] = {'sha': git_sha(local) if local else None, 'erreur': str(e)[:160]}
+        if texte:
+            file += re.findall(r"""from\s+['"]\./([\w.-]+\.mjs)['"]""", texte.decode('utf-8', 'replace'))
+    return out
+res['scripts'] = miroir_scripts()
+OUT_F = D + OUT if not os.path.isabs(OUT) else OUT
+json.dump(res, open(OUT_F + '.tmp', 'w'), ensure_ascii=False)
+os.replace(OUT_F + '.tmp', OUT_F)
+# quotas (Actions, Vercel, Jules, Gemini) : mesure à part, un échec ne bloque pas le relevé. La boucle les lance elle-même (--sans-quota).
+if not LEGER and '--sans-quota' not in OPT:
+    try:
+        subprocess.run([sys.executable, D + 'quota.py'], timeout=900, check=True)
+    except Exception as e:
+        print('quota.py a échoué :', e, file=sys.stderr)
