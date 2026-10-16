@@ -12,7 +12,7 @@
 2. Claude crée le travail. Le Coordinateur tient les chantiers et les missions, et les fils créent et ferment les tâches. Marc décide de la direction : il force une tâche avec `prio:1`.
 3. L'ordre suit une règle fixe : d'abord la panne et le rouge, puis la sécurité, puis le standard et les fonctions en alternance. Les événements GitHub réveillent le Coordinateur (§6), un filet quotidien vérifie le reste, avec au plus un fil et une tâche Jules par dépôt.
 4. La CI décide. Chaque PR qui change un écran porte des captures avant/après, prises avec des données fictives. Mergify fusionne.
-5. Une tâche est **acceptée** quand trois conditions sont remplies : elle est fusionnée, le déploiement est en ligne, et le « Fini quand » est prouvé en production par un commentaire de preuve, **posé dans l'heure qui suit la mise en ligne** (§10). Si le test de fumée échoue, la version précédente revient seule et une PR d'annulation s'ouvre. Un rapport hebdomadaire mesure la vitesse, la qualité et les retours en arrière.
+5. Une tâche est **acceptée** quand trois conditions sont remplies : elle est fusionnée, le déploiement est en ligne, et le « Fini quand » est prouvé en production par un commentaire de preuve, **posé dans l'heure qui suit la mise en ligne** (§10). Si le test de fumée échoue, la version précédente revient seule et une PR d'annulation s'ouvre. Un rapport hebdomadaire mesure la vitesse, la qualité et les retours en arrière. **Sans cette preuve, une tâche n'est jamais finie** : un garde-fou rouvre toute tâche fermée sans preuve valide (§10 bis), et une preuve qui dépend d'un événement ou d'un geste de Marc laisse la tâche ouverte, étiquetée `preuve-attendue`, jamais comptée comme finie (§10).
 
 ---
 
@@ -71,6 +71,8 @@ Un « Fini quand » non vérifiable (« c'est mieux ») est refusé. Un « Fini 
 | `jules` | Confiée à Jules | La routine |
 | `qui:marc` | Attend un geste de Marc, décrit en commentaire | Celui qui découvre le geste |
 | `bloqué` | Attend autre chose qu'une tâche, dit en commentaire | Celui qui découvre le blocage |
+| `preuve-attendue` | PR fusionnée, mais la preuve n'est pas possible tout de suite (événement futur, geste de Marc). La tâche reste **ouverte et non finie** ; elle ne bloque pas le dépôt (§10) | Le fil, en remplaçant `en-cours` |
+| `preuve-manquante` | Tâche fermée sans preuve valide, rouverte par le garde-fou (§10 bis) | Le garde-fou de preuve |
 | `incident` | Panne en production, ou retour en arrière automatique | Le workflow de fumée |
 | `hold` (sur une PR) | Mergify ne fusionne pas | Marc ou Claude |
 
@@ -98,7 +100,7 @@ Un « Fini quand » non vérifiable (« c'est mieux ») est refusé. Un « Fini 
 
 Pour chaque dépôt, la tâche suivante est la première de cette liste :
 
-1. **Panne ou rouge** : issue `incident`, branche par défaut rouge, PR rouge d'un fil.
+1. **Panne, rouge ou preuve due** : issue `incident`, branche par défaut rouge, PR rouge d'un fil, tâche `preuve-manquante` (fermée sans preuve, rouverte : la preuve est due avant tout travail neuf).
 2. **`prio:1`** posée par Marc.
 3. **Sécurité** : avis npm ou Dependabot de gravité haute, fuite de secret, donnée perso en ligne.
 4. **Alternance** : si la dernière tâche lancée ou fermée dans le dépôt venait d'un chantier de standard, on prend une fonction, et inversement. Si un côté n'a rien de prenable, on prend l'autre.
@@ -106,7 +108,7 @@ Pour chaque dépôt, la tâche suivante est la première de cette liste :
 
 Une tâche n'est **prenable** que si elle remplit cinq conditions :
 - elle est ouverte et porte `niveau:tâche` ;
-- elle n'a ni `qui:marc`, ni `bloqué`, ni `en-cours`, ni `jules` ;
+- elle n'a ni `qui:marc`, ni `bloqué`, ni `en-cours`, ni `jules`, ni `preuve-attendue` (livrée, il ne reste que la preuve) ;
 - toutes les tâches qu'elle attend sont fermées ;
 - aucune PR ouverte ne la cite ;
 - son « Fini quand » est vérifiable, et prouvable dans l'heure ou couvert par une preuve programmée (§10).
@@ -120,7 +122,7 @@ Une tâche n'est **prenable** que si elle remplit cinq conditions :
 3. **Filet.** Une fois par jour à 6 h (heure du Québec, `CRON_TZ=America/Toronto`), le Réacteur (mode FILET) et la routine continue vérifient ce qu'aucun événement n'a signalé.
 4. **Règle.** Toute nouvelle surveillance passe d'abord par un événement. Une horloge n'est permise que comme filet quotidien.
 
-**Capacité** : au plus **un fil** en cours et **une tâche Jules** par dépôt. Un dépôt occupé est sauté.
+**Capacité** : au plus **un fil** en cours et **une tâche Jules** par dépôt. Un dépôt occupé est sauté. Une tâche `preuve-attendue` n'occupe pas le dépôt (le fil a livré, la preuve est programmée), mais elle n'est **pas finie** : elle reste ouverte et ne compte comme acceptée nulle part. Un dépôt n'est libéré par une fermeture que si le garde-fou de preuve (§10 bis) l'a validée.
 
 **Aiguillage** :
 
@@ -136,9 +138,10 @@ Une tâche n'est **prenable** que si elle remplit cinq conditions :
 | État de la PR | Action |
 |---|---|
 | ouverte | rien |
-| fusionnée, acceptation prouvée | fermer l'issue avec la preuve |
+| fusionnée, acceptation prouvée | fermer l'issue avec la preuve (le garde-fou vérifie la fermeture, §10 bis) |
 | fusionnée, preuve absente depuis plus de 2 h (hors preuve programmée dont l'heure n'est pas passée, §10) | commenter ce qui manque, et la tâche revient en file |
 | fermée sans fusion | retirer `en-cours` ou `jules`, commenter, et la tâche revient en file |
+| tâche fermée `completed` sans preuve valide (garde-fou en retard, PC éteint) | la rouvrir, poser `preuve-manquante` et dire ce qui manque (§10 bis) : elle n'est jamais laissée fermée |
 
 Une issue `jules` sans PR depuis 24 h perd l'étiquette et redevient prenable.
 
@@ -154,7 +157,8 @@ Une issue `jules` sans PR depuis 24 h perd l'étiquette et redevient prenable.
 | Attend Marc | `qui:marc` | orange, filtre « Toi » |
 | Bloquée | `bloqué` ou une tâche attendue ouverte | rouge clair |
 | Fusionnée, non prouvée | PR fusionnée, issue ouverte, moins de 2 h | vert clair |
-| Preuve programmée | PR fusionnée, issue ouverte, ligne `**Preuve attendue**` dont l'heure n'est pas passée | vert clair rayé |
+| Preuve programmée | PR fusionnée, issue ouverte, `preuve-attendue`, ligne `**Preuve attendue**` dont l'heure n'est pas passée. **Pas finie** | orange rayé (jamais vert) |
+| Preuve manquante | tâche fermée sans preuve valide, rouverte par le garde-fou (`preuve-manquante`) | rouge |
 | Preuve en retard | PR fusionnée, issue ouverte depuis plus de 2 h (ou plus d'une heure après l'heure de la preuve programmée) | rouge clair |
 | **Acceptée** | issue fermée `completed` avec un commentaire de preuve | vert, fin à l'heure de fermeture |
 | Abandonnée | issue fermée `not_planned` avec la raison | gris barré |
@@ -171,8 +175,7 @@ La procédure pas à pas est la compétence `livrer-une-tache`. Elle applique ce
   - **Avant :** / **Après :** / **Comment :** ;
   - **Fini quand :** ;
   - les captures, si un écran change.
-- **Pas de `Closes #n`** : la fusion ne ferme plus l'issue. C'est la preuve d'acceptation qui la ferme (§10).
-  *Transition* : tant que le Gantt ne relie pas encore une PR par `Tâche : #n`, la PR garde `Closes #n`. Le commentaire de preuve est alors posté juste après la fusion, et l'issue est rouverte si la preuve échoue. La bascule est annoncée dans le fil « Standardisation des projets ».
+- **Jamais `Closes`, `Fixes` ni `Resolves`** (Jules et Mergify compris) : la fusion ne ferme pas l'issue, la preuve d'acceptation la ferme (§10). Si une PR en porte quand même un, GitHub ferme l'issue à la fusion et le garde-fou de preuve (§10 bis) la rouvre aussitôt avec `preuve-manquante`. La transition est finie : le Gantt relie les PR par `Tâche : #n`.
 - Taille : environ 400 lignes modifiées au plus, hors tests et fichiers générés. Au-delà, on découpe.
 - Commit et titre préfixés selon le dépôt : `feat:`, `fix:`, `docs:`… ou `[ID]`.
 - Doc touchée mise à jour dans la même PR.
@@ -200,22 +203,55 @@ La procédure pas à pas est la compétence `livrer-une-tache`. Elle applique ce
 2. Le fil vérifie qu'un déploiement de production existe et est `READY` **sur le commit fusionné**. S'il n'y en a pas, il fait un nouveau push, jamais « Redeploy ».
 3. Le test de fumée commun tourne (§11).
 4. Le fil prouve le « Fini quand » **en production** : réponse HTTP, page, contrôle ou donnée.
-5. Le fil écrit le **commentaire de preuve** sur l'issue, puis la ferme `completed` :
+5. Le fil écrit le **commentaire de preuve** sur l'issue, puis la ferme `completed`. Le format est contrôlé par une machine (§10 bis) : le commentaire commence par `**Acceptée**` en gras, tel quel (« **Acceptée.** » ou « Acceptée » sans gras ne sont pas reconnus) :
    ```
    **Acceptée** — PR #p fusionnée (<sha court>), déploiement READY (<id>), preuve : <ce qui a été vérifié et le résultat>.
    ```
-6. Cas d'une PR qui ne change rien de servi (doc, CI) : la preuve est le contrôle ou le fichier lui-même, et le commentaire le dit.
+6. Cas d'une PR qui ne change rien de servi (docs, tests, CI) : pas de déploiement à vérifier, et le commentaire écrit `sans déploiement : <raison>`. La preuve n'est pas « le fichier existe » : c'est la commande ou le contrôle du « Fini quand » exécuté sur le commit fusionné, avec son résultat (sortie copiée, lien de l'exécution CI).
+7. Tâche sans code (réglage, geste de Marc, révocation) : `sans PR` à la place de `PR #p`, avec une preuve d'au moins 60 caractères qui dit ce qui a été LU (code de réponse, valeur, capture). Quand Marc fait le geste, son « fait » n'est pas la preuve : Claude vérifie l'effet, puis prouve.
 
-**Le fil reste jusqu'à l'acceptation.** Il ne se ferme pas entre la fusion et la preuve. S'il approche de la limite de contexte (§16), il passe la main avec l'état dans un fichier, et la preuve reste due dans le même délai.
+**Le fil reste jusqu'à l'acceptation.** Il ne se ferme pas entre la fusion et la preuve : il n'est marqué résolu que quand l'issue est fermée avec un commentaire accepté par le garde-fou, ou en `preuve-attendue` avec sa routine programmée. S'il approche de la limite de contexte (§16), il passe la main avec l'état dans un fichier, et la preuve reste due dans le même délai.
 
 **Quand la preuve dépend d'un événement** (un cron, une échéance, un premier passage de données), on ne laisse pas la tâche en attente sans date :
 
 1. **D'abord, déclencher l'événement soi-même** : lancement manuel du workflow ou du cron (`workflow_dispatch`, route protégée d'un cron, appel de la fonction). Si c'est possible, la preuve se fait dans l'heure, comme toute tâche.
-2. **Sinon, programmer le contrôle au plus tôt.** Le fil écrit la ligne `**Preuve attendue** : AAAA-MM-JJ HH:MM (heure du Québec) — événement` dans l'issue, avec l'heure de l'événement prévue plus 15 minutes. Il crée une routine à usage unique à cette heure, qui part en session neuve et fait la preuve. Il commente la PR et l'issue pour dire la date.
+2. **Sinon, programmer le contrôle au plus tôt.** Le fil écrit la ligne `**Preuve attendue** : AAAA-MM-JJ HH:MM (heure du Québec) — événement` dans l'issue, avec l'heure de l'événement prévue plus 15 minutes. Il crée une routine à usage unique à cette heure, qui part en session neuve et fait la preuve. Il commente la PR et l'issue pour dire la date. **La tâche reste ouverte** : le fil remplace `en-cours` par `preuve-attendue` (le dépôt est libre, le fil suivant peut partir), mais elle n'est comptée comme finie nulle part (Gantt orange, rapport hebdomadaire, règle « une chose à la fois »). Une preuve qui attend un geste de Marc suit le même chemin, avec `qui:marc` en plus et la ligne « Geste : ».
 3. **À l'heure dite**, la preuve est posée dans l'heure qui suit l'événement, avec le même commentaire « **Acceptée** ». Si l'événement n'a pas eu lieu ou la preuve échoue, l'issue est rouverte comme un échec de fumée : incident, pas silence.
 4. Un « Fini quand » qui exige plus d'une journée d'attente n'est pas une tâche. On sépare : la tâche s'accepte sur ce qui se prouve tout de suite, et le suivi long devient une tâche à part avec son propre « Fini quand ».
 
+**Ce qui n'est PAS une preuve** (le garde-fou rouvre la tâche) :
+- un déploiement réussi dont le résultat attendu n'a pas été lu (FinanceAI#1156, 16/10 : « je n'ai pas lu le `GET /hub/summary` déployé », [Probable], issue fermée). Quand le fil ne peut pas lire (jeton absent), la tâche reste en `preuve-attendue` avec `qui:marc` si un geste est nécessaire ;
+- un commentaire qui avoue un doute : `[Probable]`, `[Supposition]`, `[À vérifier]`, « pas lu », « non testé », « je n'ai pas pu vérifier » ;
+- une CI verte ou un test seuls, quand le « Fini quand » est en production ;
+- une preuve écrite par un robot ou par Jules, ou datée d'avant la fusion de la PR ;
+- une fusion : Mergify, `Fixes #n` ou un fil pressé ne ferment jamais la tâche.
+
 Le Gantt marque une tâche **acceptée** seulement si l'issue est fermée avec ce commentaire. Sans commentaire, la pastille la signale.
+
+## 10 bis. Garde-fou de preuve : une tâche ne se ferme pas sans preuve
+
+Décision de Marc, 16/10/2026 : « je veux toujours qu'une tâche soit prouvée ». Jusque-là la règle n'était qu'écrite : rien n'empêchait de fermer l'issue sans preuve, et la fermeture libère le dépôt (§6). Constat au relevé du Gantt du 16/10 à 10 h 45 (heure du Québec) : sur 124 tâches fermées `completed`, 17 n'avaient aucun commentaire de preuve reconnu, dont des fermetures à la fusion (`Fixes #n`), des commentaires « Acceptée. » dans un format que personne ne lit, et des tâches sans PR fermées sur parole.
+
+**Mécanisme.** Le workflow commun `.github/workflows/preuve.yml` (script `scripts/preuve.mjs`, testé) est appelé par le `reacteur.yml` de chacun des dix dépôts quand une issue `niveau:tâche` est fermée, par n'importe qui ou n'importe quoi (fil, Jules, Mergify, ménage, Marc). Il lit l'issue, ses commentaires, la PR citée et les déploiements, par l'API GitHub, et décide.
+
+**Une fermeture `completed` est valide seulement si TOUT est vrai :**
+1. un commentaire commence par `**Acceptée**`, écrit par une personne ou par Claude (pas un robot, pas Jules) ; le dernier de ces commentaires fait foi ;
+2. il n'avoue aucun doute (§10, « Ce qui n'est PAS une preuve ») ;
+3. sa ligne `preuve : …` fait 40 caractères au moins (60 pour une tâche `sans PR`) ;
+4. il cite `PR #p` (ou `PR MoKarade/<dépôt>#p`), cette PR est fusionnée, l'empreinte citée est celle du commit fusionné, et le commentaire est postérieur à la fusion ; ou il dit `sans PR` ;
+5. si la PR change autre chose que docs, tests, CI et qualité (et que le dépôt se déploie) : un déploiement de production réussi existe, après la fusion, sur le commit fusionné ou sur un commit qui le contient. Vercel : l'état de déploiement GitHub. Hors Vercel (moteur DriveAI, serveur MCP de FinanceAI) : une exécution réussie du workflow de déploiement dont un JOB de déploiement a réussi (un job ignoré ne compte pas : le serveur MCP est resté 27 jours sans déploiement sous une coche verte).
+
+Une fermeture `not_planned` ou doublon est valide avec un commentaire `**Abandonnée** — <raison>` (20 caractères au moins), pour que l'abandon ne soit jamais silencieux.
+
+**Sinon** : l'issue est rouverte tout de suite, l'étiquette `preuve-manquante` est posée et un commentaire dit chaque défaut et le format attendu. La tâche passe en tête de l'ordre (§5, point 1). Quand la fermeture est valide, `preuve-manquante` et `preuve-attendue` sont retirées.
+
+**Le Réacteur ne part que sur une fermeture validée** (`acceptee` ou `abandon`) : un dépôt n'est jamais libéré par une tâche fermée sans preuve. Si le garde-fou lui-même échoue (API indisponible), le Réacteur ne part pas non plus et le filet de 6 h reprend la main.
+
+**Réglage par dépôt**, dans le `reacteur.yml` de chacun : `deploiement: vercel`, sauf `.github`, `app-template` et `hub-contract` (`aucun`, ils ne se déploient pas) ; `workflows-deploiement: deploy.yml` chez DriveAI et `deploy-mcp.yml` chez FinanceAI. Dépôt privé : le job tourne sur le robot du PC, comme tout le reste ; PC éteint, la vérification attend son retour.
+
+**Ce que le garde-fou ne fait pas.** Il ne lit pas la production (c'est le fil, §10) et ne juge pas le texte : il vérifie la forme et ce que GitHub sait (PR, empreinte, déploiement). Un faux commentaire bien formé passe. Deux filets restent : la pastille du Gantt (§13) et le ménage de la routine (§6), qui rouvrent ce que le garde-fou a manqué. Limite connue : chez DriveAI, `deploy.yml` réussit sans rien déployer quand ses secrets manquent.
+
+**Sécurité.** Le script vient de `main` de ce dépôt, jamais du code de l'appelant ; le jeton du job (`github.token`) suffit, aucun secret ; le texte des commentaires est traité comme donnée, jamais exécuté.
 
 ## 11. Retour en arrière (automatique)
 
@@ -278,7 +314,8 @@ Le Gantt montre l'état réel du travail. Il ne contient **rien de tapé à la m
   - une dépendance inconnue ou un cycle.
 - **Liens et preuves** :
   - une PR de tâche sans `Tâche : #n` ;
-  - une tâche fermée `completed` sans commentaire de preuve ;
+  - une tâche fermée `completed` sans commentaire de preuve, ou rouverte par le garde-fou (`preuve-manquante`) ;
+  - une tâche `preuve-attendue` dont l'heure est passée ;
   - une tâche fusionnée mais non prouvée depuis plus de 2 h (hors preuve programmée dont l'heure n'est pas passée) ;
   - une preuve programmée dont l'heure est passée depuis plus d'une heure.
 - **Délais** :
@@ -309,6 +346,7 @@ Une question à Marc prend toujours la forme d'une **carte**, jamais d'une quest
 | Mécanisme | Applique |
 |---|---|
 | Compétence `livrer-une-tache` | §8 à §10, pour chaque fil |
+| Garde-fou de preuve (`preuve.yml` commun, appelé par `reacteur.yml` des dix dépôts) | §10 bis : aucune tâche fermée sans preuve valide |
 | Routine continue | §5, §6 |
 | Gantt et sa pastille | §7, §13 |
 | Workflows communs de ce dépôt (`captures`, `fumee`, `rapport-hebdo`) | §8, §11, §12 |
