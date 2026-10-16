@@ -79,14 +79,25 @@ export function indexer(backlog) {
   return { noeuds, parents, fusionnees };
 }
 
-/** Remonte de la tâche à sa mission puis à son chantier (null si le parent manque). */
+/**
+ * Remonte de la tâche à sa mission (le premier parent de niveau mission) puis au premier ancêtre de niveau chantier
+ * (quatre sauts au plus). Une mission imbriquée sous une mission sans chantier (ex. une mission commune à plusieurs
+ * dépôts) n'a pas de chantier : `chantier` reste null, jamais une mission prise pour un chantier.
+ */
 function ascendants(reference, idx) {
-  const mission = idx.parents.get(reference) ?? null;
-  const chantier = mission ? (idx.parents.get(mission) ?? null) : null;
-  // Une tâche rattachée directement à un chantier : son parent est le chantier.
-  if (mission && idx.noeuds.get(mission)?.noeud.lvl === 'chantier') return { mission: null, chantier: mission };
-  return { mission, chantier };
+  let mission = null;
+  let courant = idx.parents.get(reference) ?? null;
+  for (let saut = 0; saut < 4 && courant; saut += 1) {
+    const niveau = idx.noeuds.get(courant)?.noeud.lvl;
+    if (niveau === 'chantier') return { mission, chantier: courant };
+    if (!mission) mission = courant;
+    courant = idx.parents.get(courant) ?? null;
+  }
+  return { mission, chantier: null };
 }
+
+/** Le type (`standard` / `fonction`) du chantier de cette référence, ou null (aucun chantier, ou chantier sans type). */
+const typeDuChantier = (haut, idx) => (haut.chantier ? typeChantier(idx.noeuds.get(haut.chantier)?.noeud.labels ?? []) : null);
 
 /** La dernière tâche lancée (début) ou fermée du dépôt, ou null. */
 function derniere(depot) {
@@ -141,13 +152,15 @@ export function calculer(backlog, { filsActifs = [] } = {}) {
     const derniereTache = derniere(depot);
     const refDerniere = derniereTache ? ref(depot.repo, derniereTache.n) : null;
     const hautDerniere = refDerniere ? ascendants(refDerniere, idx) : { mission: null, chantier: null };
-    const typeDerniere = hautDerniere.chantier ? typeChantier(idx.noeuds.get(hautDerniere.chantier)?.noeud.labels ?? []) : null;
-    let alternanceFlou = false;
+    const typeDerniere = typeDuChantier(hautDerniere, idx);
+    // Chantiers réels sans étiquette de type (seuls ceux-là se corrigent par une étiquette) : une tâche sans chantier n'alterne pas.
+    const chantiersSansType = new Set();
+    let alternanceEnJeu = false;
 
     const file = prenables.map((n) => {
       const r = ref(depot.repo, n.n);
       const haut = ascendants(r, idx);
-      const type = haut.chantier ? typeChantier(idx.noeuds.get(haut.chantier)?.noeud.labels ?? []) : null;
+      const type = typeDuChantier(haut, idx);
       let tier = 7;
       if (n.labels.includes('preuve-manquante') || n.pr?.merged) tier = 1;
       else if (n.labels.includes('prio:1')) tier = 2;
@@ -155,12 +168,16 @@ export function calculer(backlog, { filsActifs = [] } = {}) {
       else if (haut.mission && haut.mission === hautDerniere.mission) tier = 4;
       else if (haut.chantier && haut.chantier === hautDerniere.chantier) tier = 5;
       else if (typeDerniere && type && type !== typeDerniere) tier = 6;
-      if (tier >= 6 && refDerniere && (!type || !typeDerniere)) alternanceFlou = true;
+      if (tier >= 6 && refDerniere) {
+        alternanceEnJeu = true;
+        if (haut.chantier && !type) chantiersSansType.add(haut.chantier);
+      }
       return { ref: r, n: n.n, titre: n.title, url: n.url, prio: prioDe(n.labels), tier, raison: TIERS[tier], mission: haut.mission, chantier: haut.chantier };
     });
     file.sort((a, b) => a.tier - b.tier || a.prio - b.prio || a.n - b.n);
     file.forEach((f, i) => { f.rang = i + 1; });
-    if (alternanceFlou) alertes.push(`${depot.name} : alternance standard/fonction non calculable (chantier sans étiquette chantier:standard ou chantier:fonction)`);
+    if (alternanceEnJeu && hautDerniere.chantier && !typeDerniere) chantiersSansType.add(hautDerniere.chantier);
+    if (chantiersSansType.size) alertes.push(`${depot.name} : alternance standard/fonction non calculable (chantier sans étiquette chantier:standard ou chantier:fonction : ${[...chantiersSansType].join(', ')})`);
 
     const incidents = depot.incidents ?? [];
     const statut = incidents.length ? 'incident' : occupePar.length ? 'occupe' : file.length ? 'libre' : 'rien';
