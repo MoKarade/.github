@@ -11,7 +11,7 @@
 //      sans cela une PR pourrait desserrer ses propres règles puis se fusionner seule.
 // Exception (choix de Marc, 16/10/2026) : si TOUTES les violations sont de celles que la relecture IA
 // peut lever (références à un secret, nombre de cas de test : scripts/relecture-regles.mjs) ET qu'une
-// relecture IA a approuvé CE commit (statut « Relecture IA »), le contrôle est vert.
+// relecture IA a approuvé CE commit (commentaire de verdict « Relecture IA »), le contrôle est vert.
 // Rouge = la PR attend, une issue `qui:marc` s'ouvre (d'abord) et un commentaire dit pourquoi (non bloquant).
 //
 // Sûreté : lancé par `pull_request_target`, donc depuis le workflow de la branche par défaut, que
@@ -23,7 +23,6 @@
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import {
-  CONTEXTE as CONTEXTE_RELECTURE,
   PROPRIETAIRE,
   WORKFLOW_RELECTURE,
   toutesSurmontables,
@@ -278,21 +277,34 @@ export async function evaluer({ fichiers, proteges, contenu }) {
   return { protege: true, concernes, violations };
 }
 
+/** Première ligne du commentaire de verdict de la relecture IA (posé par scripts/relecture-ia.mjs). */
+export const MARQUE_VERDICT = /^<!-- relecture-ia sha=([0-9a-f]{7,64}) decision=(approuve|refuse) run=(\d+) -->/;
+
 /**
- * Vrai si une relecture IA a approuvé CE commit. Le statut doit venir du propriétaire ET pointer vers
- * une exécution du workflow de relecture de MoKarade/.github sur sa branche main : un statut posé à
- * la main ne suffit pas. `api(méthode, chemin)` rend null sur 404.
+ * Vrai si une relecture IA a approuvé CE commit. Le verdict est un commentaire de la PR, posé par le
+ * propriétaire, qui nomme le commit exact et une exécution du workflow de relecture de MoKarade/.github
+ * sur sa branche main : un commentaire ordinaire ne suffit pas. (Un commentaire, pas un statut de
+ * commit : le jeton de ce workflow lit les commentaires dans les dix dépôts, privés compris, alors que
+ * les statuts demanderaient un droit de plus dans dix fichiers protégés.)
+ * `api(méthode, chemin)` rend null sur 404.
  */
-export async function relectureApprouvee({ api, depot, sha }) {
-  const statuts = (await api('GET', `/repos/${depot}/commits/${sha}/statuses?per_page=100`)) ?? [];
-  const dernier = statuts.find((s) => s.context === CONTEXTE_RELECTURE);
-  const etat = dernier?.state ?? 'absent';
-  if (!dernier || dernier.state !== 'success' || dernier.creator?.login !== PROPRIETAIRE) {
-    return { ok: false, etat };
+export async function relectureApprouvee({ api, depot, numero, sha }) {
+  const commentaires = [];
+  for (let page = 1; page <= 10; page += 1) {
+    const lot = (await api('GET', `/repos/${depot}/issues/${numero}/comments?per_page=100&page=${page}`)) ?? [];
+    commentaires.push(...lot);
+    if (lot.length < 100) break;
   }
-  const id = /^https:\/\/github\.com\/MoKarade\/\.github\/actions\/runs\/(\d+)$/.exec(dernier.target_url ?? '')?.[1];
-  if (!id) return { ok: false, etat };
-  const run = await api('GET', `/repos/MoKarade/.github/actions/runs/${id}`);
+  // Le plus récent verdict posé par le propriétaire sur CE commit.
+  const verdicts = commentaires
+    .filter((c) => c.user?.login === PROPRIETAIRE)
+    .map((c) => ({ c, m: MARQUE_VERDICT.exec(c.body ?? '') }))
+    .filter(({ m }) => m && m[1] === sha);
+  const dernier = verdicts[verdicts.length - 1];
+  if (!dernier) return { ok: false, etat: 'absent' };
+  const etat = dernier.m[2];
+  if (etat !== 'approuve') return { ok: false, etat };
+  const run = await api('GET', `/repos/MoKarade/.github/actions/runs/${dernier.m[3]}`);
   const valide =
     run &&
     run.path === WORKFLOW_RELECTURE &&
@@ -301,7 +313,9 @@ export async function relectureApprouvee({ api, depot, sha }) {
     run.repository?.full_name === 'MoKarade/.github' &&
     run.conclusion !== 'failure' &&
     run.conclusion !== 'cancelled';
-  return valide ? { ok: true, etat, raison: (dernier.description ?? '').slice(0, 140) } : { ok: false, etat };
+  if (!valide) return { ok: false, etat };
+  const lignes = (dernier.c.body ?? '').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('<!--'));
+  return { ok: true, etat, raison: (lignes[1] ?? '').slice(0, 140) };
 }
 
 const TITRES = {
@@ -411,7 +425,7 @@ async function main() {
   // attend la relecture (quelques minutes), pas Marc. L'issue `qui:marc` ne s'ouvre qu'après un refus.
   let attenteRelecture = false;
   if (resultat.protege && toutesSurmontables(resultat.violations)) {
-    const relue = await relectureApprouvee({ api, depot: GITHUB_REPOSITORY, sha: pr.head.sha });
+    const relue = await relectureApprouvee({ api, depot: GITHUB_REPOSITORY, numero: PR_NUMBER, sha: pr.head.sha });
     if (relue.ok) resultat = { ...resultat, violations: [], relecture: relue.raison || 'approuvé' };
     else attenteRelecture = relue.etat === 'absent';
   }
@@ -465,9 +479,14 @@ async function main() {
     }
   } else {
     if (ancien) {
-      await api('PATCH', `/repos/${GITHUB_REPOSITORY}/issues/comments/${ancien.id}`, {
-        body: `${MARQUEUR}\nGarde-fou : vert, le blocage est levé.`,
-      });
+      // Confort, comme plus haut : un refus du commentaire ne change pas le verdict vert.
+      try {
+        await api('PATCH', `/repos/${GITHUB_REPOSITORY}/issues/comments/${ancien.id}`, {
+          body: `${MARQUEUR}\nGarde-fou : vert, le blocage est levé.`,
+        });
+      } catch (erreur) {
+        console.warn(`Garde-fou : commentaire de la PR non mis à jour. ${erreur.message}`);
+      }
     }
     if (issueOuverte) await fermerIssue('Levé : le garde-fou est vert, plus rien à faire.');
   }

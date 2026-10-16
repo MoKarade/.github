@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { evaluer, rapport, relectureApprouvee } from './garde-fou.mjs';
-import { gardeFouRouge, lireProteges } from './relecture-ia.mjs';
+import { dejaJugee, gardeFouRouge, lireProteges } from './relecture-ia.mjs';
 import {
   composerConsigne,
   composerDossier,
@@ -176,8 +176,9 @@ test('garde-fou rouge : la dernière exécution décide', () => {
   assert.equal(gardeFouRouge(undefined), false);
 });
 
-// ── Le garde-fou lit le statut ────────────────────────────────────────────────────
+// ── Le garde-fou lit le commentaire de verdict ─────────────────────────────────────
 
+const SHA = 'a'.repeat(40);
 const RUN_OK = {
   path: '.github/workflows/relecture-ia.yml',
   head_branch: 'main',
@@ -185,31 +186,32 @@ const RUN_OK = {
   conclusion: null,
   repository: { full_name: 'MoKarade/.github' },
 };
-const statut = (extra = {}) => ({
-  context: 'Relecture IA',
-  state: 'success',
-  creator: { login: 'MoKarade' },
-  target_url: 'https://github.com/MoKarade/.github/actions/runs/123',
-  description: 'Approuvé : ok',
+const verdict = (extra = {}) => ({
+  user: { login: 'MoKarade' },
+  body: `<!-- relecture-ia sha=${SHA} decision=approuve run=123 -->\n**Relecture IA : approuvée** (commit \`aaaaaaa\`)\n\nSecret donné à un workflow commun, rien ne fuit.\n\n[Exécution](x)`,
   ...extra,
 });
-const fauxApi = (statuts, run) => async (_m, chemin) => (chemin.includes('/statuses') ? statuts : chemin.includes('/actions/runs/') ? run : null);
-const lire = (statuts, run = RUN_OK) => relectureApprouvee({ api: fauxApi(statuts, run), depot: 'MoKarade/Hubperso', sha: 'abc' });
+const fauxApi = (commentaires, run) => async (_m, chemin) =>
+  chemin.includes('/comments') ? (chemin.includes('page=1') ? commentaires : []) : chemin.includes('/actions/runs/') ? run : null;
+const lire = (commentaires, run = RUN_OK, sha = SHA) =>
+  relectureApprouvee({ api: fauxApi(commentaires, run), depot: 'MoKarade/Hubperso', numero: 7, sha });
 
-test('relecture lue : statut du propriétaire pointant une exécution valide = approuvée', async () => {
-  const r = await lire([statut()]);
+test('relecture lue : verdict du propriétaire sur ce commit, exécution valide = approuvée', async () => {
+  const r = await lire([verdict()]);
   assert.equal(r.ok, true);
-  assert.equal((await lire([statut()], { ...RUN_OK, conclusion: 'success' })).ok, true);
+  assert.match(r.raison, /Secret donné/);
+  assert.equal((await lire([verdict()], { ...RUN_OK, conclusion: 'success' })).ok, true);
 });
 
-test('relecture refusée : pas de statut, mauvais auteur, mauvais état, mauvaise exécution', async () => {
+test('relecture refusée : pas de verdict, mauvais auteur, mauvais commit, refus, mauvaise exécution', async () => {
   assert.deepEqual(await lire([]), { ok: false, etat: 'absent' });
-  assert.equal((await lire([statut({ creator: { login: 'quelquun' } })])).ok, false);
-  assert.equal((await lire([statut({ state: 'failure' })])).etat, 'failure');
-  assert.equal((await lire([statut({ state: 'failure' })])).ok, false);
-  assert.equal((await lire([statut({ target_url: 'https://exemple.com/x' })])).ok, false);
-  assert.equal((await lire([statut({ target_url: 'https://github.com/MoKarade/Hubperso/actions/runs/123' })])).ok, false);
-  assert.equal((await lire([statut()], null)).ok, false);
+  assert.equal((await lire([verdict({ user: { login: 'quelquun' } })])).ok, false);
+  assert.equal((await lire([verdict({ user: { login: 'github-actions[bot]' } })])).ok, false);
+  assert.equal((await lire([verdict()], RUN_OK, 'b'.repeat(40))).etat, 'absent'); // verdict d'un autre commit
+  const refus = verdict({ body: verdict().body.replace('decision=approuve', 'decision=refuse') });
+  assert.deepEqual(await lire([refus]), { ok: false, etat: 'refuse' });
+  assert.equal((await lire([verdict({ body: `bonjour\n${verdict().body}` })])).ok, false); // marque pas en première ligne
+  assert.equal((await lire([verdict()], null)).ok, false);
   for (const faux of [
     { ...RUN_OK, path: '.github/workflows/autre.yml' },
     { ...RUN_OK, head_branch: 'claude/x' },
@@ -217,12 +219,22 @@ test('relecture refusée : pas de statut, mauvais auteur, mauvais état, mauvais
     { ...RUN_OK, conclusion: 'failure' },
     { ...RUN_OK, repository: { full_name: 'MoKarade/Hubperso' } },
   ]) {
-    assert.equal((await lire([statut()], faux)).ok, false);
+    assert.equal((await lire([verdict()], faux)).ok, false);
   }
 });
 
-test('relecture lue : le statut le plus récent compte', async () => {
-  assert.equal((await lire([statut({ state: 'failure' }), statut()])).ok, false);
+test('relecture lue : le verdict le plus récent compte', async () => {
+  const refus = verdict({ body: verdict().body.replace('decision=approuve', 'decision=refuse') });
+  assert.equal((await lire([verdict(), refus])).ok, false);
+  assert.equal((await lire([refus, verdict()])).ok, true);
+});
+
+test('déjà jugée : seulement un verdict du propriétaire sur ce commit', () => {
+  assert.equal(dejaJugee([verdict()], SHA), true);
+  assert.equal(dejaJugee([verdict()], 'b'.repeat(40)), false);
+  assert.equal(dejaJugee([verdict({ user: { login: 'autre' } })], SHA), false);
+  assert.equal(dejaJugee([], SHA), false);
+  assert.equal(dejaJugee(undefined, SHA), false);
 });
 
 test('rapport : vert grâce à la relecture, rouge sinon', () => {

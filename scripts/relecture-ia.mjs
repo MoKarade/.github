@@ -5,16 +5,15 @@
 // même étape : l'IA n'a aucun outil et aucun jeton GitHub, elle lit un texte et répond une ligne) :
 //   preparer : parcourt les PR ouvertes des dix dépôts, écrit un dossier JSON par PR à relire ;
 //   consigne <dossier.json> : écrit sur la sortie la consigne à remettre à l'IA ;
-//   publier  : lit les réponses, pose le statut « Relecture IA » sur le commit, commente la PR et,
-//              si l'IA approuve, rejoue le Garde-fou (qui lit le statut, voir garde-fou.mjs).
+//   publier  : lit les réponses, commente la PR (le verdict, première ligne lue par le Garde-fou) et,
+//              si l'IA approuve, rejoue le Garde-fou (qui lit ce commentaire, voir garde-fou.mjs).
 // Ce que l'IA peut lever est écrit dans relecture-regles.mjs, et seulement là.
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { evaluer } from './garde-fou.mjs';
+import { MARQUE_VERDICT, evaluer } from './garde-fou.mjs';
 import {
-  CONTEXTE,
   composerConsigne,
   composerDossier,
   fichiersAlire,
@@ -36,7 +35,6 @@ export const DEPOTS = [
 ];
 const PROPRIETAIRE = 'MoKarade';
 const MAX_PAR_PASSE = 5; // une passe ne relit jamais plus de PR que cela : les autres attendent dix minutes
-export const MARQUEUR = '<!-- relecture-ia -->';
 
 /** Lit les chemins protégés du dépôt dans son propre garde-fou.yml (une seule source de vérité). */
 export function lireProteges(yaml) {
@@ -51,6 +49,13 @@ export function lireProteges(yaml) {
 export function gardeFouRouge(executions) {
   const derniere = [...(executions ?? [])].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
   return derniere?.status === 'completed' && derniere.conclusion === 'failure';
+}
+
+/** Un verdict du propriétaire existe-t-il déjà pour ce commit (approuvé ou refusé) ? */
+export function dejaJugee(commentaires, sha) {
+  return (commentaires ?? []).some(
+    (c) => c.user?.login === PROPRIETAIRE && MARQUE_VERDICT.exec(c.body ?? '')?.[1] === sha,
+  );
 }
 
 // ── Entrées/sorties ──────────────────────────────────────────────────────────────
@@ -119,8 +124,8 @@ async function preparer() {
         const sha = pr.head.sha;
         const lot = await api('GET', `/repos/${depot}/actions/workflows/garde-fou.yml/runs?head_sha=${sha}&per_page=10`);
         if (!gardeFouRouge(lot?.workflow_runs)) continue;
-        const statuts = (await api('GET', `/repos/${depot}/commits/${sha}/statuses?per_page=100`)) ?? [];
-        if (statuts.some((s) => s.context === CONTEXTE)) continue; // déjà jugée sur ce commit
+        const commentaires = await pages(api, `/repos/${depot}/issues/${pr.number}/comments`);
+        if (dejaJugee(commentaires, sha)) continue; // un verdict existe déjà sur ce commit
         if (ecrits >= MAX_PAR_PASSE) continue;
 
         const fichiers = await pages(api, `/repos/${depot}/pulls/${pr.number}/files`);
@@ -186,21 +191,15 @@ async function publier() {
     }
     const verdict = lireVerdict(texte);
     if (!verdict) {
-      // Pas de réponse (jeton expiré, panne) : aucun statut, la prochaine passe réessaie, et ce
+      // Pas de réponse (jeton expiré, panne) : aucun verdict, la prochaine passe réessaie, et ce
       // job devient rouge pour que Marc le voie.
       console.error(`${dossier.depot}#${dossier.numero} : aucune réponse de la relecture`);
       sansReponse += 1;
       continue;
     }
     const approuve = verdict.decision === 'approuve';
-    await api('POST', `/repos/${dossier.depot}/statuses/${dossier.sha}`, {
-      state: approuve ? 'success' : 'failure',
-      context: CONTEXTE,
-      description: (approuve ? 'Approuvé : ' : 'Refusé : ').concat(verdict.raison).slice(0, 140),
-      target_url: urlExecution,
-    });
     await api('POST', `/repos/${dossier.depot}/issues/${dossier.numero}/comments`, {
-      body: `${MARQUEUR}\n**Relecture IA : ${approuve ? 'approuvée' : 'refusée'}** (commit \`${dossier.sha.slice(0, 7)}\`)\n\n${verdict.raison}\n\n${
+      body: `<!-- relecture-ia sha=${dossier.sha} decision=${verdict.decision} run=${GITHUB_RUN_ID} -->\n**Relecture IA : ${approuve ? 'approuvée' : 'refusée'}** (commit \`${dossier.sha.slice(0, 7)}\`)\n\n${verdict.raison}\n\n${
         approuve
           ? 'Le Garde-fou est rejoué ; Mergify fusionne ensuite si le reste est vert.'
           : 'La PR attend Marc.'
@@ -209,7 +208,7 @@ async function publier() {
     console.log(`${dossier.depot}#${dossier.numero} : ${verdict.decision}`);
 
     if (approuve) {
-      // Rejouer le Garde-fou du commit : il lira le statut et passera au vert.
+      // Rejouer le Garde-fou du commit : il lira le commentaire et passera au vert.
       const lot = await api('GET', `/repos/${dossier.depot}/actions/workflows/garde-fou.yml/runs?head_sha=${dossier.sha}&per_page=5`);
       const run = lot?.workflow_runs?.[0];
       if (!run) throw new Error(`${dossier.depot}#${dossier.numero} : aucune exécution du Garde-fou à rejouer`);
