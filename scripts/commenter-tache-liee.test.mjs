@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEPOTS, TEXTE_LEVE, commenterDepot, corpsDuCommentaire } from './commenter-tache-liee.mjs';
+import { DEPOTS, LimiteDebit, TEXTE_LEVE, avecCache, commenterDepot, corpsDuCommentaire } from './commenter-tache-liee.mjs';
 import { MARQUEUR_TACHE } from './tache-liee.mjs';
 
 // Fausse API GitHub en mémoire : PR ouvertes, issues, commentaires ; toutes les écritures sont gardées.
@@ -81,4 +81,24 @@ test('une erreur sur une PR est notée et n’arrête pas les autres', async () 
   assert.deepEqual(r.actions, ['MemoryAI#2 : posé']);
   assert.match(r.erreurs[0], /MemoryAI#1.*502/);
   assert.equal(ecritures.length, 1);
+});
+
+test('le plafond d\u2019appels arrête le passage au lieu d\u2019être noté comme une erreur de PR', async () => {
+  const { api } = faux({ pulls: [pr(1, 'sans lien'), pr(2, 'sans lien')] });
+  const limitee = async (methode, chemin, corps) => {
+    if (/\/comments$/.test(chemin)) throw new LimiteDebit('plafond');
+    return api(methode, chemin, corps);
+  };
+  await assert.rejects(commenterDepot({ api: limitee, depot: 'Hubperso' }), LimiteDebit);
+});
+
+test('avecCache : une même issue citée par plusieurs PR n\u2019est lue qu\u2019une fois, les écritures passent', async () => {
+  const appels = [];
+  const brut = async (methode, chemin) => { appels.push(`${methode} ${chemin}`); return { id: 1 }; };
+  const api = avecCache(brut);
+  await api('GET', '/repos/MoKarade/a/issues/5');
+  await api('GET', '/repos/MoKarade/a/issues/5');
+  await api('GET', '/repos/MoKarade/a/issues/5/comments');
+  await api('POST', '/repos/MoKarade/a/issues/5/comments', { body: 'x' });
+  assert.deepEqual(appels, ['GET /repos/MoKarade/a/issues/5', 'GET /repos/MoKarade/a/issues/5/comments', 'POST /repos/MoKarade/a/issues/5/comments']);
 });

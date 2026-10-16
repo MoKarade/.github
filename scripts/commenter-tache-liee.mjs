@@ -16,6 +16,19 @@ import { MARQUEUR_TACHE, controleTacheLiee, rapportTacheLiee } from './tache-lie
 export const DEPOTS = ['.github', 'FinanceAI', 'JobAI', 'batchchef-', 'DriveAI', 'Hubperso', 'CarAI', 'MemoryAI', 'app-template', 'hub-contract'];
 export const TEXTE_LEVE = 'Tâche liée : vert, le blocage est levé.';
 
+/** Le plafond d'appels du jeton est atteint : insister ne sert à rien, le passage s'arrête et reprend au suivant. */
+export class LimiteDebit extends Error {}
+
+/** Mémorise les lectures d'issues d'un même passage : dix PR qui citent la même tâche ne coûtent qu'un appel. */
+export function avecCache(api) {
+  const vues = new Map();
+  return async function apiCache(methode, chemin, corps) {
+    if (methode !== 'GET' || !/\/issues\/\d+$/.test(chemin)) return api(methode, chemin, corps);
+    if (!vues.has(chemin)) vues.set(chemin, api(methode, chemin, corps));
+    return vues.get(chemin);
+  };
+}
+
 /** Le corps du commentaire voulu pour ce résultat, ou null s'il n'y a rien à dire (PR en règle, pas de commentaire). */
 export function corpsDuCommentaire(lien, ancien) {
   if (lien.ok) return ancien ? `${MARQUEUR_TACHE}\n${TEXTE_LEVE}` : null;
@@ -52,6 +65,7 @@ export async function commenterDepot({ api, depot }) {
       else await api('POST', `/repos/${complet}/issues/${pr.number}/comments`, { body: corps });
       actions.push(`${depot}#${pr.number} : ${lien.ok ? 'levé' : ancien ? 'mis à jour' : 'posé'}`);
     } catch (erreur) {
+      if (erreur instanceof LimiteDebit) throw erreur;
       erreurs.push(`${depot}#${pr.number} : ${erreur.message}`);
     }
   }
@@ -66,7 +80,11 @@ function apiReelle(jeton) {
       body: corps ? JSON.stringify(corps) : undefined,
     });
     if (r.status === 404) return null;
-    if (!r.ok) throw new Error(`${methode} ${chemin} : HTTP ${r.status} ${(await r.text()).slice(0, 200)}`);
+    if (!r.ok) {
+      const texte = (await r.text()).slice(0, 200);
+      if ((r.status === 403 || r.status === 429) && /rate limit/i.test(texte)) throw new LimiteDebit(`${methode} ${chemin} : plafond d'appels atteint`);
+      throw new Error(`${methode} ${chemin} : HTTP ${r.status} ${texte}`);
+    }
     return r.status === 204 ? null : r.json();
   };
 }
@@ -74,7 +92,7 @@ function apiReelle(jeton) {
 async function main() {
   const jeton = process.env.GH_PAT;
   if (!jeton) { console.error('GH_PAT absent : rien à faire.'); process.exit(2); }
-  const api = apiReelle(jeton);
+  const api = avecCache(apiReelle(jeton));
   const erreurs = [];
   for (const depot of DEPOTS) {
     try {
@@ -82,6 +100,11 @@ async function main() {
       for (const a of r.actions) console.log(a);
       erreurs.push(...r.erreurs);
     } catch (erreur) {
+      if (erreur instanceof LimiteDebit) {
+        // Pas de rouge : le jeton est partagé et se vide pour d'autres raisons ; le passage suivant (10 min) reprend.
+        console.log(`::warning::Commentaire tâche liée interrompu à ${depot} : ${erreur.message}. Reprise au prochain passage.`);
+        return;
+      }
       erreurs.push(`${depot} : ${erreur.message}`);
     }
   }
