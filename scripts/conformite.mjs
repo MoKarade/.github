@@ -64,6 +64,35 @@ const json = (texte) => {
 };
 
 /** Découpe un workflow en jobs (blocs à 2 espaces sous `jobs:`) : [{ nom, bloc }]. */
+/**
+ * Sombre seul VOULU : `color-scheme: dark` déclaré à la racine (`:root`, `html` ou `body`) d'une règle de premier
+ * niveau. Une règle dans un `@media`, ou sur un composant (`.terminal { color-scheme: dark }`), ne compte pas : le
+ * thème sombre d'une app qui garde un mode clair se prouve par `prefers-color-scheme` ou `data-theme`, pas par ceci.
+ */
+export function sombreSeulDeclare(css) {
+  const texte = String(css ?? '').replace(/\/\*[\s\S]*?\*\//g, '');
+  let profondeur = 0;
+  let debut = 0;
+  let prelude = '';
+  for (let i = 0; i < texte.length; i++) {
+    const c = texte[i];
+    if (c === '{') {
+      if (profondeur === 0) prelude = texte.slice(debut, i).trim();
+      profondeur++;
+      debut = i + 1;
+    } else if (c === '}') {
+      profondeur = Math.max(0, profondeur - 1);
+      if (profondeur === 0) {
+        const corps = texte.slice(debut, i);
+        const racine = prelude.split(',').every((sel) => /^(?::root|html|body)$/.test(sel.trim()));
+        if (racine && /(^|[;\s])color-scheme\s*:\s*dark\s*(;|$)/.test(corps)) return true;
+        debut = i + 1;
+      }
+    }
+  }
+  return false;
+}
+
 export function jobsDe(texte) {
   const debut = texte.search(/^jobs:\s*$/m);
   if (debut < 0) return [];
@@ -300,7 +329,11 @@ export function evaluer(ctx) {
       resultats.push(
         ligne(12, [
           /--[\w-]+\s*:/.test(css) ? ok('couleurs en variables CSS') : ko('aucune variable CSS dans globals.css'),
-          /prefers-color-scheme\s*:\s*dark|data-theme/.test(css) ? ok('thème sombre prévu') : ko('aucun thème sombre dans globals.css'),
+          /prefers-color-scheme\s*:\s*dark|data-theme/.test(css)
+            ? ok('thème sombre prévu')
+            : sombreSeulDeclare(css)
+              ? ok('sombre seul voulu (color-scheme: dark à la racine)')
+              : ko('aucun thème sombre dans globals.css (ni sombre seul déclaré par color-scheme: dark à la racine)'),
           fichiers.some((f) => /(^|\/)tests\/theme\.test\.[jt]sx?$/.test(f)) ? ok('verrou tests/theme.test') : ko('verrou tests/theme.test absent'),
         ]),
       );
