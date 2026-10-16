@@ -61,6 +61,7 @@ function depot({ fichiers: extra = {}, retirer = [], api = {} } = {}) {
     tagContrat: 'v1.4.0',
     commits: [{ message: 'feat: x (#1)', parents: 1 }, { message: 'Merge pull request #2 from a/b', parents: 2 }, { message: '[V1-03] corriger', parents: 1 }],
     titrePr: 'fix: y',
+    surveilles: ['MoKarade/x'],
     ...api,
   };
 }
@@ -143,7 +144,9 @@ test('8 : préversions non coupées', () => {
 
 test('9 : ni Sentry, ni /api/sante, ni surveillance', () => {
   assert.equal(etats(depot({ retirer: ['app/api/sante/route.ts'] }))[9], 'rouge');
-  assert.equal(etats(depot({ fichiers: { '.github/workflows/ci.yml': CI.replace('surveillance.yml', 'x.yml') } }))[9], 'rouge');
+  assert.equal(etats(depot({ api: { surveilles: [] } }))[9], 'rouge');
+  assert.match(detail(depot({ api: { surveilles: ['MoKarade/autre'] } }), 9), /surveillance\/apps\.json/);
+  assert.equal(etats(depot({ api: { surveilles: ['mokarade/X'] } }))[9], 'vert', 'la casse du nom de dépôt ne compte pas');
   const pkg = JSON.parse(depot().lire('package.json'));
   delete pkg.dependencies['@sentry/nextjs'];
   assert.equal(etats(depot({ fichiers: { 'package.json': JSON.stringify(pkg) } }))[9], 'rouge');

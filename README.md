@@ -10,6 +10,6 @@ Le dépôt commun aux apps de Marc.
   - `securite.yml` : gitleaks sur les commits de la PR, OSV-Scanner sur `package-lock.json`, CodeQL (dépôt public seulement). Actions épinglées par SHA. Un risque accepté s'écrit dans un `osv-scanner.toml` du dépôt, avec sa raison et sa date. Ce dépôt l'applique à lui-même (`securite-ci.yml`).
   - `conformite.yml` : la grille de conformité (15 lignes) lue dans le dépôt appelant, tableau ligne par ligne dans le résumé du job. Détail : [docs/conformite.md](docs/conformite.md). Lancement à la main : workflow « Essai de la conformité ».
   - `fumee.yml` : après un déploiement de production, vérifie la santé (`{ ok: true }`), que le summary refuse sans jeton et répond avec, et que la page de connexion répond ; rouge sinon. Logique et tests dans `scripts/fumee.mjs`. Lancement à la main : workflow « Essai de la fumée ».
-  - À venir : `surveillance.yml`.
+  - `surveillance.yml` : toutes les 15 minutes, sonde `/api/sante` des apps listées dans `surveillance/apps.json` ; une app muette ouvre une issue `panne`, son retour la ferme. Logique et tests dans `scripts/surveillance.mjs`. Essai à la main : « Run workflow » avec un nom et une URL.
 
 On change une règle par une PR sur ce dépôt.

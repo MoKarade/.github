@@ -94,7 +94,7 @@ const mineure = (v) => Number.parseInt(String(v ?? '').split('.')[1], 10);
  *   titrePr: string|null
  */
 export function evaluer(ctx) {
-  const { fichiers, lire, racine = '.', depot, protection, tagContrat, commits, titrePr } = ctx;
+  const { fichiers, lire, racine = '.', depot, protection, tagContrat, commits, titrePr, surveilles = [] } = ctx;
   const sous = (chemin) => (racine === '.' ? chemin : `${racine}/${chemin}`);
   const existe = (chemin) => fichiers.includes(chemin);
   const pkg = json(lire(sous('package.json')));
@@ -257,7 +257,9 @@ export function evaluer(ctx) {
       ligne(9, [
         Object.keys(deps).some((d) => d.startsWith('@sentry/')) ? ok('Sentry en dépendance') : ko('aucune dépendance @sentry/*'),
         sante ? ok('route /api/sante présente') : ko('route /api/sante absente'),
-        /MoKarade\/\.github\/\.github\/workflows\/surveillance\.yml@/.test(tousWorkflows) ? ok('figure dans la surveillance') : ko('n’appelle pas surveillance.yml'),
+        surveilles.some((nom) => nom.toLowerCase() === String(depot.nom ?? '').toLowerCase())
+          ? ok('figure dans la surveillance')
+          : ko('absent de surveillance/apps.json de MoKarade/.github (ou route /api/sante pas encore branchée)'),
       ]),
     );
   }
@@ -380,6 +382,16 @@ function lireApi(chemin) {
   }
 }
 
+/** Dépôts sondés par la surveillance : la liste vit dans MoKarade/.github (surveillance/apps.json), à côté de ce script. */
+function surveillees() {
+  try {
+    const apps = JSON.parse(readFileSync(new URL('../surveillance/apps.json', import.meta.url), 'utf8'));
+    return apps.filter((a) => a.sante && a.depot).map((a) => a.depot);
+  } catch {
+    return [];
+  }
+}
+
 export function contexteDepuisDisque(dossier, nomDepot, env = process.env) {
   const fichiers = execFileSync('git', ['-C', dossier, 'ls-files'], { encoding: 'utf8' }).split('\n').filter(Boolean);
   const lire = (chemin) => {
@@ -402,6 +414,7 @@ export function contexteDepuisDisque(dossier, nomDepot, env = process.env) {
   return {
     fichiers,
     lire,
+    surveilles: surveillees(),
     racine: env.CONFORMITE_RACINE || '.',
     depot: infos ? { nom: nomDepot, prive: infos.private, branche, securite: infos.security_and_analysis ?? null } : { nom: nomDepot, branche },
     protection: prot ? { protegee: Boolean(prot.protected) || (Array.isArray(regles) && regles.length > 0), verifs } : null,
