@@ -18,7 +18,7 @@ const SUMMARY = {
 
 /** Sert une fausse app ; `defauts` remplace le comportement de chaque route. */
 async function appFausse(surcharges = {}) {
-  const routes = {
+  const routes = new Map(Object.entries({
     '/api/sante': (req, res) => res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}'),
     '/hub/summary': (req, res) => {
       if (req.headers['x-hub-token'] !== JETON) return res.writeHead(401).end();
@@ -26,8 +26,9 @@ async function appFausse(surcharges = {}) {
     },
     '/login': (req, res) => res.writeHead(200, { 'content-type': 'text/html' }).end('<html></html>'),
     ...surcharges,
-  };
-  const serveur = createServer((req, res) => (routes[req.url] ?? ((_, r) => r.writeHead(404).end()))(req, res));
+  }));
+  // Map et non objet : l'URL d'une requête ne doit jamais choisir une méthode héritée (CodeQL, appel dynamique).
+  const serveur = createServer((req, res) => (routes.get(req.url) ?? ((_, r) => r.writeHead(404).end()))(req, res));
   await new Promise((ok) => serveur.listen(0, '127.0.0.1', ok));
   return { base: `http://127.0.0.1:${serveur.address().port}`, fermer: () => new Promise((ok) => serveur.close(ok)) };
 }
