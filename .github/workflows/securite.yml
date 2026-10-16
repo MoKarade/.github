@@ -75,7 +75,7 @@ jobs:
           # --redact : le secret n'est jamais écrit dans le journal (il resterait lisible dans un dépôt public).
           args=(git . --redact --no-banner --exit-code 1)
           [ -n "$plage" ] && args+=(--log-opts="$plage")
-          echo "Plage analysée : ${plage:-tout l'historique}"
+          echo "Plage analysée : ${plage:-historique complet}"
           "$RUNNER_TEMP/gitleaks" "${args[@]}"
 
   osv:
