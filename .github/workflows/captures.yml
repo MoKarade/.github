@@ -1,0 +1,149 @@
+name: Captures avant/après (workflow commun)
+
+# Joint à une PR qui change un écran deux captures côte à côte (« avant » = la branche par défaut, « après » =
+# la PR), pour que Marc juge en voyant (cycle de vie des tâches, §8). Écrit UNE fois ici, appelé par chaque app.
+# Les images viennent de l'app lancée avec les DONNÉES FICTIVES des tests, jamais de la production.
+# Les images sont rangées dans la branche `captures` du dépôt appelant, sous pr-<n>/ (l'historique est gardé),
+# et le commentaire de la PR est mis à jour à chaque push (un seul commentaire par PR).
+# La logique est dans scripts/captures.mjs et scripts/captures-cote.sh (testés) ; ce fichier ne fait que les appeler.
+#
+# Appel depuis un dépôt (PR du dépôt lui-même ; une PR venue d'un fork n'a pas le droit d'écrire) :
+#
+#   on:
+#     pull_request:
+#   permissions:
+#     contents: write
+#     pull-requests: write
+#   jobs:
+#     captures:
+#       if: github.event.pull_request.head.repo.full_name == github.repository
+#       uses: MoKarade/.github/.github/workflows/captures.yml@main
+#       with:
+#         installation: npm ci
+#         demarrage: npm run start -- --port 3000     # l'app, lancée avec les données des tests
+#         url: http://localhost:3000
+#         pages: |
+#           /
+#           /liste
+#
+# Le script vient de ce dépôt, jamais du code de l'appelant. Si l'app « avant » ne démarre pas (app ajoutée
+# par la PR), le commentaire le dit au lieu de faire échouer la PR ; si l'app « après » ne démarre pas, le job
+# échoue : c'est une vraie panne de la PR.
+on:
+  workflow_call:
+    inputs:
+      installation:
+        description: 'Commande d’installation (dans la racine de l’app).'
+        type: string
+        default: npm ci
+      demarrage:
+        description: 'Commande qui LANCE l’app avec les données fictives des tests (elle reste au premier plan).'
+        type: string
+        required: true
+      url:
+        description: 'URL locale de l’app une fois lancée.'
+        type: string
+        default: http://localhost:3000
+      pages:
+        description: 'Les pages à photographier, un chemin par ligne (12 au plus).'
+        type: string
+        default: /
+      racine:
+        description: 'Dossier de l’app dans le dépôt (« web » chez batchchef-).'
+        type: string
+        default: .
+      attente-s:
+        description: 'Secondes d’attente du démarrage de l’app.'
+        type: number
+        default: 60
+      node-version:
+        type: string
+        default: '24'
+      largeur:
+        type: number
+        default: 1280
+      hauteur:
+        type: number
+        default: 800
+      ref-outils:
+        description: 'Branche ou commit de MoKarade/.github d’où vient le script (essai seulement ; main sinon).'
+        type: string
+        default: main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# Un seul passage par PR à la fois ; la branche `captures` reçoit les pushs l'un après l'autre.
+concurrency:
+  group: captures-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  captures:
+    name: Captures avant/après
+    timeout-minutes: 25
+    runs-on: ubuntu-latest
+    env:
+      CAPTURES_INSTALLATION: ${{ inputs.installation }}
+      CAPTURES_DEMARRAGE: ${{ inputs.demarrage }}
+      CAPTURES_URL: ${{ inputs.url }}
+      CAPTURES_PAGES: ${{ inputs.pages }}
+      CAPTURES_RACINE: ${{ inputs.racine }}
+      CAPTURES_ATTENTE: ${{ inputs.attente-s }}
+      CAPTURES_LARGEUR: ${{ inputs.largeur }}
+      CAPTURES_HAUTEUR: ${{ inputs.hauteur }}
+      CAPTURES_OUTILS: ${{ github.workspace }}/.captures-outils
+      CAPTURES_SORTIE: ${{ github.workspace }}/sortie
+    steps:
+      - name: Récupérer la PR (après)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: apres
+          persist-credentials: false
+
+      - name: Récupérer la branche de base (avant)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: avant
+          persist-credentials: false
+
+      - name: Récupérer le script de captures
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: MoKarade/.github
+          ref: ${{ inputs.ref-outils }}
+          path: .captures
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Installer le navigateur
+        run: |
+          mkdir -p "$CAPTURES_OUTILS"
+          cd "$CAPTURES_OUTILS"
+          echo '{"name":"captures-outils","private":true}' > package.json
+          npm install --no-audit --no-fund --save-exact playwright@1.49.1
+          npx playwright install --with-deps chromium
+
+      # Si l'app « avant » ne démarre pas, la PR n'est pas en faute : on photographie quand même « après ».
+      - name: Photographier avant (branche de base)
+        run: |
+          bash .captures/scripts/captures-cote.sh avant "$CAPTURES_SORTIE/avant" \
+            || echo "::warning title=Captures::la branche de base n'a pas pu être photographiée, le commentaire le dira"
+
+      - name: Photographier après (PR)
+        run: bash .captures/scripts/captures-cote.sh apres "$CAPTURES_SORTIE/apres"
+
+      - name: Ranger les images et commenter la PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CAPTURES_PR: ${{ github.event.pull_request.number }}
+          CAPTURES_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gh auth setup-git
+          node .captures/scripts/captures.mjs publier
