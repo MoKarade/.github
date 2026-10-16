@@ -31,6 +31,7 @@ export function avecCache(api) {
 
 /** Le corps du commentaire voulu pour ce résultat, ou null s'il n'y a rien à dire (PR en règle, pas de commentaire). */
 export function corpsDuCommentaire(lien, ancien) {
+  if (lien.ok && (lien.avertissements ?? []).length > 0) return `${MARQUEUR_TACHE}\n${rapportTacheLiee(lien)}`;
   if (lien.ok) return ancien ? `${MARQUEUR_TACHE}\n${TEXTE_LEVE}` : null;
   return `${MARQUEUR_TACHE}\n${rapportTacheLiee(lien)}`;
 }
@@ -63,7 +64,7 @@ export async function commenterDepot({ api, depot }) {
       if (corps === null || ancien?.body === corps) continue;
       if (ancien) await api('PATCH', `/repos/${complet}/issues/comments/${ancien.id}`, { body: corps });
       else await api('POST', `/repos/${complet}/issues/${pr.number}/comments`, { body: corps });
-      actions.push(`${depot}#${pr.number} : ${lien.ok ? 'levé' : ancien ? 'mis à jour' : 'posé'}`);
+      actions.push(`${depot}#${pr.number} : ${lien.ok && !(lien.avertissements ?? []).length ? 'levé' : ancien ? 'mis à jour' : 'posé'}`);
     } catch (erreur) {
       if (erreur instanceof LimiteDebit) throw erreur;
       erreurs.push(`${depot}#${pr.number} : ${erreur.message}`);

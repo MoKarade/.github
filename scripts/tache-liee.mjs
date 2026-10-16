@@ -54,32 +54,47 @@ export function defautDeLaTache(issue) {
   return null;
 }
 
+/** Ce qu'il faut signaler sans refuser la PR : une tâche sans parent (mission ou chantier) est un défaut du backlog (pastille du Gantt, I1). */
+export function avertissementDeLaTache(issue) {
+  return issue?.parent_issue_url ? null : 'elle n’a pas de parent (mission) : la rattacher à sa mission (cycle de vie §1)';
+}
+
 /**
  * Contrôle la PR : ok si elle est dispensée ou cite au moins une tâche ouverte.
  * @param api (méthode, chemin) -> JSON ou null (404) ; lève sur toute autre erreur
  */
 export async function controleTacheLiee({ api, depot, pr }) {
   const raison = dispense(pr);
-  if (raison) return { ok: true, dispense: raison, citees: [], motifs: [] };
+  if (raison) return { ok: true, dispense: raison, citees: [], motifs: [], avertissements: [] };
   const citees = extraireTaches(pr.body, depot.split('/')[1]);
   if (citees.length === 0) {
-    return { ok: false, dispense: null, citees, motifs: ['aucune ligne `Tâche : #n` dans le corps de la PR'] };
+    return { ok: false, dispense: null, citees, motifs: ['aucune ligne `Tâche : #n` dans le corps de la PR'], avertissements: [] };
   }
   const motifs = [];
+  const avertissements = [];
   let valide = false;
   for (const t of citees) {
     const issue = await api('GET', `/repos/${PROPRIETAIRE}/${t.depot}/issues/${t.numero}`);
     const defaut = defautDeLaTache(issue);
     if (defaut) motifs.push(`${t.depot}#${t.numero} : ${defaut}`);
-    else valide = true;
+    else {
+      valide = true;
+      const avertissement = avertissementDeLaTache(issue);
+      if (avertissement) avertissements.push(`${t.depot}#${t.numero} : ${avertissement}`);
+    }
   }
   // Une seule tâche ouverte suffit ; les autres références ne sont rapportées que si aucune ne vaut.
-  return { ok: valide, dispense: null, citees, motifs: valide ? [] : motifs };
+  return { ok: valide, dispense: null, citees, motifs: valide ? [] : motifs, avertissements };
 }
 
 export function rapportTacheLiee(resultat) {
   if (resultat.dispense) return `Tâche liée : sans objet (${resultat.dispense}).`;
-  if (resultat.ok) return `Tâche liée : vert (${resultat.citees.map((t) => `${t.depot}#${t.numero}`).join(', ')}).`;
+  if (resultat.ok) {
+    const vert = `Tâche liée : vert (${resultat.citees.map((t) => `${t.depot}#${t.numero}`).join(', ')}).`;
+    const avertissements = resultat.avertissements ?? [];
+    if (avertissements.length === 0) return vert;
+    return [vert, '', 'À corriger, sans bloquer la PR :', ...avertissements.map((a) => `- ${a}`)].join('\n');
+  }
   return [
     'Tâche liée : **rouge**, la PR ne cite aucune tâche ouverte.',
     '',
