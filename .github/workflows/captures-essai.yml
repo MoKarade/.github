@@ -1,0 +1,29 @@
+name: Essai des captures
+
+# Appelle le workflow commun `captures.yml` sur une page fictive de ce dépôt (tests/captures-demo) : c'est la
+# preuve que le commentaire « avant / après » apparaît et que les images arrivent dans la branche `captures`.
+# Ne tourne que quand la démo ou les captures changent ; ce n'est pas un contrôle exigé.
+on:
+  pull_request:
+    paths:
+      - tests/captures-demo/**
+      - scripts/captures*
+      - .github/workflows/captures*.yml
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  captures:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/captures.yml
+    with:
+      installation: 'true'
+      demarrage: python3 -m http.server 3000 --directory tests/captures-demo
+      url: http://localhost:3000
+      pages: |
+        /
+        /a-propos.html
+      # Le script de la PR elle-même (essai) ; les dépôts appelants utilisent main.
+      ref-outils: ${{ github.event.pull_request.head.sha }}
