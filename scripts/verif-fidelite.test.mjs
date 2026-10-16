@@ -67,6 +67,17 @@ test('I3 : une PR ouverte alors que l’issue n’était pas en-cours est non tr
   assert.deepEqual(prise.non_tracees, ['hubperso#2', 'hubperso#3']);
 });
 
+test('I3 : `en-cours` posé par le balayage dans les 10 minutes qui suivent l’ouverture compte comme tracé, pas à 11 minutes', () => {
+  const pr = { n: 5, state: 'open', merged: null, created: '2026-10-16T09:00:00Z' };
+  const r = releve([
+    noeud(1, { pr, start: '2026-10-16T09:10:00Z' }),
+    noeud(2, { pr, start: '2026-10-16T09:10:01Z' }),
+  ]);
+  const { prise } = mesure(r, vivant()).i3;
+  assert.equal(prise.total, 2);
+  assert.deepEqual(prise.non_tracees, ['hubperso#2']);
+});
+
 test('I3 : PR fusionnée sans tâche (robots et PR citant une tâche exclus), branche sans tâche', () => {
   const fusion = { state: 'closed', merged_at: '2026-10-16T10:00:00Z' };
   const v = vivant([], [

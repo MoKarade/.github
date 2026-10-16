@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEPOT_BOITE, DEPOT_GITHUB, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, WORKFLOWS_BALAYAGE, construireMotif, decider, estPanneRunner, heureQuebec, preuveAPoser, rougeDepuis, traiter } from './reveil-reacteur.mjs';
+import { DEPOT_BOITE, DEPOT_GITHUB, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, WORKFLOWS_BALAYAGE, WORKFLOWS_PR_OUVERTE, construireMotif, decider, estPanneRunner, heureQuebec, preuveAPoser, rougeDepuis, traiter } from './reveil-reacteur.mjs';
 
 // Fausse API GitHub en mémoire : les lectures viennent de `donnees`, les écritures sont gardées.
 function faux(donnees = {}) {
@@ -319,4 +319,30 @@ test('filet : un dépôt vide ou illisible (réponses nulles) ne casse pas le pa
   const { api } = faux();
   const r = await decider({ api, evt: evtFilet(), maintenant: VENDREDI_6H });
   assert.deepEqual(r, { action: 'rien', raison: 'rien à signaler' });
+});
+
+test('pr_ouverte : lance seulement le commentaire tâche liée, ne commente rien sur la boîte et ne réveille personne', async () => {
+  const { api, ecritures } = faux();
+  const lignes = [];
+  const r = await traiter({ api, evt: { type: 'pr_ouverte', depot: 'MoKarade/CarAI', pr: '12' }, jetonReveil: 'jeton', journal: (l) => lignes.push(l) });
+  assert.equal(r.action, 'balayer');
+  assert.notEqual(r.reveille, true);
+  assert.deepEqual(r.balayages, WORKFLOWS_PR_OUVERTE);
+  assert.deepEqual(ecritures, [{ methode: 'POST', chemin: `/repos/${DEPOT_GITHUB}/actions/workflows/commentaire-tache-liee.yml/dispatches`, corps: { ref: 'main' }, jeton: 'jeton' }]);
+  assert.ok(!ecritures.some((e) => e.chemin.includes(DEPOT_BOITE) || e.chemin.includes(WORKFLOW_BOITE)));
+  assert.ok(!lignes.some((l) => l.includes('Coordinateur réveillé')));
+});
+
+test('pr_ouverte : sans jeton un avertissement, aucune écriture ; balayage qui échoue = avertissement, jamais d’exception', async () => {
+  const sansJeton = faux();
+  const lignes = [];
+  await traiter({ api: sansJeton.api, evt: { type: 'pr_ouverte', depot: 'MoKarade/CarAI', pr: '12' }, jetonReveil: '', journal: (l) => lignes.push(l) });
+  assert.equal(sansJeton.ecritures.length, 0);
+  assert.ok(lignes.some((l) => l.startsWith('::warning::') && l.includes('balayage impossible')));
+
+  const api = async (methode, chemin) => { if (methode !== 'GET') throw new Error('HTTP 404 sur POST ' + chemin); return null; };
+  const lignes2 = [];
+  const r = await traiter({ api, evt: { type: 'pr_ouverte', depot: 'MoKarade/CarAI', pr: '12' }, jetonReveil: 'jeton', journal: (l) => lignes2.push(l) });
+  assert.deepEqual(r.balayages, []);
+  assert.ok(lignes2.some((l) => l.includes('commentaire-tache-liee.yml non lancé')));
 });

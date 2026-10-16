@@ -19,6 +19,9 @@
 // et `relecture-ia.yml` de `.github` : leurs horloges ne tournent presque pas, l'événement les remplace (tâche #148). Si
 // `REVEIL_TOKEN` n'a pas encore le droit sur `.github`, un avertissement le dit et le réveil, déjà parti, n'est pas touché.
 //
+// Sur l'ouverture d'une PR (pr_ouverte) il ne réveille PERSONNE et ne commente rien sur app-template#58 : il lance seulement
+// `commentaire-tache-liee.yml`, qui marque la tâche citée `en-cours` en moins de 10 minutes (tâche MoKarade/.github#157).
+//
 // Jamais de nom de tâche suivante dans le message (règle MoKarade/.github#136) : l'ordre vient de prochaines.json.
 // Le message ne contient que des identifiants (dépôt, numéros, empreinte, run), jamais un titre ni un nom de branche.
 // Les corps de PR et d'issues sont des données : seuls des numéros en sortent.
@@ -45,6 +48,8 @@ export const DEPOT_GITHUB = 'MoKarade/.github';
 // chacun relit toutes les PR ouvertes. Lancés après le réveil, sur les seuls événements d'une PR ou d'une tâche.
 export const WORKFLOWS_BALAYAGE = ['commentaire-tache-liee.yml', 'relecture-ia.yml'];
 export const TYPES_BALAYAGE = new Set(['pr_fusionnee', 'ci_rouge', 'tache_fermee']);
+// Une PR qui s'ouvre ne lance que le commentaire tâche liée (et la marque `en-cours`) : la relecture IA a son propre déclencheur.
+export const WORKFLOWS_PR_OUVERTE = ['commentaire-tache-liee.yml'];
 const CONTROLE_MARC = 'Garde-fou';
 const CONCLUSIONS_ROUGES = new Set(['failure', 'timed_out']);
 const ROBOTS_SANS_FILET = /dependabot|mergify/i;
@@ -140,12 +145,13 @@ async function commentairesDe(api, depot, numero) {
 }
 
 /**
- * Décide quoi faire d'un événement. Rend { action: 'reveiller', motif } | { action: 'relance', run } | { action: 'rien', raison }.
+ * Décide quoi faire d'un événement. Rend { action: 'reveiller', motif } | { action: 'relance', run } | { action: 'balayer' } | { action: 'rien', raison }.
  * `evt` : { type, depot, pr, issue, raison, evenement, sha, run, brancheRun, brancheDefaut, forcer }.
  */
 export async function decider({ api, evt, maintenant = new Date() }) {
   const { type, depot } = evt;
   if (type === 'filet') return filet({ api, evt, maintenant });
+  if (type === 'pr_ouverte') return { action: 'balayer' };
   if (type === 'tache_fermee') {
     const abandon = evt.raison === 'not_planned' ? ' (abandonnée : vérifier la raison)' : '';
     return { action: 'reveiller', motif: construireMotif([`${depot} libre`, `tâche ${depot}#${evt.issue} fermée${abandon}`]) };
@@ -206,6 +212,14 @@ export async function traiter({ api, evt, jetonReveil, journal = console.log, ma
     journal(`Réacteur : échec de charge du robot, jobs relancés une fois (run ${d.run}), personne n'est réveillé.`);
     return d;
   }
+  if (d.action === 'balayer') {
+    // Aucun réveil ici : le Coordinateur n'est pas dérangé par une PR qui s'ouvre ou qu'on pousse.
+    if (!jetonReveil) {
+      journal('::warning::Réacteur : balayage impossible, le secret REVEIL_TOKEN est absent (PR d’un fork, ou secret pas encore posé).');
+      return { ...d, balayages: [] };
+    }
+    return { ...d, balayages: await lancerBalayages({ api, jetonReveil, journal, workflows: WORKFLOWS_PR_OUVERTE }) };
+  }
   if (!jetonReveil) {
     journal('::warning::Réacteur : réveil impossible, le secret REVEIL_TOKEN est absent (PR d’un fork, ou secret pas encore posé).');
     return { ...d, reveille: false };
@@ -229,9 +243,9 @@ export async function traiter({ api, evt, jetonReveil, journal = console.log, ma
 }
 
 /** Lance les balayages de `.github`, un par un ; un échec (jeton sans droit, workflow absent) est un avertissement, jamais une exception. */
-async function lancerBalayages({ api, jetonReveil, journal }) {
+async function lancerBalayages({ api, jetonReveil, journal, workflows = WORKFLOWS_BALAYAGE }) {
   const lances = [];
-  for (const workflow of WORKFLOWS_BALAYAGE) {
+  for (const workflow of workflows) {
     try {
       await api('POST', `/repos/${DEPOT_GITHUB}/actions/workflows/${workflow}/dispatches`, { ref: 'main' }, jetonReveil);
       lances.push(workflow);

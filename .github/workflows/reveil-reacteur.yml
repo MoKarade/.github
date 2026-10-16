@@ -16,6 +16,9 @@ name: Réveil du Coordinateur (workflow commun)
 #       type: ${{ github.event_name == 'pull_request' && 'pr_fusionnee' || github.event_name == 'issues' && 'tache_fermee' || github.event_name == 'workflow_run' && 'ci_rouge' || 'filet' }}
 #       ...
 #
+# `pr_ouverte` (PR ouverte, rouverte, sortie du brouillon ou dont le corps change) ne réveille personne : elle lance seulement le
+# commentaire tâche liée, qui marque la tâche citée `en-cours` (MoKarade/.github#157).
+#
 # La logique est dans scripts/reveil-reacteur.mjs (testée, sans dépendance, sans IA) ; ce fichier ne fait que
 # l'appeler. Le script vient de ce dépôt, jamais du code de l'appelant. Il lance `boite-reacteur.yml` d'app-template,
 # qui commente la boîte (app-template#58) en bot : c'est ce commentaire qui réveille le Coordinateur.
@@ -30,7 +33,7 @@ on:
         type: string
         default: '"ubuntu-latest"'
       type:
-        description: 'pr_fusionnee | tache_fermee | ci_rouge | filet'
+        description: 'pr_fusionnee | pr_ouverte | tache_fermee | ci_rouge | filet'
         type: string
         required: true
       depot:
