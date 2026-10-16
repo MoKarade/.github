@@ -145,6 +145,20 @@ const ghReel = (args) =>
     });
   });
 
+/**
+ * Les apps à traiter : celles de surveillance/apps.json qui ont une sonde et un projet Vercel, ou, pour un
+ * lancement d'essai, une seule app simulée (nom, URL de santé et projet Vercel donnés à la main). Une URL
+ * d'essai sans projet Vercel d'essai ne touche à rien : la preuve du retour ne passe jamais par une vraie app.
+ */
+export function appsRetour(env, liste) {
+  if (env.SURVEILLANCE_ESSAI_URL) {
+    const vercel = env.RETOUR_ESSAI_VERCEL || '';
+    if (!/^[a-z0-9-]+$/.test(vercel)) return [];
+    return [{ nom: env.SURVEILLANCE_ESSAI_NOM || 'essai', depot: env.GITHUB_REPOSITORY || 'MoKarade/.github', sante: env.SURVEILLANCE_ESSAI_URL, vercel }];
+  }
+  return liste.filter((a) => a.sante && a.vercel);
+}
+
 async function main() {
   const env = process.env;
   const controle = env.RETOUR_CONTROLE === 'true';
@@ -156,7 +170,7 @@ async function main() {
     if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, `${texteInactif}\n`);
     return;
   }
-  const apps = lireApps(JSON.parse(readFileSync(new URL('../surveillance/apps.json', import.meta.url), 'utf8'))).filter((a) => a.sante && a.vercel);
+  const apps = appsRetour(env, lireApps(JSON.parse(readFileSync(new URL('../surveillance/apps.json', import.meta.url), 'utf8'))));
   const timeoutMs = Number(env.SURVEILLANCE_TIMEOUT_MS || 10_000);
   const appel = (u, init = {}) => fetch(u, { ...init, signal: AbortSignal.timeout(timeoutMs) });
   const api = clientVercel({ jeton, equipe: env.VERCEL_EQUIPE || '' });
