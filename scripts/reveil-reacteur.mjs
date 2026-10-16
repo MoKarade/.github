@@ -7,6 +7,11 @@
 //   - tache_fermee : « D libre » (le garde-fou de preuve a déjà validé la fermeture, voir reacteur.yml) ;
 //   - ci_rouge : PR encore ouverte, hors brouillon, au même commit, sinon rien ; un échec de charge du robot (job mort
 //     sans étape en échec) est relancé UNE fois et ne réveille personne ; le reste réveille.
+//   - filet : une fois par jour à 6 h (heure du Québec), ce que les événements n'ont pas signalé, lu dans le dépôt
+//     appelant avec le jeton du job : PR rouge depuis plus de 30 min (hors brouillon, hors Dependabot et Mergify, hors
+//     Garde-fou qui attend Marc), issue `incident` ouverte, branche par défaut rouge ; le jeudi, dans .github seulement,
+//     le rappel de remesure de la consommation Claude. Un seul réveil par dépôt, rien à signaler = aucun réveil.
+//     Tâche MoKarade/.github#143.
 // Puis il lance `boite-reacteur.yml` d'app-template, qui commente la boîte (app-template#58) en `github-actions[bot]` :
 // ce commentaire réveille le Coordinateur (un commentaire du compte de Marc ne réveille personne).
 //
@@ -28,6 +33,13 @@ export const LABEL_ATTENDUE = 'preuve-attendue';
 export const LONGUEUR_MAX = 600;
 const ENTETE_ACCEPTEE = /^\s*\*\*\s*Accept[ée]e\s*\*\*/i;
 const ROBOTS = new Set(['dependabot[bot]', 'mergify[bot]', 'github-actions[bot]']);
+export const FUSEAU = 'America/Toronto';
+export const HEURE_FILET = 6;
+export const SEUIL_ROUGE_MIN = 30;
+export const DEPOT_GITHUB = 'MoKarade/.github';
+const CONTROLE_MARC = 'Garde-fou';
+const CONCLUSIONS_ROUGES = new Set(['failure', 'timed_out']);
+const ROBOTS_SANS_FILET = /dependabot|mergify/i;
 
 /**
  * Un échec de charge du robot de tests (timeout, runner perdu) : tous les jobs en échec sont morts sans qu'AUCUNE
@@ -52,6 +64,63 @@ export function preuveAPoser({ issue, commentaires }) {
   return !commentaires.some((c) => c.user?.type === 'User' && ENTETE_ACCEPTEE.test(c.body ?? ''));
 }
 
+/** Jour et heure au Québec pour une date : { heure: 0..23, jour: 'Mon'..'Sun' }. */
+export function heureQuebec(date) {
+  const p = new Intl.DateTimeFormat('en-US', { timeZone: FUSEAU, hour: 'numeric', hourCycle: 'h23', weekday: 'short' }).formatToParts(date);
+  return { heure: Number(p.find((x) => x.type === 'hour').value), jour: p.find((x) => x.type === 'weekday').value };
+}
+
+/**
+ * Un contrôle rouge depuis plus de `minutes` ? Le Garde-fou est exclu : rouge, il attend Marc (issue `qui:marc`)
+ * et le signaler chaque matin ne ferait que du bruit.
+ */
+export function rougeDepuis(controles, maintenant, minutes = SEUIL_ROUGE_MIN) {
+  const limite = maintenant.getTime() - minutes * 60_000;
+  return controles.some((c) => {
+    if (c.name === CONTROLE_MARC || !CONCLUSIONS_ROUGES.has(c.conclusion)) return false;
+    const fin = Date.parse(c.completed_at ?? '');
+    return Number.isFinite(fin) && fin <= limite;
+  });
+}
+
+/** Le filet quotidien d'un dépôt : les lignes du réveil (vide = rien à signaler). Numéros seulement, jamais un titre. */
+async function lignesDuFiletPour({ api, evt, maintenant }) {
+  const { depot } = evt;
+  const lignes = [];
+
+  const prs = (await api('GET', `/repos/${depot}/pulls?state=open&per_page=30`)) ?? [];
+  const rouges = [];
+  for (const pr of prs) {
+    if (pr.draft || ROBOTS_SANS_FILET.test(pr.user?.login ?? '')) continue;
+    const lot = await api('GET', `/repos/${depot}/commits/${pr.head?.sha}/check-runs?per_page=100`);
+    if (rougeDepuis(lot?.check_runs ?? [], maintenant)) rouges.push(`#${pr.number}`);
+  }
+  if (rouges.length > 0) lignes.push(`PR rouge depuis plus de ${SEUIL_ROUGE_MIN} min sur ${depot} : ${rouges.join(', ')}`);
+
+  const incidents = ((await api('GET', `/repos/${depot}/issues?labels=incident&state=open&per_page=20`)) ?? []).filter((i) => !i.pull_request);
+  if (incidents.length > 0) lignes.push(`incident ouvert sur ${depot} : ${incidents.map((i) => `#${i.number}`).join(', ')}`);
+
+  if (evt.brancheDefaut) {
+    const lot = await api('GET', `/repos/${depot}/commits/${evt.brancheDefaut}/check-runs?per_page=100`);
+    if (rougeDepuis(lot?.check_runs ?? [], maintenant)) lignes.push(`branche par défaut rouge sur ${depot}`);
+  }
+
+  if (depot === DEPOT_GITHUB && heureQuebec(maintenant).jour === 'Thu') {
+    lignes.push('jeudi : remesure hebdo de la consommation Claude à lancer');
+  }
+  return lignes;
+}
+
+async function filet({ api, evt, maintenant }) {
+  // Deux horaires UTC (10 h et 11 h) couvrent l'heure d'été et l'heure d'hiver : seul celui qui tombe à 6 h au Québec agit.
+  if (evt.forcer !== 'true' && heureQuebec(maintenant).heure !== HEURE_FILET) {
+    return { action: 'rien', raison: `hors de l'heure du filet (${HEURE_FILET} h, Québec)` };
+  }
+  const lignes = await lignesDuFiletPour({ api, evt, maintenant });
+  if (lignes.length === 0) return { action: 'rien', raison: 'rien à signaler' };
+  return { action: 'reveiller', motif: construireMotif(lignes) };
+}
+
 async function commentairesDe(api, depot, numero) {
   const sortie = [];
   for (let page = 1; page <= 5; page += 1) {
@@ -64,10 +133,11 @@ async function commentairesDe(api, depot, numero) {
 
 /**
  * Décide quoi faire d'un événement. Rend { action: 'reveiller', motif } | { action: 'relance', run } | { action: 'rien', raison }.
- * `evt` : { type, depot, pr, issue, raison, evenement, sha, run, brancheRun, brancheDefaut }.
+ * `evt` : { type, depot, pr, issue, raison, evenement, sha, run, brancheRun, brancheDefaut, forcer }.
  */
-export async function decider({ api, evt }) {
+export async function decider({ api, evt, maintenant = new Date() }) {
   const { type, depot } = evt;
+  if (type === 'filet') return filet({ api, evt, maintenant });
   if (type === 'tache_fermee') {
     const abandon = evt.raison === 'not_planned' ? ' (abandonnée : vérifier la raison)' : '';
     return { action: 'reveiller', motif: construireMotif([`${depot} libre`, `tâche ${depot}#${evt.issue} fermée${abandon}`]) };
@@ -117,8 +187,8 @@ export async function decider({ api, evt }) {
 }
 
 /** Exécute la décision. `journal` reçoit les lignes à afficher ; rend un résumé court. */
-export async function traiter({ api, evt, jetonReveil, journal = console.log }) {
-  const d = await decider({ api, evt });
+export async function traiter({ api, evt, jetonReveil, journal = console.log, maintenant = new Date() }) {
+  const d = await decider({ api, evt, maintenant });
   if (d.action === 'rien') {
     journal(`Réacteur : rien à faire (${d.raison}).`);
     return d;
@@ -173,6 +243,7 @@ export async function main(env = process.env) {
     run: env.REVEIL_RUN || '',
     brancheRun: env.REVEIL_BRANCHE_RUN || '',
     brancheDefaut: env.REVEIL_BRANCHE_DEFAUT || '',
+    forcer: env.REVEIL_FORCER || '',
   };
   try {
     await traiter({ api: apiGitHub(env.GITHUB_TOKEN), evt, jetonReveil: env.REVEIL_TOKEN });
