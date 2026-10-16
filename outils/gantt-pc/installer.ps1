@@ -9,8 +9,12 @@ param([string]$Drive = '')
 $ErrorActionPreference = 'Continue'
 function Verifier($nom, $cmd, $versionArg) {
     # on LANCE l'outil : sous Windows, « python » peut être le raccourci du Microsoft Store, présent mais inutilisable
-    $v = & $cmd $versionArg 2>&1 | Select-Object -First 1
-    if ($LASTEXITCODE -eq 0 -and $v) { Write-Host "OK   $nom : $v" } else { Write-Host "MANQUE $nom ($cmd)"; $script:manque = $true }
+    # sortie lue EN ENTIER avant de garder la 1re ligne : « | Select-Object -First 1 » arrête le programme en cours de route,
+    # et $LASTEXITCODE n'est alors pas 0 : Node et Git sortaient « MANQUE » alors qu'ils marchent (PC de Marc, 16/10)
+    $sortie = & $cmd $versionArg 2>&1
+    $code = $LASTEXITCODE
+    $v = $sortie | Select-Object -First 1
+    if ($code -eq 0 -and $v) { Write-Host "OK   $nom : $v" } else { Write-Host "MANQUE $nom ($cmd)"; $script:manque = $true }
 }
 $manque = $false
 Verifier 'Python' 'python' '--version'; Verifier 'Node' 'node' '--version'; Verifier 'GitHub CLI' 'gh' '--version'; Verifier 'Git' 'git' '--version'
