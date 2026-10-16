@@ -5,7 +5,7 @@ import { MARQUEUR_TACHE } from './tache-liee.mjs';
 
 // Fausse API GitHub en mémoire : PR ouvertes, issues, commentaires ; toutes les écritures sont gardées.
 const humain = { login: 'MoKarade', type: 'User' };
-const tache = { number: 120, state: 'open', labels: [{ name: 'niveau:tâche' }] };
+const tache = { number: 120, state: 'open', parent_issue_url: 'https://api.github.com/repos/MoKarade/Hubperso/issues/100', labels: [{ name: 'niveau:tâche' }] };
 function faux({ pulls, issues = {}, commentaires = {}, echec = {} }) {
   const ecritures = [];
   const api = async (methode, chemin, corps) => {
@@ -24,6 +24,18 @@ const pr = (number, body, extra = {}) => ({ number, body, user: humain, head: { 
 test('les dix dépôts, dont .github', () => {
   assert.equal(DEPOTS.length, 10);
   assert.ok(DEPOTS.includes('.github'));
+});
+
+test('tâche sans parent : le commentaire d’avertissement est posé, mis à jour, puis levé quand le parent arrive', async () => {
+  const sansParent = { ...tache, parent_issue_url: null };
+  const poses = faux({ pulls: [pr(2, 'Tâche : #120')], issues: { 'Hubperso#120': sansParent } });
+  const r = await commenterDepot({ api: poses.api, depot: 'Hubperso' });
+  assert.deepEqual(r.actions, ['Hubperso#2 : posé']);
+  const corps = corpsDuCommentaire({ ok: true, citees: [{ depot: 'Hubperso', numero: 120 }], motifs: [], avertissements: ['Hubperso#120 : elle n’a pas de parent'] }, null);
+  assert.match(corps, /sans bloquer la PR/);
+  const leve = faux({ pulls: [pr(2, 'Tâche : #120')], commentaires: { 2: [{ id: 9, body: corps }] }, issues: { 'Hubperso#120': tache } });
+  const r2 = await commenterDepot({ api: leve.api, depot: 'Hubperso' });
+  assert.deepEqual(r2.actions, ['Hubperso#2 : levé']);
 });
 
 test('corpsDuCommentaire : rien pour une PR en règle sans commentaire, « levé » si elle en avait un', () => {
