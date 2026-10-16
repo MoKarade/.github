@@ -112,6 +112,36 @@ test('I4 : accord, écart et lancement non évaluable', () => {
   assert.equal(i4.taux, 0.5);
 });
 
+test('I4 : `depuisI4` écarte les lancements d’avant la date de fiabilité sans toucher à I3', () => {
+  const r = releve([
+    noeud(1, { start: '2026-10-16T10:10:00Z' }),
+    noeud(2, { start: '2026-10-16T10:20:00Z' }),
+  ]);
+  const snapshots = { hubperso: [{ asof: '2026-10-16T10:00:00Z', statut: 'libre', suivante: 'hubperso#1' }, { asof: '2026-10-16T10:15:00Z', statut: 'libre', suivante: 'hubperso#9' }] };
+  const tout = mesure(r, vivant(), { snapshots });
+  assert.equal(tout.i4.lancements, 2);
+  const recent = mesure(r, vivant(), { snapshots, depuisI4: '2026-10-16T10:15:00Z' });
+  assert.equal(recent.i4.lancements, 1);
+  assert.deepEqual(recent.i4.ecarts.map((e) => e.ref), ['hubperso#2']);
+  assert.equal(recent.depuis_i4, '2026-10-16T10:15:00Z');
+  assert.equal(recent.depuis, DEPUIS);
+  assert.equal(tout.depuis_i4, DEPUIS);
+});
+
+test('I4 : un lancement sur une file de plus de 40 min est listé et alerté, pas un lancement récent', () => {
+  const r = releve([
+    noeud(1, { start: '2026-10-16T10:10:00Z' }),
+    noeud(2, { start: '2026-10-16T10:55:00Z' }),
+  ]);
+  const snapshots = { hubperso: [{ asof: '2026-10-16T10:00:00Z', statut: 'libre', suivante: 'hubperso#1' }, { asof: '2026-10-16T10:50:00Z', statut: 'libre', suivante: 'hubperso#2' }] };
+  const frais = mesure(r, vivant(), { snapshots });
+  assert.deepEqual(frais.i4.perimes, []);
+  const vieux = { hubperso: [{ asof: '2026-10-16T10:00:00Z', statut: 'libre', suivante: 'hubperso#1' }] };
+  const m = mesure(r, vivant(), { snapshots: vieux });
+  assert.deepEqual(m.i4.perimes.map((x) => [x.ref, x.age_min]), [['hubperso#2', 55]]);
+  assert.ok(m.alertes.some((a) => /1 lancement\(s\) sur une file de plus de 40 min : hubperso#2/.test(a)));
+});
+
 test('les snapshots gardent la suivante de chaque calcul, sans doublon', () => {
   const prochaines = { calcule_le: '2026-10-16T12:05:00Z', depots: [{ repo: 'Hubperso', statut: 'libre', suivante: { ref: 'hubperso#4' } }] };
   const premier = mesure(releve([]), vivant(), { prochaines });
