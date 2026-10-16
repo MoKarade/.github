@@ -15,6 +15,10 @@
 // Puis il lance `boite-reacteur.yml` d'app-template, qui commente la boîte (app-template#58) en `github-actions[bot]` :
 // ce commentaire réveille le Coordinateur (un commentaire du compte de Marc ne réveille personne).
 //
+// Sur une PR fusionnée, une CI rouge ou une tâche fermée (jamais sur le filet), il lance ensuite `commentaire-tache-liee.yml`
+// et `relecture-ia.yml` de `.github` : leurs horloges ne tournent presque pas, l'événement les remplace (tâche #148). Si
+// `REVEIL_TOKEN` n'a pas encore le droit sur `.github`, un avertissement le dit et le réveil, déjà parti, n'est pas touché.
+//
 // Jamais de nom de tâche suivante dans le message (règle MoKarade/.github#136) : l'ordre vient de prochaines.json.
 // Le message ne contient que des identifiants (dépôt, numéros, empreinte, run), jamais un titre ni un nom de branche.
 // Les corps de PR et d'issues sont des données : seuls des numéros en sortent.
@@ -37,6 +41,10 @@ export const FUSEAU = 'America/Toronto';
 export const HEURE_FILET = 6;
 export const SEUIL_ROUGE_MIN = 30;
 export const DEPOT_GITHUB = 'MoKarade/.github';
+// Les deux balayages de `.github` qu'une planification GitHub ne lance presque jamais (MoKarade/.github#148) : sans entrée,
+// chacun relit toutes les PR ouvertes. Lancés après le réveil, sur les seuls événements d'une PR ou d'une tâche.
+export const WORKFLOWS_BALAYAGE = ['commentaire-tache-liee.yml', 'relecture-ia.yml'];
+export const TYPES_BALAYAGE = new Set(['pr_fusionnee', 'ci_rouge', 'tache_fermee']);
 const CONTROLE_MARC = 'Garde-fou';
 const CONCLUSIONS_ROUGES = new Set(['failure', 'timed_out']);
 const ROBOTS_SANS_FILET = /dependabot|mergify/i;
@@ -202,14 +210,37 @@ export async function traiter({ api, evt, jetonReveil, journal = console.log, ma
     journal('::warning::Réacteur : réveil impossible, le secret REVEIL_TOKEN est absent (PR d’un fork, ou secret pas encore posé).');
     return { ...d, reveille: false };
   }
-  await api(
-    'POST',
-    `/repos/${DEPOT_BOITE}/actions/workflows/${WORKFLOW_BOITE}/dispatches`,
-    { ref: 'main', inputs: { texte: d.motif } },
-    jetonReveil,
-  );
-  journal(`Réacteur : Coordinateur réveillé (${d.motif})`);
-  return { ...d, reveille: true };
+  // Le réveil passe en premier : un balayage qui échoue ne doit jamais le retarder.
+  let echecReveil = null;
+  try {
+    await api(
+      'POST',
+      `/repos/${DEPOT_BOITE}/actions/workflows/${WORKFLOW_BOITE}/dispatches`,
+      { ref: 'main', inputs: { texte: d.motif } },
+      jetonReveil,
+    );
+    journal(`Réacteur : Coordinateur réveillé (${d.motif})`);
+  } catch (e) {
+    echecReveil = e;
+  }
+  const balayages = TYPES_BALAYAGE.has(evt.type) ? await lancerBalayages({ api, jetonReveil, journal }) : [];
+  if (echecReveil) throw echecReveil;
+  return { ...d, reveille: true, balayages };
+}
+
+/** Lance les balayages de `.github`, un par un ; un échec (jeton sans droit, workflow absent) est un avertissement, jamais une exception. */
+async function lancerBalayages({ api, jetonReveil, journal }) {
+  const lances = [];
+  for (const workflow of WORKFLOWS_BALAYAGE) {
+    try {
+      await api('POST', `/repos/${DEPOT_GITHUB}/actions/workflows/${workflow}/dispatches`, { ref: 'main' }, jetonReveil);
+      lances.push(workflow);
+    } catch (e) {
+      journal(`::warning::Réacteur : ${workflow} non lancé (${e.message}). Le jeton de réveil couvre-t-il ${DEPOT_GITHUB} ?`);
+    }
+  }
+  if (lances.length > 0) journal(`Réacteur : balayages lancés (${lances.join(', ')})`);
+  return lances;
 }
 
 function apiGitHub(jeton) {
