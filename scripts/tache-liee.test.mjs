@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { controleTacheLiee, defautDeLaTache, dispense, extraireTaches, rapportTacheLiee } from './tache-liee.mjs';
+import { avertissementDeLaTache, controleTacheLiee, defautDeLaTache, dispense, extraireTaches, rapportTacheLiee } from './tache-liee.mjs';
 
 // Données fictives, aucun réseau : une fausse API GitHub en mémoire.
 const humain = { login: 'MoKarade', type: 'User' };
-const tacheOuverte = { number: 120, state: 'open', labels: [{ name: 'niveau:tâche' }, { name: 'prio:1' }] };
+const tacheOuverte = { number: 120, state: 'open', parent_issue_url: 'https://api.github.com/repos/MoKarade/Hubperso/issues/100', labels: [{ name: 'niveau:tâche' }, { name: 'prio:1' }] };
 const issues = (table) => async (methode, chemin) => {
   assert.equal(methode, 'GET');
   const m = /^\/repos\/MoKarade\/([^/]+)\/issues\/(\d+)$/.exec(chemin);
@@ -61,6 +61,22 @@ test('une PR qui cite une tâche ouverte est verte', async () => {
   assert.equal(r.ok, true);
   assert.deepEqual(r.citees, [{ depot: 'Hubperso', numero: 120 }]);
   assert.match(rapportTacheLiee(r), /vert \(Hubperso#120\)/);
+});
+
+test('une tâche sans parent : vert, mais l’avertissement le dit et il disparaît avec le parent', async () => {
+  const sansParent = { ...tacheOuverte, parent_issue_url: null };
+  assert.match(avertissementDeLaTache(sansParent), /pas de parent/);
+  assert.equal(avertissementDeLaTache(tacheOuverte), null);
+  const r = await controleTacheLiee({ api: issues({ 'Hubperso#120': sansParent }), depot: 'MoKarade/Hubperso', pr: pr('Tâche : #120') });
+  assert.equal(r.ok, true);
+  assert.equal(r.avertissements.length, 1);
+  assert.match(rapportTacheLiee(r), /vert \(Hubperso#120\)[\s\S]*sans bloquer[\s\S]*Hubperso#120 : elle n’a pas de parent/);
+  const garni = await controleTacheLiee({ api: issues({ 'Hubperso#120': tacheOuverte }), depot: 'MoKarade/Hubperso', pr: pr('Tâche : #120') });
+  assert.deepEqual(garni.avertissements, []);
+  // une tâche fermée refuse la PR : pas d'avertissement en plus du motif
+  const fermee = await controleTacheLiee({ api: issues({ 'Hubperso#120': { ...sansParent, state: 'closed' } }), depot: 'MoKarade/Hubperso', pr: pr('Tâche : #120') });
+  assert.equal(fermee.ok, false);
+  assert.deepEqual(fermee.avertissements, []);
 });
 
 test('une PR sans ligne « Tâche : » est rouge, et le rapport dit quoi faire', async () => {
