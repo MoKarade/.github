@@ -6,10 +6,10 @@ Choix de Marc du 16/10/2026 (carte « Action Claude ») : il ne fusionne plus de
 Le blocage principal n'était pas le Garde-fou mais la règle « avis du code owner » de 4 rulesets (décochée par Marc le 16/10, 14 h 22 UTC). Il restait les PR dont le Garde-fou est rouge : cette nuit-là, 9 PR, dont 6 pour une simple ligne `secrets.X` dans un workflow.
 
 ## Comment ça marche
-1. `relecture-ia.yml` passe toutes les 10 minutes (et à la demande : « Run workflow »). `preparer` cherche, dans les dix dépôts, les PR ouvertes (pas brouillon, branche du dépôt) dont le Garde-fou est rouge et qui n'ont pas encore de statut « Relecture IA » sur leur commit.
+1. `relecture-ia.yml` passe toutes les 10 minutes (et à la demande : « Run workflow »). `preparer` cherche, dans les dix dépôts, les PR ouvertes (pas brouillon, branche du dépôt) dont le Garde-fou est rouge et qui n'ont pas encore de verdict de la relecture sur leur commit.
 2. Il refait le calcul du Garde-fou (`evaluer`, même code). Si une seule violation n'est pas dans la liste levable ci-dessous, la PR est ignorée : elle reste à Marc.
 3. Sinon, l'IA (Claude, `--tools ""` : aucun outil, aucun jeton GitHub, hors du dépôt) reçoit le diff des fichiers concernés et répond une ligne JSON : `approuve` ou `refuse`, avec une raison. Au moindre doute, elle refuse ; une réponse illisible est un refus.
-4. `publier` pose le statut « Relecture IA » sur le commit, commente la PR et, si l'IA approuve, rejoue le Garde-fou. Le Garde-fou lit le statut (il doit venir de `MoKarade` ET pointer vers une exécution de `relecture-ia.yml` sur `main` de ce dépôt), passe au vert, ferme l'éventuelle issue `qui:marc` ; Mergify fusionne si le reste est vert.
+4. `publier` commente la PR et, si l'IA approuve, rejoue le Garde-fou. La première ligne du commentaire est le verdict lu par la machine (`<!-- relecture-ia sha=… decision=… run=… -->`). Le Garde-fou le lit (commentaire de `MoKarade`, pour le commit exact de la PR, avec une exécution de `relecture-ia.yml` sur `main` de ce dépôt), passe au vert, ferme l'éventuelle issue `qui:marc` ; Mergify fusionne si le reste est vert.
 5. Un nouveau commit change le SHA : l'avis ne vaut plus, la PR est relue.
 
 Tant que l'IA n'a pas rendu d'avis, le Garde-fou est rouge « en attente de la relecture » et n'ouvre PAS d'issue `qui:marc` ; il l'ouvre seulement si l'IA refuse.
@@ -23,14 +23,19 @@ Test sauté ou supprimé, CI affaiblie (`continue-on-error`, `|| true`), seuil d
 
 ## Limites connues
 - [Probable] Le jeton d'abonnement (`claude setup-token`) sert à l'usage CI ; si Anthropic en change les conditions, la relecture s'arrête et le job devient rouge (aucune PR n'est approuvée par défaut).
-- L'avis est celui d'un modèle : une injection de prompt dans le diff est possible. Défenses : balise aléatoire, consigne de refuser toute phrase qui s'adresse au relecteur, aucun outil, liste levable courte, et le statut ne vaut que pour le commit relu.
+- L'avis est celui d'un modèle : une injection de prompt dans le diff est possible. Défenses : balise aléatoire, consigne de refuser toute phrase qui s'adresse au relecteur, aucun outil, liste levable courte, et le verdict ne vaut que pour le commit relu.
 - Latence : jusqu'à 10 minutes après le Garde-fou rouge. Au plus 5 PR par passe.
-- Le statut est posé avec le jeton de Marc (compte `MoKarade`) : quiconque détient ce jeton pourrait poser un statut ; d'où la vérification de l'exécution `relecture-ia.yml`, qu'on ne peut pas fabriquer à la main.
+- Le verdict est un commentaire posé avec le jeton de Marc (compte `MoKarade`). Limite connue : toute session qui commente sous ce compte peut écrire un faux verdict qui cite une vraie exécution de `relecture-ia.yml` ; la vérification de l'exécution écarte un commentaire quelconque, pas cette fraude volontaire. Choisi parce que le jeton du Garde-fou lit les commentaires dans les dix dépôts, privés compris, mais pas les statuts de commit (droit de plus à ajouter dans dix fichiers protégés).
 
 ## Les deux secrets (à poser une fois, dépôt MoKarade/.github, Settings > Secrets and variables > Actions)
 - `CLAUDE_CODE_OAUTH_TOKEN` : sur le PC, `claude setup-token`, copier le jeton. Pas de facturation en plus : c'est l'abonnement.
-- `RELECTURE_PAT` : jeton GitHub « fine-grained », propriétaire `MoKarade`, les 10 dépôts, droits : Actions (lecture et écriture), Commit statuses (lecture et écriture), Pull requests (lecture et écriture), Contents (lecture seule). Durée : la plus longue permise ; à renouveler à l'échéance (le job devient rouge sinon).
+- `RELECTURE_PAT` : jeton GitHub « fine-grained », propriétaire `MoKarade`, les 10 dépôts, droits : Actions (lecture et écriture), Pull requests (lecture et écriture), Contents (lecture seule). Rien d'autre : ni Checks, ni Commit statuses. Durée : la plus longue permise ; à renouveler à l'échéance (le job devient rouge sinon).
 Jamais par le chat.
+
+## Pannes et noms réservés
+- Une erreur de lecture sur une PR ou un dépôt (droit manquant, panne GitHub) n'arrête pas les autres : elle est notée, aucun avis n'est posé pour cette PR, et la dernière étape du job devient rouge avec la liste.
+- Le Garde-fou est lu par l'API des exécutions de workflow (droit Actions), pas par celle des contrôles : aucun droit « Checks » à donner au jeton.
+- Tout workflow dont le nom de fichier contient `garde-fou` ou `relecture` est traité comme le garde-fou lui-même : jamais levé par l'IA, fusion de Marc.
 
 ## Avant de modifier le workflow
 Lancer `actionlint` sur `relecture-ia.yml` : un workflow invalide ne s'exécute pas et n'affiche qu'une exécution « push » à zéro tâche (cas du 16/10/2026 : `runner.temp` n'existe pas dans `env:` du job).

@@ -2,8 +2,8 @@ name: Relecture IA
 
 # Relit les PR dont le Garde-fou est rouge pour une raison que le jugement peut trancher (références à
 # un secret de la CI, nombre de cas de test ; liste dans scripts/relecture-regles.mjs). Choix de Marc,
-# 16/10/2026 (carte « Action Claude »). Si l'IA approuve, le statut « Relecture IA » est posé sur le
-# commit et le Garde-fou est rejoué : il passe au vert, Mergify fusionne. Sinon la PR attend Marc.
+# 16/10/2026 (carte « Action Claude »). Si l'IA approuve, un commentaire de verdict est posé sur la
+# PR et le Garde-fou est rejoué : il passe au vert, Mergify fusionne. Sinon la PR attend Marc.
 # Détail, limites et pose des deux secrets : docs/relecture-ia.md.
 #
 # SÛRETÉ :
@@ -65,7 +65,7 @@ jobs:
           for dossier in "${dossiers[@]}"; do
             base="$(basename "$dossier" .json)"
             node "$racine/scripts/relecture-ia.mjs" consigne "$dossier" > "$RUNNER_TEMP/consigne.txt"
-            # Une réponse manquante (jeton expiré, panne) laisse la PR sans statut : la passe suivante réessaie.
+            # Une réponse manquante (jeton expiré, panne) laisse la PR sans verdict : la passe suivante réessaie.
             claude -p --model sonnet --tools "" --no-session-persistence --output-format text \
               < "$RUNNER_TEMP/consigne.txt" > "$VERDICTS/$base.txt" || rm -f "$VERDICTS/$base.txt"
           done
