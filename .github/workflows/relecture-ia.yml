@@ -30,10 +30,12 @@ jobs:
     # Plafond : une passe relit au plus 5 PR ; un job figé ne doit pas tourner six heures.
     timeout-minutes: 20
     runs-on: ubuntu-latest # dépôt public : machines GitHub (gratuites)
-    env:
-      DOSSIERS: ${{ runner.temp }}/relecture/dossiers
-      VERDICTS: ${{ runner.temp }}/relecture/verdicts
     steps:
+      # `runner` n'est pas disponible dans `env:` du job : les dossiers se déclarent ici.
+      - name: Dossiers de travail
+        run: |
+          echo "DOSSIERS=$RUNNER_TEMP/relecture/dossiers" >> "$GITHUB_ENV"
+          echo "VERDICTS=$RUNNER_TEMP/relecture/verdicts" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
