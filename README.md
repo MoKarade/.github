@@ -11,5 +11,6 @@ Le dépôt commun aux apps de Marc.
   - `conformite.yml` : la grille de conformité (15 lignes) lue dans le dépôt appelant, tableau ligne par ligne dans le résumé du job. Détail : [docs/conformite.md](docs/conformite.md). Lancement à la main : workflow « Essai de la conformité ».
   - `fumee.yml` : après un déploiement de production, vérifie la santé (`{ ok: true }`), que le summary refuse sans jeton et répond avec, et que la page de connexion répond ; rouge sinon. Logique et tests dans `scripts/fumee.mjs`. Lancement à la main : workflow « Essai de la fumée ».
   - `surveillance.yml` : toutes les 15 minutes, sonde `/api/sante` des apps listées dans `surveillance/apps.json` ; une app muette ouvre une issue `panne`, son retour la ferme. Logique et tests dans `scripts/surveillance.mjs`. Essai à la main : « Run workflow » avec un nom et une URL.
+  - `rapport-hebdo.yml` : chaque lundi (10:00 UTC), une issue `rapport` « Rapport de la semaine du AAAA-MM-JJ » : vitesse, qualité, santé du backlog des dix dépôts ; le premier lundi du mois, la revue de la grille. Ce qui n'est pas mesuré (dépôts privés, Vercel, tests instables) est dit « non mesuré ». Logique et tests dans `scripts/rapport-hebdo.mjs`. Lancement à la main : « Run workflow ».
 
 On change une règle par une PR sur ce dépôt.
