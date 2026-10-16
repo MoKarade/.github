@@ -111,7 +111,7 @@ Pour chaque dépôt, la tâche suivante est la première de cette liste :
 5. **Alternance** (décision 16b) : seulement quand ce chantier n'a plus rien de prenable : si la dernière tâche venait d'un chantier `chantier:standard`, on prend un chantier `chantier:fonction`, et inversement ; si un côté n'a rien de prenable, l'autre.
 6. **Le reste**, par `prio` croissante, puis par numéro d'issue.
 
-Chaque chantier porte `chantier:standard` (socle, CI, conformité, sécurité, dépendances, tests, contrat, gabarit, outillage) ou `chantier:fonction` (ce que Marc voit ou utilise). Sans cette étiquette, l'alternance n'est pas calculable et le script le signale dans `alertes`.
+Chaque chantier porte `chantier:standard` (socle, CI, conformité, sécurité, dépendances, tests, contrat, gabarit, outillage) ou `chantier:fonction` (ce que Marc voit ou utilise). Sans cette étiquette, l'alternance n'est pas calculable et le script le signale dans `alertes` en nommant le chantier. Le script remonte de la tâche jusqu'au premier ancêtre de niveau chantier (quatre sauts au plus) ; une tâche dont les missions n'ont aucun chantier au-dessus (mission commune à plusieurs dépôts) n'alterne pas et ne déclenche pas l'alerte : il n'y a rien à étiqueter.
 
 **Avant de lancer**, l'agent revérifie en direct la tâche choisie (ouverte, sans `en-cours`, sans PR ouverte) : `prochaines.json` peut dater de 40 minutes.
 
