@@ -4,7 +4,7 @@
 # que la page « Chantier Apps » lit avec le connecteur Google Drive.
 # Usage (PowerShell, utilisateur de Marc, pas en administrateur) : powershell -ExecutionPolicy Bypass -File installer.ps1 [-Drive "G:\Mon disque\_Gantt"]
 # Relancer le script est sans risque : il remplace la tâche et met le code à jour.
-param([string]$Drive = '')
+param([string]$Drive = '', [string]$Etat = 'C:\dev\_pc-local\gantt-releve')
 # 'Continue' : sous PowerShell 5.1, une ligne écrite sur stderr par un programme (git, gh) deviendrait une erreur fatale en 'Stop'
 $ErrorActionPreference = 'Continue'
 function Verifier($nom, $cmd, $versionArg) {
@@ -36,7 +36,8 @@ if (-not $Drive) { throw 'Dossier Google Drive introuvable : relancer avec -Driv
 New-Item -ItemType Directory -Force $Drive | Out-Null
 Write-Host "OK   Drive : $Drive"
 
-$Etat = Join-Path $env:LOCALAPPDATA 'Gantt'
+# Dossier d'état hors de AppData : lancé depuis l'app Claude (paquet Windows), AppData est redirigé vers un dossier privé
+# du paquet, que la tâche planifiée ne voit pas ; le relevé restait figé sans erreur (PC de Marc, 16/10).
 $Depot = Join-Path $Etat 'depot'
 New-Item -ItemType Directory -Force $Etat | Out-Null
 if (Test-Path (Join-Path $Depot '.git')) { git -C $Depot pull --ff-only --quiet 2>&1 | Out-Host }
@@ -45,7 +46,7 @@ if (-not (Test-Path (Join-Path $Depot 'outils\gantt-pc\tour.py'))) { throw "Code
 Write-Host "OK   code : $Depot"
 
 $lanceur = Join-Path $Depot 'outils\gantt-pc\lancer.ps1'
-$arg = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$lanceur`" -Drive `"$Drive`""
+$arg = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$lanceur`" -Drive `"$Drive`" -Etat `"$Etat`""
 $action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $arg
 $declencheur = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 10)
 $reglages = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 25) `
@@ -54,6 +55,6 @@ Register-ScheduledTask -TaskName 'Gantt-releve' -Action $action -Trigger $declen
     -Description 'Relevé du Gantt (page Chantier Apps) toutes les 10 min, sans Claude. Voir MoKarade/.github outils/gantt-pc.' -Force | Out-Null
 Write-Host 'OK   tâche Gantt-releve : toutes les 10 min, premier tour dans 1 min'
 # premier tour tout de suite, visible, pour voir une erreur éventuelle maintenant plutôt que dans le journal
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $lanceur -Drive $Drive
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $lanceur -Drive $Drive -Etat $Etat
 Get-Content (Join-Path $Etat 'tour.log') -Tail 3 | Out-Host
 Write-Host "Journal : $(Join-Path $Etat 'tour.log')   ·   État : $(Join-Path $Drive 'etat.json')"
