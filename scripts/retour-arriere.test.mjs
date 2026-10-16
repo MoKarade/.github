@@ -25,7 +25,7 @@ test('choisirCible : rien sans lien avec un déploiement récent, déjà retiré
   assert.match(choisirCible({ courantId: 'dpl_new', deploiements: [dep('dpl_new', 500, 'a'), ancien], maintenant: m }).raison, /vieux/);
   assert.match(choisirCible({ courantId: 'dpl_old', deploiements: [recent, ancien], maintenant: m }).raison, /déjà retiré/);
   assert.match(choisirCible({ courantId: 'dpl_new', deploiements: [recent], maintenant: m }).raison, /aucune version précédente/);
-  assert.match(choisirCible({ courantId: null, deploiements: [recent, ancien], maintenant: m }).raison, /illisible/);
+  assert.match(choisirCible({ courantId: null, deploiements: [recent, ancien], maintenant: m }).raison, /introuvable/);
   assert.match(choisirCible({ courantId: 'x', deploiements: [], maintenant: m }).raison, /aucun déploiement/);
 });
 
@@ -45,7 +45,7 @@ const fauxApi = (reponses, appels = []) => {
   return api;
 };
 const vercelOk = (appels) =>
-  fauxApi({ '/v9/projects/': { id: 'prj_1', targets: { production: { id: 'dpl_new' } } }, '/v6/deployments': { deployments: [recent, ancien] }, '/rollback/': {} }, appels);
+  fauxApi({ '/v9/projects/': { id: 'prj_1' }, '/v6/deployments': { deployments: [recent, ancien] }, '/v13/deployments/dpl_new': { alias: ['x.example'] }, '/v13/deployments/dpl_old': { alias: [] }, '/rollback/': {} }, appels);
 const ghFaux = (existantes = []) => {
   const appels = [];
   const gh = async (args) => {
@@ -57,9 +57,19 @@ const ghFaux = (existantes = []) => {
 
 test('lireProjet : projet, déploiement en ligne et liste READY de production', async () => {
   const appels = [];
-  const p = await lireProjet(vercelOk(appels), 'hubperso');
+  const p = await lireProjet(vercelOk(appels), 'hubperso', 'x.example');
   assert.deepEqual([p.projetId, p.courantId, p.deploiements.length], ['prj_1', 'dpl_new', 2]);
   assert.deepEqual(appels[1].params, { projectId: 'prj_1', target: 'production', state: 'READY', limit: 5 });
+});
+
+test('lireProjet : le déploiement en ligne est celui qui porte l’alias de production, pas le plus récent', async () => {
+  const api = fauxApi({ '/v9/projects/': { id: 'prj_1', targets: { production: { id: 'dpl_new' } } }, '/v6/deployments': { deployments: [recent, ancien] }, '/v13/deployments/dpl_new': { alias: [] }, '/v13/deployments/dpl_old': { alias: ['x.example'] } });
+  assert.equal((await lireProjet(api, 'hubperso', 'x.example')).courantId, 'dpl_old');
+});
+
+test('lireProjet : aucun alias de production trouvé → courantId nul (rien ne sera fait)', async () => {
+  const api = fauxApi({ '/v9/projects/': { id: 'prj_1' }, '/v6/deployments': { deployments: [recent] }, '/v13/deployments/': { alias: ['autre.example'] } });
+  assert.equal((await lireProjet(api, 'hubperso', 'x.example')).courantId, null);
 });
 
 test('traiter : remet la version précédente, refait la sonde, ouvre l’issue incident', async () => {
@@ -93,7 +103,8 @@ test('traiter : l’issue existe déjà → pas de doublon', async () => {
 
 test('traiter : rien à faire → aucun POST, aucune issue', async () => {
   const appels = [];
-  const api = fauxApi({ '/v9/projects/': { id: 'prj_1', targets: { production: { id: 'dpl_old' } } }, '/v6/deployments': { deployments: [recent, ancien] } }, appels);
+  // Déjà retiré : le déploiement en ligne est l'ancien, le fautif récent n'est plus servi.
+  const api = fauxApi({ '/v9/projects/': { id: 'prj_1' }, '/v6/deployments': { deployments: [recent, ancien] }, '/v13/deployments/dpl_new': { alias: [] }, '/v13/deployments/dpl_old': { alias: ['x.example'] } }, appels);
   const { gh, appels: ghAppels } = ghFaux();
   const r = await traiter(app, { api, sondeApres: async () => assert.fail('pas de sonde'), gh, maintenant: MAINTENANT });
   assert.match(r.etat, /rien fait/);
