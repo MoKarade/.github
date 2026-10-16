@@ -27,8 +27,13 @@ async function appFausse(surcharges = {}) {
     '/login': (req, res) => res.writeHead(200, { 'content-type': 'text/html' }).end('<html></html>'),
     ...surcharges,
   }));
-  // Map et non objet : l'URL d'une requête ne doit jamais choisir une méthode héritée (CodeQL, appel dynamique).
-  const serveur = createServer((req, res) => (routes.get(req.url) ?? ((_, r) => r.writeHead(404).end()))(req, res));
+  // Comparaison explicite : l'URL d'une requête ne choisit jamais la fonction appelée (CodeQL, appel dynamique).
+  const serveur = createServer((req, res) => {
+    for (const [chemin, traiter] of routes) {
+      if (chemin === req.url) return traiter(req, res);
+    }
+    return res.writeHead(404).end();
+  });
   await new Promise((ok) => serveur.listen(0, '127.0.0.1', ok));
   return { base: `http://127.0.0.1:${serveur.address().port}`, fermer: () => new Promise((ok) => serveur.close(ok)) };
 }
