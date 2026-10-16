@@ -1,0 +1,117 @@
+name: Réveil du Coordinateur (workflow commun)
+
+# Remplace la routine « Réacteur » (session Claude lancée à chaque événement, donc du quota). Écrit UNE fois ici ;
+# le `reacteur.yml` de chaque dépôt l'appelle quand une PR est fusionnée, quand la CI devient rouge ou quand une
+# tâche est fermée ET prouvée (docs/cycle-de-vie-tache.md §6). Tâche : MoKarade/.github#139.
+#
+#   reveiller:
+#     needs: preuve
+#     if: <PR fusionnée, CI rouge d'un humain, ou tâche prouvée>
+#     permissions: { contents: read, pull-requests: read, issues: read, actions: write }
+#     uses: MoKarade/.github/.github/workflows/reveil-reacteur.yml@main
+#     secrets: inherit
+#     with:
+#       runner: ${{ github.event.repository.visibility == 'public' && '"ubuntu-latest"' || '["self-hosted","pc-marc"]' }}
+#       type: ${{ github.event_name == 'pull_request' && 'pr_fusionnee' || github.event_name == 'issues' && 'tache_fermee' || 'ci_rouge' }}
+#       ...
+#
+# La logique est dans scripts/reveil-reacteur.mjs (testée, sans dépendance, sans IA) ; ce fichier ne fait que
+# l'appeler. Le script vient de ce dépôt, jamais du code de l'appelant. Il lance `boite-reacteur.yml` d'app-template,
+# qui commente la boîte (app-template#58) en bot : c'est ce commentaire qui réveille le Coordinateur.
+# Jeton : `REVEIL_TOKEN`, jeton fin de Marc limité à MoKarade/app-template (Actions : lecture et écriture), posé
+# comme secret dans les dix dépôts. Sans lui le job le dit par un avertissement et ne réveille personne.
+# Le jeton du job (`github.token`) lit le dépôt appelant et relance ses jobs en échec ; il ne sort jamais du script.
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: 'Machine, en JSON : "ubuntu-latest" (dépôt public) ou ["self-hosted","pc-marc"] (dépôt privé).'
+        type: string
+        default: '"ubuntu-latest"'
+      type:
+        description: 'pr_fusionnee | tache_fermee | ci_rouge'
+        type: string
+        required: true
+      depot:
+        description: 'Dépôt appelant (MoKarade/nom).'
+        type: string
+        required: true
+      pr:
+        description: 'Numéro de la PR (fusionnée, ou en CI rouge).'
+        type: string
+        default: ''
+      issue:
+        description: 'Numéro de l’issue fermée.'
+        type: string
+        default: ''
+      raison:
+        description: 'Raison de fermeture de l’issue (completed, not_planned).'
+        type: string
+        default: ''
+      evenement:
+        description: 'Événement de la CI rouge (pull_request, push, schedule).'
+        type: string
+        default: ''
+      sha:
+        description: 'Empreinte du commit de la CI rouge.'
+        type: string
+        default: ''
+      run:
+        description: 'Identifiant du run CI rouge.'
+        type: string
+        default: ''
+      branche-run:
+        description: 'Branche du run CI rouge.'
+        type: string
+        default: ''
+      branche-defaut:
+        description: 'Branche par défaut du dépôt appelant.'
+        type: string
+        default: main
+    secrets:
+      REVEIL_TOKEN:
+        description: 'Jeton fin limité à app-template (Actions : lecture et écriture).'
+        required: false
+
+permissions: {}
+
+jobs:
+  reveiller:
+    name: Réveiller le Coordinateur
+    # Plafond : un job figé ne doit pas tourner six heures. Dure quelques secondes.
+    timeout-minutes: 3
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      actions: write
+    steps:
+      - name: Récupérer le script de réveil
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: MoKarade/.github
+          ref: main
+          path: .reveil
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Décider, relancer ou réveiller (sans IA)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVEIL_TOKEN: ${{ secrets.REVEIL_TOKEN }}
+          REVEIL_TYPE: ${{ inputs.type }}
+          REVEIL_DEPOT: ${{ inputs.depot }}
+          REVEIL_PR: ${{ inputs.pr }}
+          REVEIL_ISSUE: ${{ inputs.issue }}
+          REVEIL_RAISON: ${{ inputs.raison }}
+          REVEIL_EVENEMENT: ${{ inputs.evenement }}
+          REVEIL_SHA: ${{ inputs.sha }}
+          REVEIL_RUN: ${{ inputs.run }}
+          REVEIL_BRANCHE_RUN: ${{ inputs.branche-run }}
+          REVEIL_BRANCHE_DEFAUT: ${{ inputs.branche-defaut }}
+        run: node .reveil/scripts/reveil-reacteur.mjs

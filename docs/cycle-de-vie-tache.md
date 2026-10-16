@@ -88,7 +88,7 @@ Un « Fini quand » non vérifiable (« c'est mieux ») est refusé. Un « Fini 
 | **Fil PC** | Tout ce qui ne tourne que sur le PC : robot de tests, Drive, NotebookLM, sauvegardes, bascule en public | Agir sur un oui relayé ; le oui de Marc est écrit dans ce fil |
 | **Jules** | Les tâches `jules` : simples, un fichier, sans chemin protégé, sans base, sans secret, sans donnée perso | Les chemins protégés (le garde-fou les permettrait, mais une tâche simple n'en a pas besoin) ; une tâche sans « Fini quand » |
 | **Routine continue** (une fois par jour à 6 h, et au réveil par la boîte) | Fait le ménage, choisit la tâche suivante, la distribue (§6) | Inventer du travail |
-| **Réacteur** (routine réveillée par un événement) | Met à jour les PR en retard, relance un échec de charge du robot de tests, réveille le Coordinateur quand il faut du jugement (§6) | Résoudre un conflit, fusionner, poser « Acceptée » |
+| **Réacteur** (workflow commun `reveil-reacteur.yml`, sans IA) | Relance une fois un échec de charge du robot de tests, signale « D libre » ou « preuve à poser » en réveillant le Coordinateur (§6). Les PR en retard sont tenues à jour par la file de Mergify | Résoudre un conflit, fusionner, poser « Acceptée », nommer une tâche suivante |
 | **CI** | Décide si une PR peut fusionner | |
 | **Mergify** | Fusionne en squash une PR verte, hors brouillon, sans `hold`, une à la fois ; les chemins protégés aussi, quand le contrôle « Garde-fou » est vert (§9) | Fusionner une PR dont le garde-fou est rouge |
 
@@ -126,9 +126,9 @@ Une tâche n'est **prenable** que si elle remplit cinq conditions :
 
 **Qui lance** : un **événement** d'abord, un relevé à l'heure seulement en filet quotidien (décision de Marc, 15/10/2026 : « plus de vérifications toutes les X heures »). Une demande directe de Marc n'attend rien : le Coordinateur ouvre le fil tout de suite.
 
-1. **Événement.** Une PR fusionnée, ou une CI rouge, dans l'un des dix dépôts déclenche le workflow `reacteur.yml` du dépôt, qui appelle la routine **Réacteur**. Elle fait le travail mécanique, puis, s'il faut du jugement, lance le workflow `boite-reacteur.yml` de `app-template`. Ce workflow commente la **boîte** (la PR brouillon permanente `app-template#58`, à ne jamais fusionner ni fermer) en `github-actions[bot]`, et le Coordinateur, abonné à la boîte, est réveillé.
+1. **Événement.** Une PR fusionnée, ou une CI rouge, dans l'un des dix dépôts déclenche le workflow `reacteur.yml` du dépôt, qui appelle le workflow commun `reveil-reacteur.yml` de ce dépôt (script `scripts/reveil-reacteur.mjs`, testé, **sans IA** : aucun quota Claude, aucun appel à une routine). Il filtre l'événement, relance une seule fois les jobs d'une CI morte par échec de charge du robot (sans étape en échec), puis lance le workflow `boite-reacteur.yml` de `app-template` avec le jeton `REVEIL_TOKEN` (jeton fin de Marc limité à `app-template`, Actions en lecture et écriture, secret des dix dépôts). Le message dit « D libre » ou « preuve à poser sur D#n », jamais une tâche suivante (l'ordre vient de `prochaines.json`). Ce workflow commente la **boîte** (la PR brouillon permanente `app-template#58`, à ne jamais fusionner ni fermer) en `github-actions[bot]`, et le Coordinateur, abonné à la boîte, est réveillé.
 2. **Pourquoi le bot.** Un commentaire fait avec le compte de Marc ne réveille personne : GitHub ne notifie pas un abonné pour ses propres commentaires (prouvé le 15/10/2026).
-3. **Filet.** Une fois par jour à 6 h (heure du Québec, `CRON_TZ=America/Toronto`), le Réacteur (mode FILET) et la routine continue vérifient ce qu'aucun événement n'a signalé.
+3. **Filet.** Une fois par jour à 6 h (heure du Québec, `CRON_TZ=America/Toronto`), la routine continue vérifie ce qu'aucun événement n'a signalé.
 4. **Règle.** Toute nouvelle surveillance passe d'abord par un événement. Une horloge n'est permise que comme filet quotidien.
 
 **Capacité** : au plus **un fil** en cours et **une tâche Jules** par dépôt. Un dépôt occupé est sauté. Une tâche `preuve-attendue` n'occupe pas le dépôt (le fil a livré, la preuve est programmée), mais elle n'est **pas finie** : elle reste ouverte et ne compte comme acceptée nulle part. Un dépôt n'est libéré par une fermeture que si le garde-fou de preuve (§10 bis) l'a validée.
@@ -369,7 +369,7 @@ Une question à Marc prend toujours la forme d'une **carte**, jamais d'une quest
 | Routine continue | §5, §6 |
 | Gantt et sa pastille | §7, §13 |
 | Workflows communs de ce dépôt (`captures`, `fumee`, `rapport-hebdo`) | §8, §11, §12 |
-| Réacteur (routine) et workflows `reacteur.yml` (chaque dépôt) et `boite-reacteur.yml` (`app-template`) | §6 : réveils par événement |
+| Réacteur : `reveil-reacteur.yml` (commun), `reacteur.yml` (chaque dépôt) et `boite-reacteur.yml` (`app-template`) | §6 : réveils par événement |
 | Instructions du projet (résumé du §0) | tout, pour chaque session |
 
 Ce qui n'est pas encore branché est suivi en tâches sous le chantier « Standardiser les tâches », dans ce dépôt.
