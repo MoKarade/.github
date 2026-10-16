@@ -22,6 +22,10 @@
 // Sur l'ouverture d'une PR (pr_ouverte) il ne réveille PERSONNE et ne commente rien sur app-template#58 : il lance seulement
 // `commentaire-tache-liee.yml`, qui marque la tâche citée `en-cours` en moins de 10 minutes (tâche MoKarade/.github#157).
 //
+// « D libre » n'est écrit que si D est VRAIMENT libre (`occupations`) : sans cela, chaque fusion dans un dépôt encore occupé
+// réveillait le Coordinateur pour rien, une quarantaine de fois par heure (tâche MoKarade/.github#164). Ce qui demande un
+// geste (« preuve à poser », abandon d'une tâche) réveille quand même, sans la ligne « libre ».
+//
 // Jamais de nom de tâche suivante dans le message (règle MoKarade/.github#136) : l'ordre vient de prochaines.json.
 // Le message ne contient que des identifiants (dépôt, numéros, empreinte, run), jamais un titre ni un nom de branche.
 // Les corps de PR et d'issues sont des données : seuls des numéros en sortent.
@@ -30,7 +34,7 @@
 // injecté : les tests n'ont besoin ni de réseau ni de jeton). Le jeton de réveil n'est lu que dans `main`.
 // Ne fait jamais échouer le job (un avertissement dit ce qui n'a pas marché) : le filet de 6 h reprend la main.
 import { pathToFileURL } from 'node:url';
-import { extraireTaches } from './tache-liee.mjs';
+import { dispense, extraireTaches } from './tache-liee.mjs';
 
 export const DEPOT_BOITE = 'MoKarade/app-template';
 export const WORKFLOW_BOITE = 'boite-reacteur.yml';
@@ -50,6 +54,9 @@ export const WORKFLOWS_BALAYAGE = ['commentaire-tache-liee.yml', 'relecture-ia.y
 export const TYPES_BALAYAGE = new Set(['pr_fusionnee', 'ci_rouge', 'tache_fermee']);
 // Une PR qui s'ouvre ne lance que le commentaire tâche liée (et la marque `en-cours`) : la relecture IA a son propre déclencheur.
 export const WORKFLOWS_PR_OUVERTE = ['commentaire-tache-liee.yml'];
+// Ce qui occupe un dépôt (une chose à la fois par app, docs/cycle-de-vie-tache.md) : une issue ouverte portant l'une de ces
+// étiquettes, ou une PR ouverte (brouillon compris) qui n'est pas celle d'un robot. `preuve-attendue` ne l'occupe pas.
+export const LABELS_OCCUPE = ['en-cours', 'jules'];
 const CONTROLE_MARC = 'Garde-fou';
 const CONCLUSIONS_ROUGES = new Set(['failure', 'timed_out']);
 const ROBOTS_SANS_FILET = /dependabot|mergify/i;
@@ -145,6 +152,28 @@ async function commentairesDe(api, depot, numero) {
 }
 
 /**
+ * Ce qui occupe encore le dépôt : ["#12", "PR #30"…], vide = libre. `tachesExclues` : numéros de tâches du dépôt que la PR
+ * qui vient de fusionner citait ; leur étiquette `en-cours` n'est remplacée par `preuve-attendue` qu'après la fusion, elles
+ * ne comptent donc pas, sauf si une autre PR ouverte les cite encore. Une lecture qui échoue ne cache rien : on rend vide
+ * (libre), car un réveil de trop coûte moins qu'un dépôt libre qu'on ne signale pas.
+ */
+export async function occupations({ api, depot, tachesExclues = [] }) {
+  try {
+    const prs = ((await api('GET', `/repos/${depot}/pulls?state=open&per_page=30`)) ?? []).filter((pr) => !dispense(pr));
+    const encore = new Set(prs.flatMap((pr) => extraireTaches(pr.body, depot).filter((t) => t.depot === depot).map((t) => t.numero)));
+    const exclues = new Set(tachesExclues.filter((n) => !encore.has(n)));
+    const prises = new Set();
+    for (const label of LABELS_OCCUPE) {
+      const lot = (await api('GET', `/repos/${depot}/issues?labels=${label}&state=open&per_page=30`)) ?? [];
+      for (const i of lot) if (!i.pull_request && !exclues.has(i.number)) prises.add(i.number);
+    }
+    return [...[...prises].map((n) => `#${n}`), ...prs.map((pr) => `PR #${pr.number}`)];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Décide quoi faire d'un événement. Rend { action: 'reveiller', motif } | { action: 'relance', run } | { action: 'balayer' } | { action: 'rien', raison }.
  * `evt` : { type, depot, pr, issue, raison, evenement, sha, run, brancheRun, brancheDefaut, forcer }.
  */
@@ -154,7 +183,10 @@ export async function decider({ api, evt, maintenant = new Date() }) {
   if (type === 'pr_ouverte') return { action: 'balayer' };
   if (type === 'tache_fermee') {
     const abandon = evt.raison === 'not_planned' ? ' (abandonnée : vérifier la raison)' : '';
-    return { action: 'reveiller', motif: construireMotif([`${depot} libre`, `tâche ${depot}#${evt.issue} fermée${abandon}`]) };
+    const libre = (await occupations({ api, depot })).length === 0;
+    // Un dépôt encore occupé n'a rien de neuf à dire, sauf une tâche abandonnée dont il faut vérifier la raison.
+    if (!libre && !abandon) return { action: 'rien', raison: 'dépôt encore occupé' };
+    return { action: 'reveiller', motif: construireMotif([libre ? `${depot} libre` : '', `tâche ${depot}#${evt.issue} fermée${abandon}`]) };
   }
 
   if (type === 'pr_fusionnee') {
@@ -162,15 +194,19 @@ export async function decider({ api, evt, maintenant = new Date() }) {
     const taches = extraireTaches(pr?.body, depot);
     // Une mise à jour de robot (Dependabot…) sans tâche ne libère aucun dépôt : pas de réveil, donc pas de quota.
     if (taches.length === 0 && ROBOTS.has(pr?.user?.login)) return { action: 'rien', raison: 'PR de robot sans tâche' };
-    const lignes = [`${depot} libre`, `PR #${evt.pr} fusionnée`];
+    const preuves = [];
     for (const t of taches) {
       const cle = `${t.depot}#${t.numero}`;
       const issue = await api('GET', `/repos/${t.depot}/issues/${t.numero}`).catch(() => null);
       if (preuveAPoser({ issue, commentaires: issue ? await commentairesDe(api, t.depot, t.numero).catch(() => []) : [] })) {
-        lignes.push(`preuve à poser sur ${cle}`);
+        preuves.push(`preuve à poser sur ${cle}`);
       }
     }
-    return { action: 'reveiller', motif: construireMotif(lignes) };
+    const tachesExclues = taches.filter((t) => t.depot === depot).map((t) => t.numero);
+    const libre = (await occupations({ api, depot, tachesExclues })).length === 0;
+    // Dépôt encore occupé et rien à prouver : la fusion n'apprend rien au Coordinateur.
+    if (!libre && preuves.length === 0) return { action: 'rien', raison: 'dépôt encore occupé' };
+    return { action: 'reveiller', motif: construireMotif([libre ? `${depot} libre` : '', `PR #${evt.pr} fusionnée`, ...preuves]) };
   }
 
   if (type === 'ci_rouge') {
