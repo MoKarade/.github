@@ -1,6 +1,6 @@
 name: Tests du garde-fou
 
-# Les tests du contrôle appelé par les dix dépôts (scripts/garde-fou.mjs). Aucune dépendance :
+# Les tests des contrôles appelés par les dix dépôts (scripts/garde-fou.mjs, scripts/fumee.mjs). Aucune dépendance :
 # `node --test`. Aucun `paths:` : un contrôle requis filtré ne tournerait pas.
 on:
   push:
@@ -26,4 +26,4 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
-      - run: node --test scripts/garde-fou.test.mjs
+      - run: node --test scripts/garde-fou.test.mjs scripts/fumee.test.mjs
