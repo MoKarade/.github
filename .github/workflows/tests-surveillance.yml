@@ -1,6 +1,6 @@
 name: Tests de la surveillance
 
-# Les tests de la surveillance (scripts/surveillance.mjs) : un vrai serveur HTTP local et un faux `gh`,
+# Les tests de la surveillance (scripts/surveillance.mjs) et des déploiements (scripts/deploiements.mjs) : un vrai serveur HTTP local et un faux `gh`,
 # aucun réseau externe, aucune dépendance. Aucun `paths:` : un contrôle exigé filtré ne tournerait pas.
 on:
   push:
@@ -26,4 +26,4 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-      - run: node --test scripts/surveillance.test.mjs
+      - run: node --test scripts/surveillance.test.mjs scripts/deploiements.test.mjs
