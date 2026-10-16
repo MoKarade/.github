@@ -10,11 +10,13 @@ name: Réacteur
 # titre ni un nom de branche : tout ce qui vient d'un tiers reste hors du texte.
 # Une tâche fermée ne réveille le Coordinateur que si le garde-fou de preuve (MoKarade/.github, cycle de vie §10 bis)
 # valide la fermeture ; sans preuve valide il rouvre l'issue et personne n'est réveillé.
+# PR ouverte (MoKarade/.github#157) : le même workflow commun ne réveille personne, il lance seulement le commentaire tâche liée,
+# qui marque `en-cours` la tâche citée par la PR (la prise est tracée par la machine, pas par la mémoire du fil).
 # Filet quotidien (MoKarade/.github#143) : chaque jour à 6 h (heure du Québec), le même workflow commun relit le dépôt avec le
 # jeton du job (PR rouge depuis plus de 30 min, incident ouvert, branche par défaut rouge) et ne réveille que s'il y a un signal.
 on:
   pull_request:
-    types: [closed]
+    types: [closed, opened, reopened, ready_for_review, edited]
   workflow_run:
     workflows: [CI]
     types: [completed]
@@ -53,6 +55,7 @@ jobs:
     if: >-
       always() && (
       (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      (github.event_name == 'pull_request' && github.event.action != 'closed' && github.event.pull_request.user.type != 'Bot') ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.actor.type != 'Bot') ||
       (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'niveau:tâche') && contains(fromJSON('["acceptee","abandon"]'), needs.preuve.outputs.statut)) ||
       github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
@@ -68,7 +71,7 @@ jobs:
     secrets: inherit
     with:
       runner: ${{ github.event.repository.visibility == 'public' && '"ubuntu-latest"' || '["self-hosted","pc-marc"]' }}
-      type: ${{ github.event_name == 'pull_request' && 'pr_fusionnee' || github.event_name == 'issues' && 'tache_fermee' || github.event_name == 'workflow_run' && 'ci_rouge' || 'filet' }}
+      type: ${{ github.event_name == 'pull_request' && (github.event.action == 'closed' && 'pr_fusionnee' || 'pr_ouverte') || github.event_name == 'issues' && 'tache_fermee' || github.event_name == 'workflow_run' && 'ci_rouge' || 'filet' }}
       depot: ${{ github.repository }}
       pr: ${{ format('{0}', github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number) }}
       issue: ${{ format('{0}', github.event.issue.number) }}
