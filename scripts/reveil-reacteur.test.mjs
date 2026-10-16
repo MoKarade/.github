@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEPOT_BOITE, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, construireMotif, decider, estPanneRunner, preuveAPoser, traiter } from './reveil-reacteur.mjs';
+import { DEPOT_BOITE, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, construireMotif, decider, estPanneRunner, heureQuebec, preuveAPoser, rougeDepuis, traiter } from './reveil-reacteur.mjs';
 
 // Fausse API GitHub en mémoire : les lectures viennent de `donnees`, les écritures sont gardées.
 function faux(donnees = {}) {
@@ -159,4 +159,101 @@ test('traiter : une panne du robot de tests relance les jobs en échec une seule
   });
   await traiter({ api, evt: roug, jetonReveil: 'jeton', journal: () => {} });
   assert.deepEqual(ecritures.map((e) => `${e.methode} ${e.chemin}`), ['POST /repos/MoKarade/DriveAI/actions/runs/555/rerun-failed-jobs']);
+});
+
+// ---- Filet quotidien (tâche MoKarade/.github#143) ----
+// Vendredi 16/10/2026 à 6 h au Québec (heure d'été, UTC-4) = 10:00 UTC ; jeudi 15/10 à 6 h = 10:00 UTC.
+const VENDREDI_6H = new Date('2026-10-16T10:00:00Z');
+const JEUDI_6H = new Date('2026-10-15T10:00:00Z');
+const il = (minutes, extra = {}) => ({ name: 'Gate', conclusion: 'failure', completed_at: new Date(VENDREDI_6H.getTime() - minutes * 60_000).toISOString(), ...extra });
+const evtFilet = (extra = {}) => ({ type: 'filet', depot: 'MoKarade/JobAI', brancheDefaut: 'main', ...extra });
+const pr = (numero, extra = {}) => ({ number: numero, draft: false, user: humain, head: { sha: `sha${numero}` }, ...extra });
+
+test('heureQuebec : heure d’été et d’hiver, jour de la semaine', () => {
+  assert.deepEqual(heureQuebec(new Date('2026-10-16T10:00:00Z')), { heure: 6, jour: 'Fri' });
+  assert.deepEqual(heureQuebec(new Date('2026-10-16T11:00:00Z')), { heure: 7, jour: 'Fri' });
+  // après le retour à l'heure normale (1er novembre 2026), 6 h au Québec = 11:00 UTC
+  assert.deepEqual(heureQuebec(new Date('2026-11-02T11:00:00Z')), { heure: 6, jour: 'Mon' });
+  assert.deepEqual(heureQuebec(new Date('2026-11-02T10:00:00Z')), { heure: 5, jour: 'Mon' });
+  assert.equal(heureQuebec(new Date('2026-10-16T04:30:00Z')).heure, 0); // minuit : 0, jamais 24
+});
+
+test('rougeDepuis : rouge depuis plus de 30 min seulement, Garde-fou exclu', () => {
+  assert.equal(rougeDepuis([il(31)], VENDREDI_6H), true);
+  assert.equal(rougeDepuis([il(10)], VENDREDI_6H), false);
+  assert.equal(rougeDepuis([il(120, { conclusion: 'success' })], VENDREDI_6H), false);
+  assert.equal(rougeDepuis([il(120, { conclusion: 'neutral' })], VENDREDI_6H), false);
+  assert.equal(rougeDepuis([il(120, { name: 'Garde-fou' })], VENDREDI_6H), false);
+  assert.equal(rougeDepuis([il(120, { conclusion: 'timed_out' })], VENDREDI_6H), true);
+  assert.equal(rougeDepuis([il(120, { completed_at: null })], VENDREDI_6H), false);
+  assert.equal(rougeDepuis([], VENDREDI_6H), false);
+});
+
+test('filet : hors de 6 h au Québec, rien (sans même lire GitHub) ; « forcer » passe outre', async () => {
+  const lectures = [];
+  const api = async (m, c) => { lectures.push(c); return []; };
+  const r = await decider({ api, evt: evtFilet(), maintenant: new Date('2026-10-16T11:00:00Z') });
+  assert.equal(r.action, 'rien');
+  assert.deepEqual(lectures, []);
+  const f = await decider({ api, evt: evtFilet({ forcer: 'true' }), maintenant: new Date('2026-10-16T11:00:00Z') });
+  assert.equal(f.action, 'rien');
+  assert.match(f.raison, /rien à signaler/);
+  assert.ok(lectures.length > 0);
+});
+
+test('filet : rien à signaler, aucun réveil et aucune écriture', async () => {
+  const { api, ecritures } = faux({
+    '/repos/MoKarade/JobAI/pulls': [pr(3), pr(4, { draft: true })],
+    '/repos/MoKarade/JobAI/commits/sha3/check-runs': { check_runs: [il(500, { conclusion: 'success' })] },
+    '/repos/MoKarade/JobAI/issues': [],
+    '/repos/MoKarade/JobAI/commits/main/check-runs': { check_runs: [il(500, { conclusion: 'success' })] },
+  });
+  const sortie = [];
+  const r = await traiter({ api, evt: evtFilet(), jetonReveil: 'jeton', journal: (l) => sortie.push(l), maintenant: VENDREDI_6H });
+  assert.equal(r.action, 'rien');
+  assert.deepEqual(ecritures, []);
+  assert.match(sortie.join(''), /rien à signaler/);
+});
+
+test('filet : PR rouge, incident et branche par défaut rouge, un seul réveil avec des numéros', async () => {
+  const { api, ecritures } = faux({
+    '/repos/MoKarade/JobAI/pulls': [
+      pr(3),
+      pr(4),
+      pr(5, { draft: true }),
+      pr(6, { user: { login: 'dependabot[bot]', type: 'Bot' } }),
+      pr(7, { user: { login: 'mergify[bot]', type: 'Bot' } }),
+      pr(8),
+    ],
+    '/repos/MoKarade/JobAI/commits/sha3/check-runs': { check_runs: [il(45)] },
+    '/repos/MoKarade/JobAI/commits/sha4/check-runs': { check_runs: [il(5)] },
+    '/repos/MoKarade/JobAI/commits/sha8/check-runs': { check_runs: [il(600, { name: 'Garde-fou' })] },
+    '/repos/MoKarade/JobAI/issues': [{ number: 12 }, { number: 13, pull_request: {} }],
+    '/repos/MoKarade/JobAI/commits/main/check-runs': { check_runs: [il(90)] },
+  });
+  const r = await traiter({ api, evt: evtFilet(), jetonReveil: 'jeton', journal: () => {}, maintenant: VENDREDI_6H });
+  assert.equal(r.reveille, true);
+  assert.equal(
+    r.motif,
+    'RÉACTEUR : PR rouge depuis plus de 30 min sur MoKarade/JobAI : #3 ; incident ouvert sur MoKarade/JobAI : #12 ; branche par défaut rouge sur MoKarade/JobAI',
+  );
+  assert.equal(ecritures.length, 1);
+  assert.equal(ecritures[0].chemin, `/repos/${DEPOT_BOITE}/actions/workflows/${WORKFLOW_BOITE}/dispatches`);
+  assert.deepEqual(ecritures[0].corps, { ref: 'main', inputs: { texte: r.motif } });
+  assert.equal(ecritures[0].jeton, 'jeton');
+});
+
+test('filet : le rappel du jeudi ne vient que de .github, et seulement le jeudi', async () => {
+  const vide = { '/repos/MoKarade/.github/pulls': [], '/repos/MoKarade/.github/issues': [], '/repos/MoKarade/JobAI/pulls': [], '/repos/MoKarade/JobAI/issues': [] };
+  const { api } = faux(vide);
+  const jeudiGithub = await decider({ api, evt: evtFilet({ depot: 'MoKarade/.github' }), maintenant: JEUDI_6H });
+  assert.deepEqual(jeudiGithub, { action: 'reveiller', motif: 'RÉACTEUR : jeudi : remesure hebdo de la consommation Claude à lancer' });
+  assert.equal((await decider({ api, evt: evtFilet({ depot: 'MoKarade/.github' }), maintenant: VENDREDI_6H })).action, 'rien');
+  assert.equal((await decider({ api, evt: evtFilet(), maintenant: JEUDI_6H })).action, 'rien');
+});
+
+test('filet : un dépôt vide ou illisible (réponses nulles) ne casse pas le passage', async () => {
+  const { api } = faux();
+  const r = await decider({ api, evt: evtFilet(), maintenant: VENDREDI_6H });
+  assert.deepEqual(r, { action: 'rien', raison: 'rien à signaler' });
 });

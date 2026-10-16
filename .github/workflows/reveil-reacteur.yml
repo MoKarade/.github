@@ -1,8 +1,9 @@
 name: Réveil du Coordinateur (workflow commun)
 
 # Remplace la routine « Réacteur » (session Claude lancée à chaque événement, donc du quota). Écrit UNE fois ici ;
-# le `reacteur.yml` de chaque dépôt l'appelle quand une PR est fusionnée, quand la CI devient rouge ou quand une
-# tâche est fermée ET prouvée (docs/cycle-de-vie-tache.md §6). Tâche : MoKarade/.github#139.
+# le `reacteur.yml` de chaque dépôt l'appelle quand une PR est fusionnée, quand la CI devient rouge, quand une
+# tâche est fermée ET prouvée, et une fois par jour à 6 h (heure du Québec) pour le filet (docs/cycle-de-vie-tache.md §6).
+# Tâches : MoKarade/.github#139 (événements) et #143 (filet).
 #
 #   reveiller:
 #     needs: preuve
@@ -12,7 +13,7 @@ name: Réveil du Coordinateur (workflow commun)
 #     secrets: inherit
 #     with:
 #       runner: ${{ github.event.repository.visibility == 'public' && '"ubuntu-latest"' || '["self-hosted","pc-marc"]' }}
-#       type: ${{ github.event_name == 'pull_request' && 'pr_fusionnee' || github.event_name == 'issues' && 'tache_fermee' || 'ci_rouge' }}
+#       type: ${{ github.event_name == 'pull_request' && 'pr_fusionnee' || github.event_name == 'issues' && 'tache_fermee' || github.event_name == 'workflow_run' && 'ci_rouge' || 'filet' }}
 #       ...
 #
 # La logique est dans scripts/reveil-reacteur.mjs (testée, sans dépendance, sans IA) ; ce fichier ne fait que
@@ -29,7 +30,7 @@ on:
         type: string
         default: '"ubuntu-latest"'
       type:
-        description: 'pr_fusionnee | tache_fermee | ci_rouge'
+        description: 'pr_fusionnee | tache_fermee | ci_rouge | filet'
         type: string
         required: true
       depot:
@@ -68,6 +69,10 @@ on:
         description: 'Branche par défaut du dépôt appelant.'
         type: string
         default: main
+      forcer:
+        description: 'true : le filet passe même hors de 6 h au Québec (lancement manuel, essais).'
+        type: string
+        default: ''
     secrets:
       REVEIL_TOKEN:
         description: 'Jeton fin limité à app-template (Actions : lecture et écriture).'
@@ -85,6 +90,7 @@ jobs:
       contents: read
       pull-requests: read
       issues: read
+      checks: read
       actions: write
     steps:
       - name: Récupérer le script de réveil
@@ -114,4 +120,5 @@ jobs:
           REVEIL_RUN: ${{ inputs.run }}
           REVEIL_BRANCHE_RUN: ${{ inputs.branche-run }}
           REVEIL_BRANCHE_DEFAUT: ${{ inputs.branche-defaut }}
+          REVEIL_FORCER: ${{ inputs.forcer }}
         run: node .reveil/scripts/reveil-reacteur.mjs
