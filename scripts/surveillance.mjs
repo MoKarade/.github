@@ -32,7 +32,9 @@ export function lireApps(brut) {
       return { nom: a.nom, depot: a.depot, sante: null, raison: a.raison };
     }
     if (typeof a.sante !== 'string' || !/^https:\/\//.test(a.sante)) throw new Error(`app ${a.nom} : sante doit être une URL https`);
-    return { nom: a.nom, depot: a.depot, sante: a.sante };
+    // `vercel` (facultatif) : nom du projet Vercel, utilisé par le retour en arrière automatique (retour-arriere.mjs).
+    if (a.vercel !== undefined && (typeof a.vercel !== 'string' || !/^[a-z0-9-]+$/.test(a.vercel))) throw new Error(`app ${a.nom} : vercel doit être un nom de projet (minuscules, chiffres, tirets)`);
+    return { nom: a.nom, depot: a.depot, sante: a.sante, ...(a.vercel ? { vercel: a.vercel } : {}) };
   });
 }
 

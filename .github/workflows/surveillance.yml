@@ -10,6 +10,11 @@ name: Surveillance des apps
 # ouvre une issue `panne` « Déploiement en échec : <app> », le déploiement suivant réussi la ferme (tâche #60).
 # Un dépôt que le jeton du job ne lit pas (privé) est « non mesuré » dans le résumé, jamais un faux vert.
 #
+# Tâche #30 : si une app dont la santé est rouge a un projet Vercel déclaré (`vercel` dans surveillance/apps.json)
+# et que sa panne suit un déploiement récent, la version précédente est remise en ligne et une issue `incident` est
+# ouverte (scripts/retour-arriere.mjs). Seul pas qui lit un secret du dépôt : VERCEL_TOKEN. Sans lui, ce pas est
+# inactif et le dit dans le résumé.
+#
 # Lancement d'essai (preuve « une panne ouvre l'issue, le retour la ferme ») : « Run workflow » avec
 # un nom et une URL de santé ; seule cette app simulée est sondée. Pour l'échec de déploiement : choisir
 # `echec` puis `succes` dans « deploiement-essai » (un déploiement simulé, rien n'est lu chez Vercel).
@@ -35,6 +40,11 @@ on:
           - ''
           - echec
           - succes
+      retour-controle:
+        description: 'Contrôle en lecture seule du retour en arrière : lit Vercel pour chaque app et dit si la version précédente est prête (rien n’est changé)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -75,3 +85,13 @@ jobs:
           SURVEILLANCE_ESSAI_NOM: ${{ inputs.nom-essai }}
           DEPLOIEMENT_ESSAI: ${{ inputs.deploiement-essai }}
         run: node scripts/deploiements.mjs
+
+      - name: Remettre la version précédente si une app tombe après un déploiement
+        if: ${{ !cancelled() && !inputs.deploiement-essai && !inputs.url-essai }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_EQUIPE: mokarades-projects
+          RETOUR_CONTROLE: ${{ inputs.retour-controle }}
+        run: node scripts/retour-arriere.mjs
