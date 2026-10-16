@@ -19,6 +19,10 @@ import { pathToFileURL } from 'node:url';
 export const LABEL_TACHE = 'niveau:tâche';
 export const LABEL_MANQUE = 'preuve-manquante';
 export const LABEL_ATTENDUE = 'preuve-attendue';
+// Retirés à toute fermeture validée : une tâche finie n'est plus « en cours » et n'attend plus de geste de Marc.
+export const LABELS_A_RETIRER = [LABEL_MANQUE, LABEL_ATTENDUE, 'en-cours', 'qui:marc'];
+// Une issue d'essai fermée `not_planned` par l'essai lui-même n'a rien à prouver (le Gantt l'ignore aussi).
+export const LABEL_ESSAI = 'essai';
 
 // Même définition que le Gantt (fetch.py, PREUVE) : un commentaire de preuve COMMENCE par ce mot en gras.
 export const ENTETE_ACCEPTEE = /^\s*\*\*\s*Accept[ée]e\s*\*\*/i;
@@ -172,6 +176,7 @@ export async function traiter({ api, depot, numero, config = {} }) {
   if (!etiquettes.includes(LABEL_TACHE)) return { statut: 'ignoree', motifs: [`pas de ${LABEL_TACHE}`] };
 
   const raison = issue.state_reason ?? 'completed';
+  if (etiquettes.includes(LABEL_ESSAI) && raison === 'not_planned') return { statut: 'ignoree', motifs: ['issue d’essai fermée sans suite'] };
   const commentaires = await pages(api, `/repos/${depot}/issues/${numero}/comments`);
 
   let pr = null;
@@ -197,7 +202,7 @@ export async function traiter({ api, depot, numero, config = {} }) {
 
   const verdict = evaluer({ raison, commentaires, pr, fichiers, deploiement });
   if (verdict.ok) {
-    for (const nom of [LABEL_MANQUE, LABEL_ATTENDUE]) {
+    for (const nom of LABELS_A_RETIRER) {
       if (etiquettes.includes(nom)) await api(`/repos/${depot}/issues/${numero}/labels/${encodeURIComponent(nom)}`, { method: 'DELETE' }).catch(() => {});
     }
     return { statut: verdict.type === 'abandon' ? 'abandon' : 'acceptee', motifs: [] };
