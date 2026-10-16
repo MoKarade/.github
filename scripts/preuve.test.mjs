@@ -191,6 +191,32 @@ test('traiter : acceptée, l’étiquette preuve-manquante est retirée', async 
   assert.deepEqual(appels.filter((a) => a.methode === 'DELETE').map((a) => a.chemin.split('/').pop()), ['preuve-manquante', 'preuve-attendue']);
 });
 
+test('traiter : acceptée, en-cours et qui:marc sont retirés aussi', async () => {
+  const { api, appels } = fauxGitHub({
+    issue: issueFermee({ labels: [{ name: 'niveau:tâche' }, { name: 'en-cours' }, { name: 'qui:marc' }, { name: 'prio:1' }] }),
+    commentaires: [commentaire(preuveOk)],
+    prs: { 12: prFusionnee },
+    fichiers: { 12: [{ filename: 'README.md' }] },
+  });
+  assert.equal((await traiter({ api, depot: 'MoKarade/Hubperso', numero: 7, config: cfg })).statut, 'acceptee');
+  assert.deepEqual(appels.filter((a) => a.methode === 'DELETE').map((a) => decodeURIComponent(a.chemin.split('/').pop())), ['en-cours', 'qui:marc']);
+});
+
+test('traiter : rouverte, en-cours et qui:marc ne sont PAS retirés (la tâche n’est pas finie)', async () => {
+  const { api, appels } = fauxGitHub({ issue: issueFermee({ labels: [{ name: 'niveau:tâche' }, { name: 'en-cours' }] }) });
+  assert.equal((await traiter({ api, depot: 'MoKarade/Hubperso', numero: 7, config: cfg })).statut, 'rouverte');
+  assert.equal(appels.filter((a) => a.methode === 'DELETE').length, 0);
+});
+
+test('traiter : issue d’essai fermée not_planned → ignorée ; fermée completed sans preuve → rouverte', async () => {
+  const essai = [{ name: 'niveau:tâche' }, { name: 'essai' }];
+  const a = fauxGitHub({ issue: issueFermee({ state_reason: 'not_planned', labels: essai }) });
+  assert.equal((await traiter({ api: a.api, depot: 'MoKarade/x', numero: 1, config: cfg })).statut, 'ignoree');
+  assert.equal(a.appels.filter((x) => x.methode !== 'GET').length, 0);
+  const b = fauxGitHub({ issue: issueFermee({ labels: essai }) });
+  assert.equal((await traiter({ api: b.api, depot: 'MoKarade/x', numero: 1, config: cfg })).statut, 'rouverte');
+});
+
 test('traiter : code servi sans déploiement trouvé → rouverte ; avec déploiement réussi → acceptée', async () => {
   const base = { issue: issueFermee(), commentaires: [commentaire(preuveOk)], prs: { 12: prFusionnee }, fichiers: { 12: [{ filename: 'app/page.tsx' }] } };
   const sans = fauxGitHub(base);

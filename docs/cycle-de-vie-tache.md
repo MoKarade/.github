@@ -10,7 +10,7 @@
 
 1. Trois niveaux : **chantier** (objectif de plusieurs semaines) › **mission** (résultat livrable en une semaine au plus) › **tâche** (une PR, une journée au plus, environ 400 lignes modifiées hors tests). Chacun est une issue GitHub.
 2. Claude crée le travail. Le Coordinateur tient les chantiers et les missions, et les fils créent et ferment les tâches. Marc décide de la direction : il force une tâche avec `prio:1`.
-3. L'ordre suit une règle fixe : d'abord la panne et le rouge, puis la sécurité, puis le standard et les fonctions en alternance. Les événements GitHub réveillent le Coordinateur (§6), un filet quotidien vérifie le reste, avec au plus un fil et une tâche Jules par dépôt.
+3. L'ordre suit une règle fixe, calculée par un script (§5) : d'abord la panne, le rouge et la preuve due, puis `prio:1`, puis la sécurité, puis le chantier en cours jusqu'au bout, puis le standard et les fonctions en alternance. Les événements GitHub réveillent le Coordinateur (§6), un filet quotidien vérifie le reste, avec au plus un fil et une tâche Jules par dépôt.
 4. La CI décide. Chaque PR qui change un écran porte des captures avant/après, prises avec des données fictives. Mergify fusionne.
 5. Une tâche est **acceptée** quand trois conditions sont remplies : elle est fusionnée, le déploiement est en ligne, et le « Fini quand » est prouvé en production par un commentaire de preuve, **posé dans l'heure qui suit la mise en ligne** (§10). Si le test de fumée échoue, la version précédente revient seule et une PR d'annulation s'ouvre. Un rapport hebdomadaire mesure la vitesse, la qualité et les retours en arrière. **Sans cette preuve, une tâche n'est jamais finie** : un garde-fou rouvre toute tâche fermée sans preuve valide (§10 bis), et une preuve qui dépend d'un événement ou d'un geste de Marc laisse la tâche ouverte, étiquetée `preuve-attendue`, jamais comptée comme finie (§10).
 
@@ -74,6 +74,8 @@ Un « Fini quand » non vérifiable (« c'est mieux ») est refusé. Un « Fini 
 | `preuve-attendue` | PR fusionnée, mais la preuve n'est pas possible tout de suite (événement futur, geste de Marc). La tâche reste **ouverte et non finie** ; elle ne bloque pas le dépôt (§10) | Le fil, en remplaçant `en-cours` |
 | `preuve-manquante` | Tâche fermée sans preuve valide, rouverte par le garde-fou (§10 bis) | Le garde-fou de preuve |
 | `incident` | Panne en production, ou retour en arrière automatique | Le workflow de fumée |
+| `chantier:standard` / `chantier:fonction` (sur un chantier) | Type du chantier, pour l'alternance (§5) | Le Coordinateur, à la création du chantier |
+| `essai` | Issue créée par un essai ; fermée `not_planned` par l'essai lui-même ; ignorée par le Gantt et par le garde-fou de preuve (§13) | Le test qui la crée |
 | `hold` (sur une PR) | Mergify ne fusionne pas | Marc ou Claude |
 
 ## 4. Qui fait quoi
@@ -98,13 +100,20 @@ Un « Fini quand » non vérifiable (« c'est mieux ») est refusé. Un « Fini 
 
 ## 5. Ordre (règle fixe)
 
+**La file est calculée par UN script** : `scripts/prochaine-tache.mjs` (ce dépôt) lit le relevé du Gantt et écrit `prochaines.json` : pour chaque dépôt, son état (`libre`, `occupe`, `incident`, `rien`), la tâche suivante, la file complète et la raison de chaque tâche écartée. Le Gantt l'affiche, la routine continue le lit. Ce texte décrit ce que le script calcule ; en cas de divergence, on corrige le script (et ses tests), jamais une routine ni une page.
+
 Pour chaque dépôt, la tâche suivante est la première de cette liste :
 
-1. **Panne, rouge ou preuve due** : issue `incident`, branche par défaut rouge, PR rouge d'un fil, tâche `preuve-manquante` (fermée sans preuve, rouverte : la preuve est due avant tout travail neuf).
+1. **Panne, rouge ou preuve due** : issue `incident` (le dépôt passe alors à l'état `incident`), branche par défaut rouge, PR rouge d'un fil, tâche `preuve-manquante` (fermée sans preuve, rouverte), ou PR fusionnée dont la tâche n'est pas acceptée : la preuve est due avant tout travail neuf.
 2. **`prio:1`** posée par Marc.
-3. **Sécurité** : avis npm ou Dependabot de gravité haute, fuite de secret, donnée perso en ligne.
-4. **Alternance** : si la dernière tâche lancée ou fermée dans le dépôt venait d'un chantier de standard, on prend une fonction, et inversement. Si un côté n'a rien de prenable, on prend l'autre.
-5. **Le reste**, par `prio` croissante, puis par numéro d'issue.
+3. **Sécurité** : avis npm ou Dependabot de gravité haute, fuite de secret, donnée perso en ligne (le script ne lit que l'étiquette `sécurité` ; les avis sont à vérifier par l'appelant).
+4. **Le chantier en cours jusqu'au bout** (décision de Marc, 16/10/2026) : la prochaine tâche prenable de la même mission que la dernière tâche lancée ou fermée dans le dépôt, sinon du même chantier.
+5. **Alternance** (décision 16b) : seulement quand ce chantier n'a plus rien de prenable : si la dernière tâche venait d'un chantier `chantier:standard`, on prend un chantier `chantier:fonction`, et inversement ; si un côté n'a rien de prenable, l'autre.
+6. **Le reste**, par `prio` croissante, puis par numéro d'issue.
+
+Chaque chantier porte `chantier:standard` (socle, CI, conformité, sécurité, dépendances, tests, contrat, gabarit, outillage) ou `chantier:fonction` (ce que Marc voit ou utilise). Sans cette étiquette, l'alternance n'est pas calculable et le script le signale dans `alertes`.
+
+**Avant de lancer**, l'agent revérifie en direct la tâche choisie (ouverte, sans `en-cours`, sans PR ouverte) : `prochaines.json` peut dater de 40 minutes.
 
 Une tâche n'est **prenable** que si elle remplit cinq conditions :
 - elle est ouverte et porte `niveau:tâche` ;
@@ -329,6 +338,15 @@ Le Gantt montre l'état réel du travail. Il ne contient **rien de tapé à la m
   - un dépôt qui a plus d'un fil en cours.
 
 Le fil « Vue personnalisée du projet » possède les outils du Gantt. Cette section est leur cahier des charges.
+
+**Source de vérité** (mission MoKarade/.github#116, 16/10/2026) : GitHub est la source, le Gantt en est la vue. Chaque relevé écrit trois fichiers dans `commun/outils/gantt/` : `backlog.json` (le relevé), `prochaines.json` (la file, §5) et `fiabilite.json` (`scripts/verif-fidelite.mjs`). Ce dernier relit GitHub directement et mesure :
+- **I1 cohérence** : les défauts de la pastille ;
+- **I2 fidélité** : les écarts entre le relevé et GitHub (état, étiquettes, PR liée), hors ce qui change après le relevé ;
+- **I3 prise tracée** : `en-cours` posé avant la PR ; aucune PR fusionnée sans tâche (robots exclus) ; aucune branche `claude/*` sans tâche ; aucun `en-cours` sans PR depuis plus de 3 h ;
+- **I4 accord file/agents** : la tâche lancée était la `suivante` du dernier calcul.
+On ne dit « fiable » que quand I1 = I2 = 0 sur 20 relevés de suite et que les lancements de la période sont à 100 % ; l'historique n'est jamais remis à zéro.
+
+**Issue d'essai** : un essai qui a besoin d'une vraie issue porte l'étiquette `essai`, est fermé `not_planned` par l'essai lui-même, et le Gantt l'ignore (il ne s'affiche pas, ne compte dans aucune mesure). Le garde-fou de preuve ne rouvre pas une issue `essai` fermée `not_planned`. À la fermeture validée d'une tâche, `en-cours` et `qui:marc` sont retirés par le garde-fou de preuve.
 
 ## 14. Cartes de décision (questions à Marc)
 
