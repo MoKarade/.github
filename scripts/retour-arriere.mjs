@@ -50,11 +50,11 @@ export const normaliser = (d) => ({
  * ou { action: 'rien', raison }.
  */
 export function choisirCible({ courantId, deploiements, maintenant, ageMaxMin = AGE_MAX_MIN }) {
-  if (!courantId) return { action: 'rien', raison: 'déploiement en ligne illisible' };
+  if (!courantId) return { action: 'rien', raison: 'déploiement en ligne introuvable parmi les derniers prêts (domaine de production sans alias)' };
   const liste = deploiements.map(normaliser);
   if (liste.length === 0) return { action: 'rien', raison: 'aucun déploiement de production prêt' };
   const [recent, precedent] = liste;
-  if (recent.id !== courantId) return { action: 'rien', raison: 'le déploiement le plus récent n’est pas en ligne (déjà retiré ou en cours)' };
+  if (recent.id !== courantId) return { action: 'rien', raison: 'le déploiement le plus récent n’est pas en ligne (déjà retiré, annulé ou pas encore promu)' };
   const ageMin = (maintenant - recent.cree) / 60_000;
   if (!(ageMin <= ageMaxMin)) return { action: 'rien', raison: `déploiement vieux de plus de ${ageMaxMin} min : la panne n’en vient probablement pas` };
   if (!precedent) return { action: 'rien', raison: 'aucune version précédente à remettre' };
@@ -72,11 +72,26 @@ export const clientVercel = ({ jeton, equipe, appel = fetch }) =>
     return r.status === 204 ? {} : await r.json();
   };
 
-/** Ce que Vercel sait d'un projet : { projetId, courantId, deploiements }. */
-export async function lireProjet(api, nomProjet) {
+/**
+ * Ce que Vercel sait d'un projet : { projetId, courantId, deploiements }. Le déploiement EN LIGNE est celui dont les
+ * alias portent le domaine de production de l'app (`hote`), pas `targets.production` du projet : celui-ci rend le
+ * dernier déploiement créé, même annulé ou en échec (constaté sur batchchef le 16/10), et il ne bouge pas après un
+ * retour en arrière.
+ */
+export async function lireProjet(api, nomProjet, hote) {
   const projet = await api('GET', `/v9/projects/${encodeURIComponent(nomProjet)}`);
   const liste = await api('GET', '/v6/deployments', { projectId: projet.id, target: 'production', state: 'READY', limit: 5 });
-  return { projetId: projet.id, courantId: projet.targets?.production?.id ?? null, deploiements: liste.deployments ?? [] };
+  const deploiements = liste.deployments ?? [];
+  let courantId = null;
+  for (const d of deploiements) {
+    const id = normaliser(d).id;
+    const detail = await api('GET', `/v13/deployments/${encodeURIComponent(id)}`);
+    if (Array.isArray(detail.alias) && detail.alias.includes(hote)) {
+      courantId = id;
+      break;
+    }
+  }
+  return { projetId: projet.id, courantId, deploiements };
 }
 
 const tacheOrigine = (message, depot) => {
@@ -99,7 +114,7 @@ export const corpsIncident = ({ app, fautif, precedent, probeApres, date }) =>
 
 /** Traite une app dont la sonde est rouge. Rend une ligne de résumé { nom, issue }. */
 export async function traiter(app, { api, sondeApres, gh, maintenant, controle = false }) {
-  const { projetId, courantId, deploiements } = await lireProjet(api, app.vercel);
+  const { projetId, courantId, deploiements } = await lireProjet(api, app.vercel, new URL(app.sante).hostname);
   const cible = choisirCible({ courantId, deploiements, maintenant: maintenant.getTime() });
   if (controle) return { nom: app.nom, etat: cible.action === 'retour' ? `prêt (précédente ${court(cible.precedent.sha)})` : `rien à faire : ${cible.raison}` };
   if (cible.action !== 'retour') return { nom: app.nom, etat: `rien fait : ${cible.raison}` };
