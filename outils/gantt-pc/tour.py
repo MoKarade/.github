@@ -8,7 +8,9 @@
 #   3. fiabilité (verif-fidelite.mjs de MoKarade/.github) : mesure complète si la précédente a plus de 55 min, sinon instantané de file seul
 #   4. dépôt dans le dossier Google Drive synchronisé (--drive DOSSIER) : donnees.json.gz (lu par la page), prochaines.json,
 #      fiabilite.json, quota.json, etat.json. Les fichiers sont RÉÉCRITS SUR PLACE : Drive garde alors le même identifiant.
-# Freins repris de boucle.sh : moins de 3 000 appels GitHub restants = tour sauté ; « rate limit » au tour précédent = 30 min d'attente.
+# Freins : le jeton du PC est celui de Marc, partagé avec tout le reste de son compte (5 000 appels/h). Sous 1 500 appels restants, tour
+# économe (relevé léger, quotas rapides, pas de mesure de fiabilité) ; sous 300, tour sauté ; « rate limit » au tour précédent = 30 min
+# d'attente. Un seuil unique à 3 000 sautait des tours entiers dès que le compte servait ailleurs (PC de Marc, 16/10 : 1 911 restants).
 # Lancer : python -X utf8 tour.py --drive "G:\Mon disque\_Gantt"   (un tour, puis sortie ; code 0 = OK ou tour sauté, 1 = échec)
 import argparse, datetime, gzip, json, os, shutil, socket, subprocess, sys, time
 
@@ -65,18 +67,19 @@ def sur_place(src, dst, gz=False):
     with open(dst, 'r+b' if os.path.exists(dst) else 'wb') as fh: fh.seek(0); fh.write(b); fh.truncate()
 
 
-def releve():
+def releve(econome=False):
     # 1. relevé GitHub
     mode = 'plein'
     try:
-        if age_min('.dernier-plein') is not None and age_min('.dernier-plein') < 60 and lire('backlog.json').get('v', 0) >= 8: mode = 'leger'
+        recent = age_min('.dernier-plein') is not None and age_min('.dernier-plein') < 60
+        if (recent or econome) and lire('backlog.json').get('v', 0) >= 8: mode = 'leger'
     except (OSError, ValueError): pass
     args = [PY, 'fetch.py', '--sans-quota'] + (['--leger'] if mode == 'leger' else [])
     if lancer(args, '.refresh-fetch.log', 900) != 0:
         if mode == 'leger' and lancer([PY, 'fetch.py', '--sans-quota'], '.refresh-fetch.log', 900) == 0: mode = 'plein (léger en échec)'
         else: return 1, f'ÉCHEC {maintenant()} relevé GitHub ({mode}) : {queue(".refresh-fetch.log")}'
     if mode.startswith('plein'): touche('.dernier-plein')
-    rapide = age_min('.dernier-quota-plein') is not None and age_min('.dernier-quota-plein') < 55
+    rapide = econome or (age_min('.dernier-quota-plein') is not None and age_min('.dernier-quota-plein') < 55)
     if lancer([PY, 'quota.py'] + (['--rapide'] if rapide else []), '.refresh-quota.log', 900) == 0:
         if not rapide: touche('.dernier-quota-plein')
     # 2. file du script + données de la page
@@ -90,7 +93,7 @@ def releve():
     script = D + 'scripts-github/verif-fidelite.mjs'
     texte = open(script, encoding='utf-8').read() if os.path.exists(script) else ''
     a = age_mesure_min()
-    if texte and (a is None or a >= 55):
+    if texte and not econome and (a is None or a >= 55):
         n = str(lire('donnees.json')['sante']['n'])
         i4 = ['--depuis-i4', '2026-10-16T19:48:00Z'] if '--depuis-i4' in texte else []
         if lancer([NODE, script, 'backlog.json', 'prochaines.json', '--sortie', 'fiabilite.json', '--defauts', n] + i4, '.refresh-fiab.log', 600) == 0:
@@ -127,9 +130,10 @@ def main():
             reste = int(subprocess.run(['gh', 'api', 'rate_limit', '--jq', '.resources.core.remaining'], env=ENV,
                                        capture_output=True, text=True, timeout=60).stdout.strip() or 99999)
         except (OSError, ValueError, subprocess.TimeoutExpired): reste = 99999
-        if reste < 3000: code, res = 0, f'tour sauté : {reste} appels GitHub restants dans l\'heure'
+        if reste < 300: code, res = 0, f'tour sauté : {reste} appels GitHub restants dans l\'heure'
         else:
-            code, res = releve()
+            code, res = releve(econome=reste < 1500)
+            if code == 0 and reste < 1500: res += f' · tour économe ({reste} appels restants)'
             res = res.replace(f'relevé ', f'relevé en {int(time.time() - t0)} s, ', 1) if code == 0 else res
         ecrire_etat(debut, res)
         print(res)
