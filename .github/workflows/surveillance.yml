@@ -6,8 +6,13 @@ name: Surveillance des apps
 # ne vivent qu'1 h : cette sonde externe est la seule trace d'une panne de nuit.
 # Le jeton du job (github.token, droits limités à ce dépôt) sert au seul CLI `gh` ; aucun secret du dépôt.
 #
+# Même passage : le dernier déploiement de production de chaque app (état GitHub publié par Vercel). Un échec
+# ouvre une issue `panne` « Déploiement en échec : <app> », le déploiement suivant réussi la ferme (tâche #60).
+# Un dépôt que le jeton du job ne lit pas (privé) est « non mesuré » dans le résumé, jamais un faux vert.
+#
 # Lancement d'essai (preuve « une panne ouvre l'issue, le retour la ferme ») : « Run workflow » avec
-# un nom et une URL de santé ; seule cette app simulée est sondée.
+# un nom et une URL de santé ; seule cette app simulée est sondée. Pour l'échec de déploiement : choisir
+# `echec` puis `succes` dans « deploiement-essai » (un déploiement simulé, rien n'est lu chez Vercel).
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -21,6 +26,15 @@ on:
         description: 'URL https de santé de l’app simulée (vide : surveillance normale)'
         required: false
         default: ''
+      deploiement-essai:
+        description: 'Simuler le dernier déploiement de production de l’app d’essai : echec ou succes (vide : surveillance normale)'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''
+          - echec
+          - succes
 
 permissions:
   contents: read
@@ -46,9 +60,18 @@ jobs:
           node-version: 24
 
       - name: Sonder les apps et tenir les issues de panne
+        if: ${{ !inputs.deploiement-essai }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           SURVEILLANCE_ESSAI_NOM: ${{ inputs.nom-essai }}
           SURVEILLANCE_ESSAI_URL: ${{ inputs.url-essai }}
         run: node scripts/surveillance.mjs
+
+      - name: Relever les déploiements de production et tenir les issues d'échec
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SURVEILLANCE_ESSAI_NOM: ${{ inputs.nom-essai }}
+          DEPLOIEMENT_ESSAI: ${{ inputs.deploiement-essai }}
+        run: node scripts/deploiements.mjs
