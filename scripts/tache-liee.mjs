@@ -12,6 +12,9 @@
 export const MARQUEUR_TACHE = '<!-- garde-fou-tache -->';
 export const PROPRIETAIRE = 'MoKarade';
 export const LABEL_TACHE = 'niveau:tâche';
+export const LABEL_EN_COURS = 'en-cours';
+// Une tâche qui porte déjà l'un de ces trois états n'a pas besoin qu'on la marque « en cours » (prise par Jules, livrée en attente de preuve).
+const LABELS_PRISE = [LABEL_EN_COURS, 'jules', 'preuve-attendue'];
 
 // Même définition que le Gantt (fetch.py, TACHE_LIGNE et REF) : une ligne qui commence par « Tâche : », puis des références.
 const LIGNE_TACHE = /^[\s>*_-]*T[âa]che[\s*_]*:(.*)$/gim;
@@ -54,6 +57,14 @@ export function defautDeLaTache(issue) {
   return null;
 }
 
+const nomsDesLabels = (issue) => (issue?.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
+
+/** La tâche ouverte citée par une PR ouverte doit-elle être marquée `en-cours` ? Oui si aucun état de prise ne la marque déjà. */
+export function priseAPoser(issue) {
+  const noms = nomsDesLabels(issue);
+  return !LABELS_PRISE.some((nom) => noms.includes(nom));
+}
+
 /** Ce qu'il faut signaler sans refuser la PR : une tâche sans parent (mission ou chantier) est un défaut du backlog (pastille du Gantt, I1). */
 export function avertissementDeLaTache(issue) {
   return issue?.parent_issue_url ? null : 'elle n’a pas de parent (mission) : la rattacher à sa mission (cycle de vie §1)';
@@ -65,13 +76,14 @@ export function avertissementDeLaTache(issue) {
  */
 export async function controleTacheLiee({ api, depot, pr }) {
   const raison = dispense(pr);
-  if (raison) return { ok: true, dispense: raison, citees: [], motifs: [], avertissements: [] };
+  if (raison) return { ok: true, dispense: raison, citees: [], motifs: [], avertissements: [], ouvertes: [] };
   const citees = extraireTaches(pr.body, depot.split('/')[1]);
   if (citees.length === 0) {
-    return { ok: false, dispense: null, citees, motifs: ['aucune ligne `Tâche : #n` dans le corps de la PR'], avertissements: [] };
+    return { ok: false, dispense: null, citees, motifs: ['aucune ligne `Tâche : #n` dans le corps de la PR'], avertissements: [], ouvertes: [] };
   }
   const motifs = [];
   const avertissements = [];
+  const ouvertes = [];
   let valide = false;
   for (const t of citees) {
     const issue = await api('GET', `/repos/${PROPRIETAIRE}/${t.depot}/issues/${t.numero}`);
@@ -79,12 +91,13 @@ export async function controleTacheLiee({ api, depot, pr }) {
     if (defaut) motifs.push(`${t.depot}#${t.numero} : ${defaut}`);
     else {
       valide = true;
+      ouvertes.push({ depot: t.depot, numero: t.numero, aPrendre: priseAPoser(issue) });
       const avertissement = avertissementDeLaTache(issue);
       if (avertissement) avertissements.push(`${t.depot}#${t.numero} : ${avertissement}`);
     }
   }
   // Une seule tâche ouverte suffit ; les autres références ne sont rapportées que si aucune ne vaut.
-  return { ok: valide, dispense: null, citees, motifs: valide ? [] : motifs, avertissements };
+  return { ok: valide, dispense: null, citees, motifs: valide ? [] : motifs, avertissements, ouvertes };
 }
 
 export function rapportTacheLiee(resultat) {

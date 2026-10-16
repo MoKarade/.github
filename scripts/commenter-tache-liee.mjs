@@ -11,7 +11,7 @@
 //
 // Fonctions pures d'un côté (`corpsDuCommentaire`), I/O de l'autre (`commenterDepot` avec `api` injecté, `main`).
 import { pathToFileURL } from 'node:url';
-import { MARQUEUR_TACHE, controleTacheLiee, rapportTacheLiee } from './tache-liee.mjs';
+import { LABEL_EN_COURS, MARQUEUR_TACHE, PROPRIETAIRE, controleTacheLiee, rapportTacheLiee } from './tache-liee.mjs';
 
 export const DEPOTS = ['.github', 'FinanceAI', 'JobAI', 'batchchef-', 'DriveAI', 'Hubperso', 'CarAI', 'MemoryAI', 'app-template', 'hub-contract'];
 export const TEXTE_LEVE = 'Tâche liée : vert, le blocage est levé.';
@@ -36,6 +36,27 @@ export function corpsDuCommentaire(lien, ancien) {
   return `${MARQUEUR_TACHE}\n${rapportTacheLiee(lien)}`;
 }
 
+/**
+ * Marque `en-cours` la tâche ouverte qu'une PR ouverte cite, si rien ne la marque déjà : la prise est tracée par la machine,
+ * pas par la mémoire du fil (cycle de vie §3, tâche MoKarade/.github#157). Idempotent : une tâche déjà marquée n'est jamais touchée,
+ * et jamais d'étiquette retirée ici. `deja` garde les tâches traitées pendant le passage (le cache des lectures serait périmé).
+ */
+async function marquerEnCours({ api, depot, pr, lien, deja }) {
+  const posees = [];
+  for (const t of lien.ouvertes ?? []) {
+    const cle = `${t.depot}#${t.numero}`;
+    if (!t.aPrendre || deja.has(cle)) continue;
+    deja.add(cle);
+    const chemin = `/repos/${PROPRIETAIRE}/${t.depot}/issues/${t.numero}`;
+    await api('POST', `${chemin}/labels`, { labels: [LABEL_EN_COURS] });
+    await api('POST', `${chemin}/comments`, {
+      body: `\`${LABEL_EN_COURS}\` posé automatiquement : la PR ${depot}#${pr.number} ouverte cite cette tâche (\`Tâche :\`). Le fil qui la mène n'a rien à faire ; il remplace l'étiquette par \`preuve-attendue\` ou ferme la tâche avec la preuve (cycle de vie §3).`,
+    });
+    posees.push(`${depot}#${pr.number} : ${cle} marquée ${LABEL_EN_COURS}`);
+  }
+  return posees;
+}
+
 async function pages(api, chemin) {
   const sortie = [];
   for (let page = 1; page <= 20; page += 1) {
@@ -54,10 +75,17 @@ export async function commenterDepot({ api, depot }) {
   const actions = [];
   const erreurs = [];
   const complet = `MoKarade/${depot}`;
+  const deja = new Set();
   for (const pr of await pages(api, `/repos/${complet}/pulls?state=open`)) {
     try {
       const lien = await controleTacheLiee({ api, depot: complet, pr });
       if (lien.dispense) continue; // robot ou boîte du Réacteur : jamais de commentaire
+      try {
+        actions.push(...(await marquerEnCours({ api, depot, pr, lien, deja })));
+      } catch (erreur) {
+        if (erreur instanceof LimiteDebit) throw erreur;
+        erreurs.push(`${depot}#${pr.number} : étiquette ${LABEL_EN_COURS} non posée (${erreur.message})`);
+      }
       const commentaires = await pages(api, `/repos/${complet}/issues/${pr.number}/comments`);
       const ancien = commentaires.find((c) => c.body?.includes(MARQUEUR_TACHE));
       const corps = corpsDuCommentaire(lien, ancien);
