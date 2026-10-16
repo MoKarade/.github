@@ -10,7 +10,7 @@ le PC, le relevé tourne sans Claude.
 ## Comment ça marche
 
 1. La tâche Windows `Gantt-releve` lance `lancer.ps1` toutes les 10 min, dans une console cachée.
-2. `lancer.ps1` met à jour ce dépôt (clone dédié dans `%LOCALAPPDATA%\Gantt\depot`), copie les `.py` dans `%LOCALAPPDATA%\Gantt`
+2. `lancer.ps1` met à jour ce dépôt (clone dédié dans `C:\dev\_pc-local\gantt-releve\depot`), copie les `.py` dans `C:\dev\_pc-local\gantt-releve`
    et lance `tour.py`.
 3. `tour.py` fait un tour : `fetch.py` (GitHub), `quota.py`, `build.py` (file du script `scripts/prochaine-tache.mjs`), mesure de
    fiabilité (`scripts/verif-fidelite.mjs`, au plus 1×/h, sinon instantané de file seul).
@@ -27,9 +27,13 @@ powershell -ExecutionPolicy Bypass -File installer.ps1 -Drive "G:\Mon disque\_Ga
 Il faut Python 3, Node, `gh` connecté au compte de Marc (accès aux dépôts privés) et Git. L'installateur vérifie chacun en le
 lançant, remplace la tâche si elle existe, et fait un premier tour visible.
 
+Le dossier d'état est `C:\dev\_pc-local\gantt-releve` (option `-Etat`), jamais AppData : lancé depuis l'app Claude, AppData
+est redirigé vers un dossier privé que la tâche planifiée ne voit pas, et le relevé restait figé sans erreur (16/10).
+Google Drive pour ordinateur ne doit pas être en pause : sinon les fichiers restent sur le PC et la page ne les voit pas.
+
 ## Suivre et arrêter
 
-- Journal : `%LOCALAPPDATA%\Gantt\tour.log` ; dernier résultat : `_Gantt\etat.json` dans le Drive.
+- Journal : `C:\dev\_pc-local\gantt-releve\tour.log` ; dernier résultat : `_Gantt\etat.json` dans le Drive.
 - Arrêter : `Unregister-ScheduledTask -TaskName Gantt-releve -Confirm:$false`.
 
 ## Source
