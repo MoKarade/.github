@@ -26,6 +26,8 @@ Mise en place : MoKarade/.github#76. Proposition d'origine : `commun/plans/2026-
 **Vérifier** : <commande de test ciblée>
 
 **Source** : <BACKLOG.md:Lnn, ADR, ou issue parente>
+
+**À citer dans la PR** : `Tâche : #<numéro de CETTE issue>` ; sujet de commit : `<préfixe permis>: <type>: <verbe et objet>`
 ```
 
 ## Règles de rédaction
@@ -35,6 +37,7 @@ Mise en place : MoKarade/.github#76. Proposition d'origine : `commun/plans/2026-
 3. Un « Fini quand » qu'un script peut contrôler ; sinon la tâche n'est pas prête.
 4. Une tâche tient en deux fichiers au plus et environ 150 lignes de diff ; au-delà, on découpe.
 5. Aucune donnée personnelle dans l'issue (dépôts publics). Exemples et jeux d'essai fictifs.
+6. Écrire en toutes lettres le numéro de l'issue et le préfixe de commit permis : Jules copie sinon l'ID de la ligne « Source » (constat Hubperso#147 : `[H-25]` et `Tâche : #25`). Hubperso : `HORS-BACKLOG:` tant que `BACKLOG.md` n'est pas un fichier permis.
 
 ## Tâches qui conviennent à Jules
 
