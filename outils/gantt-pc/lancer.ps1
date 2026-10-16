@@ -1,10 +1,9 @@
 ﻿# lancer.ps1 : un tour du relevé du Gantt sur le PC de Marc. Lancé toutes les 10 min par la tâche Windows « Gantt-releve »
 # (installer.ps1), dans une console cachée (conhost --headless), comme les autres tâches du PC.
 # 1. met à jour le code depuis MoKarade/.github (clone dédié, jamais celui où Marc travaille)
-# 2. copie le code dans le dossier d'état (%LOCALAPPDATA%\Gantt) et lance tour.py, qui dépose les résultats dans le Drive
-param([Parameter(Mandatory = $true)][string]$Drive)
+# 2. copie le code dans le dossier d'état (C:\dev\_pc-local\gantt-releve par défaut, jamais AppData : voir installer.ps1) et lance tour.py, qui dépose les résultats dans le Drive
+param([Parameter(Mandatory = $true)][string]$Drive, [string]$Etat = 'C:\dev\_pc-local\gantt-releve')
 $ErrorActionPreference = 'Continue'
-$Etat = Join-Path $env:LOCALAPPDATA 'Gantt'
 $Depot = Join-Path $Etat 'depot'
 $Journal = Join-Path $Etat 'tour.log'
 New-Item -ItemType Directory -Force $Etat | Out-Null
