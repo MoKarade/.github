@@ -36,6 +36,17 @@ export function lireApps(brut) {
   });
 }
 
+/**
+ * Les apps à sonder : la liste du dépôt, ou, pour un lancement d'essai, une seule app simulée (nom et URL
+ * donnés à la main). `lireListe` rend le texte de surveillance/apps.json.
+ */
+export function appsAControler(env, lireListe) {
+  if (env.SURVEILLANCE_ESSAI_URL) {
+    return [{ nom: env.SURVEILLANCE_ESSAI_NOM || 'essai', depot: env.GITHUB_REPOSITORY || 'MoKarade/.github', sante: env.SURVEILLANCE_ESSAI_URL }];
+  }
+  return JSON.parse(lireListe());
+}
+
 /** Sonde la santé d'une app ; rend { nom, ok, cause }. Même contrôle que la fumée (200 et { ok: true }). */
 export async function sonder(app, { essais, delaiMs, timeoutMs, appel }) {
   const url = new URL(app.sante);
@@ -108,10 +119,7 @@ const ghReel = (args) =>
 async function main() {
   const env = process.env;
   // Lancement d'essai : une seule app simulée, nommée et pointée à la main (preuve « panne ouvre, retour ferme »).
-  const brut = env.SURVEILLANCE_ESSAI_URL
-    ? [{ nom: env.SURVEILLANCE_ESSAI_NOM || 'essai', sante: env.SURVEILLANCE_ESSAI_URL }]
-    : JSON.parse(readFileSync(new URL('../surveillance/apps.json', import.meta.url), 'utf8'));
-  const apps = lireApps(brut);
+  const apps = lireApps(appsAControler(env, () => readFileSync(new URL('../surveillance/apps.json', import.meta.url), 'utf8')));
   const config = {
     essais: Number(env.SURVEILLANCE_ESSAIS || 3),
     delaiMs: Number(env.SURVEILLANCE_DELAI_MS || 10_000),
