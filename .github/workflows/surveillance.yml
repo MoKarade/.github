@@ -16,7 +16,8 @@ name: Surveillance des apps
 # inactif et le dit dans le résumé.
 #
 # Lancement d'essai (preuve « une panne ouvre l'issue, le retour la ferme ») : « Run workflow » avec
-# un nom et une URL de santé ; seule cette app simulée est sondée. Pour l'échec de déploiement : choisir
+# un nom et une URL de santé ; seule cette app simulée est sondée. Avec `retour-essai` (un projet Vercel d'essai),
+# le retour en arrière est aussi exercé pour de vrai sur ce seul projet. Pour l'échec de déploiement : choisir
 # `echec` puis `succes` dans « deploiement-essai » (un déploiement simulé, rien n'est lu chez Vercel).
 on:
   schedule:
@@ -45,6 +46,10 @@ on:
         required: false
         default: false
         type: boolean
+      retour-essai:
+        description: 'Essai du retour en arrière : nom d’un projet Vercel d’essai, utilisé avec url-essai (vide : aucune app n’est touchée en lancement d’essai)'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -87,10 +92,13 @@ jobs:
         run: node scripts/deploiements.mjs
 
       - name: Remettre la version précédente si une app tombe après un déploiement
-        if: ${{ !cancelled() && !inputs.deploiement-essai && !inputs.url-essai }}
+        if: ${{ !cancelled() && !inputs.deploiement-essai }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          SURVEILLANCE_ESSAI_NOM: ${{ inputs.nom-essai }}
+          SURVEILLANCE_ESSAI_URL: ${{ inputs.url-essai }}
+          RETOUR_ESSAI_VERCEL: ${{ inputs.retour-essai }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_EQUIPE: mokarades-projects
           RETOUR_CONTROLE: ${{ inputs.retour-controle }}
