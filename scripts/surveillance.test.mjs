@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
-import { LABEL, appliquer, corpsOuverture, decider, lireApps, sonder, tableau, titrePanne } from './surveillance.mjs';
+import { LABEL, appliquer, appsAControler, corpsOuverture, decider, lireApps, sonder, tableau, titrePanne } from './surveillance.mjs';
 
 const CFG = { essais: 2, delaiMs: 5, timeoutMs: 1000, appel: (u, init = {}) => fetch(u, { ...init, signal: AbortSignal.timeout(1000) }) };
 
@@ -132,4 +132,16 @@ test('tableau : panne, retour et app à brancher', () => {
   assert.match(t, /\| a \| PANNE \| HTTP 500 \| issue ouverte \|/);
   assert.match(t, /\| b \| répond \|/);
   assert.match(t, /\| c \| à brancher \| route absente \|/);
+});
+
+test('lancement d\'essai : une seule app simulée, valide pour lireApps (régression du 16/10 : depot manquant)', () => {
+  const env = { SURVEILLANCE_ESSAI_NOM: 'essai', SURVEILLANCE_ESSAI_URL: 'https://x.example/api/sante', GITHUB_REPOSITORY: 'MoKarade/.github' };
+  const apps = lireApps(appsAControler(env, () => assert.fail('la liste ne doit pas être lue')));
+  assert.deepEqual(apps, [{ nom: 'essai', depot: 'MoKarade/.github', sante: 'https://x.example/api/sante' }]);
+  assert.equal(lireApps(appsAControler({ SURVEILLANCE_ESSAI_URL: 'https://x.example/s' }, () => '[]'))[0].nom, 'essai', 'nom par défaut');
+});
+
+test('sans essai : la liste du dépôt est lue', () => {
+  const liste = JSON.stringify([{ nom: 'a', depot: 'MoKarade/A', sante: 'https://a.example/api/sante' }]);
+  assert.equal(lireApps(appsAControler({}, () => liste))[0].nom, 'a');
 });
