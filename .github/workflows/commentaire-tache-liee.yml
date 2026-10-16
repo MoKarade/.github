@@ -4,13 +4,17 @@ name: Commentaire tâche liée
 # Pourquoi ici : le jeton des workflows du Garde-fou n'a pas `pull-requests: write` (HTTP 403) ; le jeton fin
 # RELECTURE_PAT (Pull requests en lecture et écriture sur les dix dépôts, voir docs/relecture-ia.md) le peut, et un
 # seul fichier remplace dix PR sur des chemins protégés. Ce workflow ne change jamais le verdict : le contrôle requis
-# reste le « Garde-fou ». Même cadence que la relecture IA (aucune horloge de plus à comprendre).
+# reste le « Garde-fou ».
+#
+# Horloge : GitHub espace fortement les planifications `*/10` de ce dépôt (aucun passage en 73 min le 16/10/2026, alors
+# que ses lancements manuels marchent) et retarde surtout celles qui tombent aux minutes rondes. Minutes décalées
+# (3, 13, 23, ...) en essai ; à garder si les passages deviennent réguliers, sinon passer à un déclencheur par événement.
 #
 # SÛRETÉ : le script vient de la branche main de ce dépôt et ne lit que le corps des PR (une donnée) ; ce fichier
 # fait partie de ce que le garde-fou refuse de laisser modifier seul.
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '3,13,23,33,43,53 * * * *'
   workflow_dispatch:
 
 # Aucun `paths:` : la règle vaut partout ici.
