@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEPOT_BOITE, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, construireMotif, decider, estPanneRunner, heureQuebec, preuveAPoser, rougeDepuis, traiter } from './reveil-reacteur.mjs';
+import { DEPOT_BOITE, DEPOT_GITHUB, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, WORKFLOWS_BALAYAGE, construireMotif, decider, estPanneRunner, heureQuebec, preuveAPoser, rougeDepuis, traiter } from './reveil-reacteur.mjs';
 
 // Fausse API GitHub en mémoire : les lectures viennent de `donnees`, les écritures sont gardées.
 function faux(donnees = {}) {
@@ -134,12 +134,75 @@ test('traiter : le réveil lance boite-reacteur.yml d’app-template avec le jet
   const lignes = [];
   const r = await traiter({ api, evt: { type: 'tache_fermee', depot: 'MoKarade/CarAI', issue: '1', raison: 'completed' }, jetonReveil: 'jeton', journal: (l) => lignes.push(l) });
   assert.equal(r.reveille, true);
-  assert.deepEqual(ecritures, [{
+  // Le réveil d'abord, puis les deux balayages de .github (tâche #148), tous avec le jeton de réveil.
+  assert.deepEqual(ecritures[0], {
     methode: 'POST',
     chemin: `/repos/${DEPOT_BOITE}/actions/workflows/${WORKFLOW_BOITE}/dispatches`,
     corps: { ref: 'main', inputs: { texte: 'RÉACTEUR : MoKarade/CarAI libre ; tâche MoKarade/CarAI#1 fermée' } },
     jeton: 'jeton',
-  }]);
+  });
+  assert.deepEqual(
+    ecritures.slice(1),
+    WORKFLOWS_BALAYAGE.map((w) => ({ methode: 'POST', chemin: `/repos/${DEPOT_GITHUB}/actions/workflows/${w}/dispatches`, corps: { ref: 'main' }, jeton: 'jeton' })),
+  );
+  assert.deepEqual(r.balayages, ['commentaire-tache-liee.yml', 'relecture-ia.yml']);
+});
+
+test('traiter : PR fusionnée et CI rouge lancent aussi les balayages ; le filet, un événement sans réveil ou sans jeton, jamais', async () => {
+  const balayages = (ecritures) => ecritures.filter((e) => e.chemin.startsWith(`/repos/${DEPOT_GITHUB}/`)).length;
+  const fusionnee = faux({ '/repos/MoKarade/CarAI/pulls/5': { body: '', user: { login: 'MoKarade' } } });
+  await traiter({ api: fusionnee.api, evt: { type: 'pr_fusionnee', depot: 'MoKarade/CarAI', pr: '5' }, jetonReveil: 'jeton', journal: () => {} });
+  assert.equal(balayages(fusionnee.ecritures), 2);
+
+  const rouge = faux({
+    '/repos/MoKarade/CarAI/pulls/6': { state: 'open', draft: false, head: { sha: 'abc1234def' } },
+    '/repos/MoKarade/CarAI/actions/runs/9': { run_attempt: 2 },
+  });
+  await traiter({ api: rouge.api, evt: { type: 'ci_rouge', depot: 'MoKarade/CarAI', pr: '6', evenement: 'pull_request', sha: 'abc1234def', run: '9' }, jetonReveil: 'jeton', journal: () => {} });
+  assert.equal(balayages(rouge.ecritures), 2);
+
+  const robot = faux({ '/repos/MoKarade/CarAI/pulls/7': { body: '', user: { login: 'dependabot[bot]' } } });
+  await traiter({ api: robot.api, evt: { type: 'pr_fusionnee', depot: 'MoKarade/CarAI', pr: '7' }, jetonReveil: 'jeton', journal: () => {} });
+  assert.equal(robot.ecritures.length, 0);
+
+  const sansJeton = faux();
+  await traiter({ api: sansJeton.api, evt: { type: 'tache_fermee', depot: 'MoKarade/CarAI', issue: '1' }, jetonReveil: '', journal: () => {} });
+  assert.equal(sansJeton.ecritures.length, 0);
+});
+
+test('traiter : jeton sans droit sur .github : avertissement, le réveil reste fait et rien ne lève', async () => {
+  const ecritures = [];
+  const api = async (methode, chemin, corps, jeton) => {
+    if (methode !== 'GET') {
+      ecritures.push(chemin);
+      if (chemin.startsWith(`/repos/${DEPOT_GITHUB}/`)) throw new Error('HTTP 404 sur POST ' + chemin);
+    }
+    return null;
+  };
+  const lignes = [];
+  const r = await traiter({ api, evt: { type: 'tache_fermee', depot: 'MoKarade/CarAI', issue: '1' }, jetonReveil: 'jeton', journal: (l) => lignes.push(l) });
+  assert.equal(r.reveille, true);
+  assert.deepEqual(r.balayages, []);
+  assert.equal(ecritures.length, 3);
+  assert.equal(lignes.filter((l) => l.startsWith('::warning::') && l.includes('commentaire-tache-liee.yml non lancé')).length, 1);
+  assert.equal(lignes.filter((l) => l.startsWith('::warning::') && l.includes('relecture-ia.yml non lancé')).length, 1);
+  assert.ok(lignes.some((l) => l.includes('Coordinateur réveillé')));
+});
+
+test('traiter : le réveil qui échoue ne retient pas les balayages, puis l\'erreur remonte', async () => {
+  const ecritures = [];
+  const api = async (methode, chemin) => {
+    if (methode !== 'GET') {
+      ecritures.push(chemin);
+      if (chemin.includes(WORKFLOW_BOITE)) throw new Error('HTTP 500');
+    }
+    return null;
+  };
+  await assert.rejects(
+    traiter({ api, evt: { type: 'tache_fermee', depot: 'MoKarade/CarAI', issue: '1' }, jetonReveil: 'jeton', journal: () => {} }),
+    /HTTP 500/,
+  );
+  assert.equal(ecritures.length, 3);
 });
 
 test('traiter : sans jeton, aucun appel d’écriture et un avertissement qui le dit', async () => {
