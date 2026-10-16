@@ -32,5 +32,8 @@ Test sauté ou supprimé, CI affaiblie (`continue-on-error`, `|| true`), seuil d
 - `RELECTURE_PAT` : jeton GitHub « fine-grained », propriétaire `MoKarade`, les 10 dépôts, droits : Actions (lecture et écriture), Commit statuses (lecture et écriture), Pull requests (lecture et écriture), Contents (lecture seule). Durée : la plus longue permise ; à renouveler à l'échéance (le job devient rouge sinon).
 Jamais par le chat.
 
+## Avant de modifier le workflow
+Lancer `actionlint` sur `relecture-ia.yml` : un workflow invalide ne s'exécute pas et n'affiche qu'une exécution « push » à zéro tâche (cas du 16/10/2026 : `runner.temp` n'existe pas dans `env:` du job).
+
 ## Essai
 « Run workflow » sur `relecture-ia.yml` : sans PR à relire, la passe dit « 0 PR à relire ». Une PR rouge pour une ligne `secrets.X` sert de cas réel.
