@@ -1,8 +1,8 @@
 [
-  {"nom": "emploi", "depot": "MoKarade/JobAI", "sante": "https://emploi.hubperso.com/api/sante"},
-  {"nom": "batchchef", "depot": "MoKarade/batchchef-", "sante": "https://batchchef.hubperso.com/api/sante"},
-  {"nom": "carai", "depot": "MoKarade/CarAI", "sante": "https://carai.hubperso.com/api/sante"},
-  {"nom": "hubperso", "depot": "MoKarade/Hubperso", "sante": "https://www.hubperso.com/api/sante"},
+  {"nom": "emploi", "depot": "MoKarade/JobAI", "sante": "https://emploi.hubperso.com/api/sante", "vercel": "job-ai"},
+  {"nom": "batchchef", "depot": "MoKarade/batchchef-", "sante": "https://batchchef.hubperso.com/api/sante", "vercel": "batchchef-glu8"},
+  {"nom": "carai", "depot": "MoKarade/CarAI", "sante": "https://carai.hubperso.com/api/sante", "vercel": "car-ai"},
+  {"nom": "hubperso", "depot": "MoKarade/Hubperso", "sante": "https://www.hubperso.com/api/sante", "vercel": "hubperso"},
   {"nom": "memoryai", "depot": "MoKarade/MemoryAI", "sante": null, "raison": "/api/sante absente (la route répond 401 derrière la connexion)"},
   {"nom": "driveai", "depot": "MoKarade/DriveAI", "sante": null, "raison": "/api/sante absente (404)"},
   {"nom": "financeai", "depot": "MoKarade/FinanceAI", "sante": null, "raison": "/api/sante absente (la page d'accueil répond à la place)"}
