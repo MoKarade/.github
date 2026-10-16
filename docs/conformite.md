@@ -39,10 +39,14 @@ Le tableau ligne par ligne s'écrit dans le résumé du job. Le workflow « Essa
 | 9 | Surveillance | dépendance `@sentry/*`, route `app/api/sante`, dépôt listé avec une route de santé dans `surveillance/apps.json` (MoKarade/.github) |
 | 10 | Base | `lib/migrations.ts` ou `db:migrate` dans `vercel-build` ; la sauvegarde vit sur le PC : toujours « à relire » |
 | 11 | Docs | `CLAUDE.md` ≤ 60 lignes, `HANDOVER.md`, `docs/adr/`, `BACKLOG.md` ≤ 20 lignes avec un renvoi vers les issues, `docs/COMPTE-RENDU.md` |
-| 12 | Socle visuel | `app/globals.css` en variables, thème sombre, verrou `tests/theme.test.*` |
+| 12 | Socle visuel | `app/globals.css` en variables, thème sombre (`prefers-color-scheme: dark` ou `data-theme`, ou un sombre seul voulu : `color-scheme: dark` posé à la racine `:root`, `html` ou `body`, hors `@media`), verrou `tests/theme.test.*` |
 | 13 | Actions épinglées | chaque `uses:` finit par un SHA de 40 caractères. Exceptions : `./…`, `docker://…` et l'appel d'un workflow commun `MoKarade/.github/.github/workflows/<nom>.yml@main` |
 | 14 | Crons | aucun cron `vercel.json` plus fréquent que par jour (minute et heure fixes) |
 | 15 | Préfixes | les 10 derniers commits non fusionnés de la branche par défaut et le titre de la PR portent `feat:`, `fix:`, `docs:`… ou `[ID]` ou `HORS-BACKLOG:` |
+
+## Sombre seul voulu (ligne 12)
+
+Une app qui reste en sombre seul sur décision de Marc (Hubperso, JobAI) le déclare par `color-scheme: dark` dans une règle de premier niveau sur `:root`, `html` ou `body` de `app/globals.css`. Les variables CSS et le verrou `tests/theme.test.*` restent exigés. Ne comptent pas : `color-scheme: light dark`, la même déclaration sur un composant, dans un `@media` ou en commentaire.
 
 ## Limites connues
 

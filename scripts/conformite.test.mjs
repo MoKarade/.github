@@ -2,7 +2,7 @@
 // Aucune dépendance, aucun réseau (`node --test scripts/conformite.test.mjs`). Chaque ligne a un cas vert ET un cas rouge.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cronQuotidien, evaluer, jobsDe, tableau } from './conformite.mjs';
+import { cronQuotidien, evaluer, jobsDe, sombreSeulDeclare, tableau } from './conformite.mjs';
 
 const SHA = 'a'.repeat(40);
 const CI = `name: CI
@@ -173,6 +173,34 @@ test('12 : pas de variables, pas de thème sombre, pas de verrou', () => {
   assert.equal(etats(depot({ fichiers: { 'app/globals.css': 'body { color: #fff; }' } }))[12], 'rouge');
   assert.equal(etats(depot({ fichiers: { 'app/globals.css': ':root { --a: #fff; }' } }))[12], 'rouge');
   assert.equal(etats(depot({ retirer: ['tests/theme.test.ts'] }))[12], 'rouge');
+});
+
+test('12 : sombre seul voulu = color-scheme: dark à la racine, avec variables et verrou', () => {
+  const sombreSeul = ':root {\n  color-scheme: dark;\n  --fond: #07090d;\n}\nbody { color: var(--fond); }';
+  assert.equal(etats(depot({ fichiers: { 'app/globals.css': sombreSeul } }))[12], 'vert');
+  assert.match(detail(depot({ fichiers: { 'app/globals.css': sombreSeul } }), 12), /sombre seul voulu/);
+  // Le verrou et les variables restent exigés.
+  assert.equal(etats(depot({ fichiers: { 'app/globals.css': sombreSeul }, retirer: ['tests/theme.test.ts'] }))[12], 'rouge');
+  assert.equal(etats(depot({ fichiers: { 'app/globals.css': 'html { color-scheme: dark; }' } }))[12], 'rouge');
+});
+
+test('12 : color-scheme: dark hors de la racine ne vaut pas sombre seul', () => {
+  const rouge = (css) => etats(depot({ fichiers: { 'app/globals.css': `:root { --a: #fff; }\n${css}` } }))[12];
+  assert.equal(rouge('.terminal { color-scheme: dark; }'), 'rouge');
+  assert.equal(rouge('@supports (color: red) { :root { color-scheme: dark; } }'), 'rouge');
+  assert.equal(rouge(':root { color-scheme: light dark; }'), 'rouge');
+  assert.equal(rouge(':root { color-scheme: light; }'), 'rouge');
+  assert.equal(rouge('/* :root { color-scheme: dark; } */'), 'rouge');
+  assert.equal(rouge(':root { --color-scheme: dark; }'), 'rouge');
+  assert.equal(rouge('html, body { color-scheme: dark }'), 'vert');
+  assert.equal(rouge('.a, :root { color-scheme: dark; }'), 'rouge');
+});
+
+test('sombreSeulDeclare : entrées vides ou illisibles', () => {
+  assert.equal(sombreSeulDeclare(''), false);
+  assert.equal(sombreSeulDeclare(null), false);
+  assert.equal(sombreSeulDeclare(':root { color-scheme: dark; '), false);
+  assert.equal(sombreSeulDeclare(':root{color-scheme:dark}'), true);
 });
 
 test('13 : action épinglée par tag ; appel d’un workflow commun en @main toléré', () => {
