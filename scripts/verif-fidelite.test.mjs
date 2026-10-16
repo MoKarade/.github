@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ajouterAHistorique, lireVivant, mesurer } from './verif-fidelite.mjs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ajouterAHistorique, ajouterSnapshot, lireVivant, mesurer } from './verif-fidelite.mjs';
 
 // Données fictives, aucun réseau. Relevé à 12:00, règle « tâche liée » en vigueur depuis 06:00 le même jour.
 const ASOF = '2026-10-16T12:00:00Z';
@@ -215,4 +219,36 @@ test('lireVivant : ouvertes, fermées récentes, PR, branches claude/* ; les PR 
   assert.deepEqual(v.Hubperso.pulls.map((p) => p.number), [8, 9]);
   assert.deepEqual(v.Hubperso.branches, [{ name: 'claude/a', date: '2026-10-16T09:00:00Z' }]);
   assert.ok(appels.some((c) => c.includes('labels=niveau%3At%C3%A2che') && c.includes('state=closed') && c.includes('since=2026-10-15T00:00:00Z')));
+});
+
+const prochaines = (calcule_le, suivante) => ({ calcule_le, depots: [{ repo: 'Hubperso', statut: suivante ? 'libre' : 'occupe', suivante: suivante ? { ref: suivante } : null }] });
+
+test('ajouterSnapshot : ajoute la file du calcul sans toucher au reste, un seul point par calcul, 72 h au plus', () => {
+  const fichier = { version: 1, calcule_le: 'A', historique: [{ releve: 'r1' }], i2: { ecarts: [] }, snapshots: { hubperso: [{ asof: '2026-10-12T00:00:00Z', statut: 'libre', suivante: 'hubperso#1' }] } };
+  const un = ajouterSnapshot(fichier, prochaines('2026-10-16T10:00:00Z', 'hubperso#2'));
+  assert.deepEqual(un.snapshots.hubperso, [{ asof: '2026-10-16T10:00:00Z', statut: 'libre', suivante: 'hubperso#2' }]); // le point du 12/10 (plus de 72 h) est retiré
+  assert.deepEqual({ ...un, snapshots: null }, { ...fichier, snapshots: null }); // rien d'autre ne bouge
+  const deux = ajouterSnapshot(ajouterSnapshot(un, prochaines('2026-10-16T10:10:00Z', null)), prochaines('2026-10-16T10:10:00Z', null));
+  assert.deepEqual(deux.snapshots.hubperso.map((x) => x.asof), ['2026-10-16T10:00:00Z', '2026-10-16T10:10:00Z']);
+  assert.deepEqual(ajouterSnapshot({ version: 1 }, { depots: [] }).snapshots, {});
+});
+
+test('--snapshot-seulement : le fichier garde sa date de dernière mesure, tout le reste est intact', () => {
+  const dossier = mkdtempSync(join(tmpdir(), 'fiab-'));
+  const sortie = join(dossier, 'fiabilite.json');
+  const pro = join(dossier, 'prochaines.json');
+  writeFileSync(sortie, JSON.stringify({ version: 1, calcule_le: 'A', snapshots: {} }));
+  const ancien = new Date('2026-10-16T09:00:00Z');
+  utimesSync(sortie, ancien, ancien);
+  writeFileSync(pro, JSON.stringify(prochaines('2026-10-16T10:00:00Z', 'hubperso#2')));
+  const script = new URL('./verif-fidelite.mjs', import.meta.url).pathname;
+  execFileSync('node', [script, '--snapshot-seulement', pro, '--sortie', sortie]);
+  const apres = JSON.parse(readFileSync(sortie, 'utf8'));
+  assert.equal(apres.calcule_le, 'A');
+  assert.equal(apres.snapshots.hubperso[0].suivante, 'hubperso#2');
+  assert.equal(statSync(sortie).mtime.toISOString(), ancien.toISOString());
+  // sans fichier de fiabilité, rien n'est créé
+  const absent = join(dossier, 'absent.json');
+  execFileSync('node', [script, '--snapshot-seulement', pro, '--sortie', absent]);
+  assert.throws(() => statSync(absent));
 });
