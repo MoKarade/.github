@@ -345,7 +345,7 @@ Le fil « Vue personnalisée du projet » possède les outils du Gantt. Cette se
 - **I1 cohérence** : les défauts de la pastille ;
 - **I2 fidélité** : les écarts entre le relevé et GitHub (état, étiquettes, PR liée), hors ce qui change après le relevé ;
 - **I3 prise tracée** : `en-cours` posé au plus 10 minutes après l'ouverture de la PR (le balayage le pose, §8) ; aucune PR fusionnée sans tâche (robots exclus) ; aucune branche `claude/*` sans tâche ; aucun `en-cours` sans PR depuis plus de 3 h ;
-- **I4 accord file/agents** : la tâche lancée était la `suivante` du dernier calcul.
+- **I4 accord file/agents** : la tâche lancée était la `suivante` du dernier calcul ; la `suivante` de chaque calcul de `prochaines.json` (toutes les 10 minutes) est gardée par `verif-fidelite.mjs --snapshot-seulement`, et un lancement sur une file de plus de 40 minutes est listé (`perimes`).
 On ne dit « fiable » que quand I1 = I2 = 0 sur 20 relevés de suite et que les lancements de la période sont à 100 % ; l'historique n'est jamais remis à zéro.
 
 **Issue d'essai** : un essai qui a besoin d'une vraie issue porte l'étiquette `essai`, est fermé `not_planned` par l'essai lui-même, et le Gantt l'ignore (il ne s'affiche pas, ne compte dans aucune mesure). Le garde-fou de preuve ne rouvre pas une issue `essai` fermée `not_planned`. À la fermeture validée d'une tâche, `en-cours` et `qui:marc` sont retirés par le garde-fou de preuve.

@@ -9,11 +9,11 @@
 //      (par défaut la fusion du contrôle « tâche liée »), pour ne pas juger l'avant-règle
 //   I4 accord file/agents (mesuré depuis `--depuis-i4`, par défaut `--depuis` : la date où la boucle du Gantt est fiable ; un lancement sur
 //      une file de plus de 40 min est listé dans `perimes`) : une tâche lancée était-elle la `suivante` de `prochaines.json` au dernier calcul avant son
-//      lancement ? Les `suivante` de chaque calcul sont gardées dans `snapshots`.
+//      lancement ? Les `suivante` de chaque calcul sont gardées dans `snapshots` (à chaque tour de 10 min par `--snapshot-seulement`, sans refaire la mesure).
 // L'historique n'est JAMAIS remis à zéro : `consecutifs_a_zero` compte les relevés de queue avec I1 = I2 = 0.
 // Fonctions pures d'un côté (`mesurer`, `ajouterAHistorique`), I/O de l'autre (`lireVivant`, `main` avec `gh api`).
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { dispense, extraireTaches } from './tache-liee.mjs';
 
@@ -192,6 +192,14 @@ export function mesurer({ releve, vivant, prochaines = null, snapshots = {}, dep
   return { releve_asof: releve.asof, depuis, depuis_i4: depuisI4, i1: { defauts }, i2, i3, i4, alertes, snapshots: majSnapshots(snapshots, prochaines) };
 }
 
+/**
+ * Garde la file de CE calcul sans refaire la mesure (appelé à chaque tour de 10 minutes) : I4 juge ainsi un lancement contre le
+ * dernier calcul réel avant lui, pas contre celui de la mesure horaire précédente. Ne touche à rien d'autre dans le fichier.
+ */
+export function ajouterSnapshot(fichier, prochaines) {
+  return { ...fichier, snapshots: majSnapshots(fichier.snapshots ?? {}, prochaines) };
+}
+
 const nul = (m) => m.i1.defauts === 0 && m.i2.ecarts.length === 0;
 const i3propre = (m) => m.i3.prise.non_tracees.length + m.i3.sans_tache.length + m.i3.branches_sans_tache.length === 0;
 
@@ -257,9 +265,10 @@ export function lireVivant(api, depots, { asof, depuis }) {
 }
 
 function lireArguments(argv) {
-  const o = { releve: null, prochaines: null, sortie: null, defauts: null, depuis: DEPUIS_DEFAUT, depuisI4: null, seuilPriseH: SEUIL_PRISE_H };
+  const o = { snapshotSeulement: false, releve: null, prochaines: null, sortie: null, defauts: null, depuis: DEPUIS_DEFAUT, depuisI4: null, seuilPriseH: SEUIL_PRISE_H };
   for (let k = 0; k < argv.length; k += 1) {
-    if (argv[k] === '--sortie') o.sortie = argv[++k];
+    if (argv[k] === '--snapshot-seulement') o.snapshotSeulement = true;
+    else if (argv[k] === '--sortie') o.sortie = argv[++k];
     else if (argv[k] === '--defauts') o.defauts = Number(argv[++k]);
     else if (argv[k] === '--depuis') o.depuis = argv[++k];
     else if (argv[k] === '--depuis-i4') o.depuisI4 = argv[++k];
@@ -270,8 +279,25 @@ function lireArguments(argv) {
   return o;
 }
 
+/** `--snapshot-seulement prochaines.json --sortie fiabilite.json` : la date du fichier reste celle de la dernière MESURE (la boucle du Gantt la lit pour décider quand remesurer). */
+function mainSnapshot(o) {
+  const chemin = o.releve; // premier argument positionnel : prochaines.json
+  if (!chemin || !o.sortie) {
+    console.error('usage : node scripts/verif-fidelite.mjs --snapshot-seulement prochaines.json --sortie fiabilite.json');
+    process.exit(2);
+  }
+  if (!existsSync(o.sortie)) { console.log('Aucun fiabilite.json : rien à compléter.'); return; }
+  const fichier = ajouterSnapshot(JSON.parse(readFileSync(o.sortie, 'utf8')), JSON.parse(readFileSync(chemin, 'utf8')));
+  const date = statSync(o.sortie);
+  writeFileSync(`${o.sortie}.tmp`, `${JSON.stringify(fichier, null, 1)}\n`);
+  utimesSync(`${o.sortie}.tmp`, date.atime, date.mtime);
+  renameSync(`${o.sortie}.tmp`, o.sortie);
+  console.log(`Instantané de file gardé (${Object.keys(fichier.snapshots).length} dépôts).`);
+}
+
 function main() {
   const o = lireArguments(process.argv.slice(2));
+  if (o.snapshotSeulement) return mainSnapshot(o);
   if (!o.releve || !o.sortie) {
     console.error('usage : node scripts/verif-fidelite.mjs backlog.json [prochaines.json] --sortie fiabilite.json [--defauts N] [--depuis ISO] [--depuis-i4 ISO] [--seuil-prise-h H]');
     process.exit(2);
