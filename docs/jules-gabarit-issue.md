@@ -49,4 +49,4 @@ Chemin protégé, base de données, migration, authentification, secret, dépend
 
 ## Après la PR de Jules
 
-Claude relit le diff dans les minutes qui suivent (Mergify fusionne en 3 min quand tout est vert) : fichiers touchés ⊆ « Fichiers permis », aucun mot français devenu anglais, pas de `Fixes`. Si la doc est touchée, poser `hold` avant de relire. La preuve « Acceptée » est posée par Claude sur l'issue.
+Claude relit le diff dans les minutes qui suivent (Mergify fusionne en 3 min quand tout est vert) : fichiers touchés ⊆ « Fichiers permis », aucun mot français devenu anglais, pas de `Fixes`. Si la doc est touchée, poser `hold` avant de relire. La preuve « Acceptée » est posée par Claude sur l'issue. Si l'issue se ferme quand même à la fusion (un `Fixes #n` s'est glissé dans la PR), le garde-fou de preuve (`docs/cycle-de-vie-tache.md` §10 bis) la rouvre dans la minute avec l'étiquette `preuve-manquante` : ce n'est pas un incident, la preuve reste due. Une preuve écrite par Jules n'est jamais acceptée.

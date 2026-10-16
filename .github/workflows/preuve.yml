@@ -1,0 +1,82 @@
+name: Garde-fou de preuve (workflow commun)
+
+# Une tâche (issue `niveau:tâche`) ne reste fermée que si sa preuve est valide (docs/cycle-de-vie-tache.md §10 bis).
+# Écrit UNE fois ici ; chaque dépôt l'appelle depuis son `reacteur.yml`, quand une issue se ferme :
+#
+#   jobs:
+#     preuve:
+#       if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'niveau:tâche')
+#       permissions: { contents: read, issues: write, pull-requests: read, deployments: read, actions: read }
+#       uses: MoKarade/.github/.github/workflows/preuve.yml@main
+#       with:
+#         numero: ${{ github.event.issue.number }}
+#         runner: ${{ github.event.repository.visibility == 'public' && '"ubuntu-latest"' || '["self-hosted","pc-marc"]' }}
+#         deploiement: vercel            # ou « aucun » pour un dépôt qui ne se déploie pas
+#         workflows-deploiement: deploy.yml   # facultatif : workflows qui déploient hors Vercel (liste séparée par des virgules)
+#
+# Sortie `statut` : acceptee | abandon (la fermeture est justifiée) | rouverte (sans preuve valide : l'issue est
+# rouverte, étiquetée `preuve-manquante`, avec ce qui manque) | ignoree. Le réveil du Réacteur ne part que sur
+# acceptee ou abandon : une app n'est jamais libérée par une tâche fermée sans preuve.
+# La logique est dans scripts/preuve.mjs (testée, sans dépendance) ; ce fichier ne fait que l'appeler. Le script
+# vient de ce dépôt, jamais du code de l'appelant. Aucun secret : le jeton du job suffit.
+on:
+  workflow_call:
+    inputs:
+      numero:
+        description: 'Numéro de l’issue fermée.'
+        type: number
+        required: true
+      runner:
+        description: 'Machine, en JSON : "ubuntu-latest" (dépôt public) ou ["self-hosted","pc-marc"] (dépôt privé).'
+        type: string
+        default: '"ubuntu-latest"'
+      deploiement:
+        description: 'vercel : une PR qui change du code servi exige un déploiement de production réussi ; aucun : jamais exigé.'
+        type: string
+        default: vercel
+      workflows-deploiement:
+        description: 'Workflows qui déploient hors Vercel (ex. deploy.yml), séparés par des virgules.'
+        type: string
+        default: ''
+    outputs:
+      statut:
+        description: 'acceptee | abandon | rouverte | ignoree'
+        value: ${{ jobs.preuve.outputs.statut }}
+
+permissions: {}
+
+jobs:
+  preuve:
+    name: Garde-fou de preuve
+    timeout-minutes: 5
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+      deployments: read
+      actions: read
+    outputs:
+      statut: ${{ steps.garde.outputs.statut }}
+    steps:
+      - name: Récupérer le script de preuve
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: MoKarade/.github
+          ref: main
+          path: .preuve
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Vérifier la preuve de la tâche fermée
+        id: garde
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.numero }}
+          PREUVE_DEPLOIEMENT: ${{ inputs.deploiement }}
+          PREUVE_WORKFLOWS: ${{ inputs.workflows-deploiement }}
+        run: node .preuve/scripts/preuve.mjs
