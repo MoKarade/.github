@@ -10,7 +10,7 @@
 
 1. Trois niveaux : **chantier** (objectif de plusieurs semaines) › **mission** (résultat livrable en une semaine au plus) › **tâche** (une PR, une journée au plus, environ 400 lignes modifiées hors tests). Chacun est une issue GitHub.
 2. Claude crée le travail. Le Coordinateur tient les chantiers et les missions, et les fils créent et ferment les tâches. Marc décide de la direction : il force une tâche avec `prio:1`.
-3. L'ordre suit une règle fixe : d'abord la panne et le rouge, puis la sécurité, puis le standard et les fonctions en alternance. La routine distribue toutes les 2 h, avec au plus un fil et une tâche Jules par dépôt.
+3. L'ordre suit une règle fixe : d'abord la panne et le rouge, puis la sécurité, puis le standard et les fonctions en alternance. Les événements GitHub réveillent le Coordinateur (§6), un filet quotidien vérifie le reste, avec au plus un fil et une tâche Jules par dépôt.
 4. La CI décide. Chaque PR qui change un écran porte des captures avant/après, prises avec des données fictives. Mergify fusionne.
 5. Une tâche est **acceptée** quand trois conditions sont remplies : elle est fusionnée, le déploiement est en ligne, et le « Fini quand » est prouvé en production par un commentaire de preuve, **posé dans l'heure qui suit la mise en ligne** (§10). Si le test de fumée échoue, la version précédente revient seule et une PR d'annulation s'ouvre. Un rapport hebdomadaire mesure la vitesse, la qualité et les retours en arrière.
 
@@ -83,7 +83,8 @@ Un « Fini quand » non vérifiable (« c'est mieux ») est refusé. Un « Fini 
 | **Fil** (une session par tâche) | Prend une tâche, la livre, prouve l'acceptation ; crée les tâches de sa mission ; ouvre une issue pour un bug trouvé en chemin | Toucher la structure (chantiers, missions) ; prendre une deuxième tâche dans un autre dépôt |
 | **Fil PC** | Tout ce qui ne tourne que sur le PC : robot de tests, Drive, NotebookLM, sauvegardes, bascule en public | Agir sur un oui relayé ; le oui de Marc est écrit dans ce fil |
 | **Jules** | Les tâches `jules` : simples, un fichier, sans chemin protégé, sans base, sans secret, sans donnée perso | Les chemins protégés (le garde-fou les permettrait, mais une tâche simple n'en a pas besoin) ; une tâche sans « Fini quand » |
-| **Routine continue** (toutes les 2 h) | Fait le ménage, choisit la tâche suivante, la distribue (§6) | Inventer du travail |
+| **Routine continue** (une fois par jour à 6 h, et au réveil par la boîte) | Fait le ménage, choisit la tâche suivante, la distribue (§6) | Inventer du travail |
+| **Réacteur** (routine réveillée par un événement) | Met à jour les PR en retard, relance un échec de charge du robot de tests, réveille le Coordinateur quand il faut du jugement (§6) | Résoudre un conflit, fusionner, poser « Acceptée » |
 | **CI** | Décide si une PR peut fusionner | |
 | **Mergify** | Fusionne en squash une PR verte, hors brouillon, sans `hold`, une à la fois ; les chemins protégés aussi, quand le contrôle « Garde-fou » est vert (§9) | Fusionner une PR dont le garde-fou est rouge |
 
@@ -112,7 +113,12 @@ Une tâche n'est **prenable** que si elle remplit cinq conditions :
 
 ## 6. Répartition du travail
 
-**Qui lance** : la routine continue, toutes les 2 h, jour et nuit. Une demande directe de Marc ne l'attend pas : le Coordinateur ouvre le fil tout de suite.
+**Qui lance** : un **événement** d'abord, un relevé à l'heure seulement en filet quotidien (décision de Marc, 15/10/2026 : « plus de vérifications toutes les X heures »). Une demande directe de Marc n'attend rien : le Coordinateur ouvre le fil tout de suite.
+
+1. **Événement.** Une PR fusionnée, ou une CI rouge, dans l'un des dix dépôts déclenche le workflow `reacteur.yml` du dépôt, qui appelle la routine **Réacteur**. Elle fait le travail mécanique, puis, s'il faut du jugement, lance le workflow `boite-reacteur.yml` de `app-template`. Ce workflow commente la **boîte** (la PR brouillon permanente `app-template#58`, à ne jamais fusionner ni fermer) en `github-actions[bot]`, et le Coordinateur, abonné à la boîte, est réveillé.
+2. **Pourquoi le bot.** Un commentaire fait avec le compte de Marc ne réveille personne : GitHub ne notifie pas un abonné pour ses propres commentaires (prouvé le 15/10/2026).
+3. **Filet.** Une fois par jour à 6 h (heure du Québec, `CRON_TZ=America/Toronto`), le Réacteur (mode FILET) et la routine continue vérifient ce qu'aucun événement n'a signalé.
+4. **Règle.** Toute nouvelle surveillance passe d'abord par un événement. Une horloge n'est permise que comme filet quotidien.
 
 **Capacité** : au plus **un fil** en cours et **une tâche Jules** par dépôt. Un dépôt occupé est sauté.
 
@@ -304,6 +310,7 @@ Une question à Marc prend toujours la forme d'une **carte**, jamais d'une quest
 | Routine continue | §5, §6 |
 | Gantt et sa pastille | §7, §13 |
 | Workflows communs de ce dépôt (`captures`, `fumee`, `rapport-hebdo`) | §8, §11, §12 |
+| Réacteur (routine) et workflows `reacteur.yml` (chaque dépôt) et `boite-reacteur.yml` (`app-template`) | §6 : réveils par événement |
 | Instructions du projet (résumé du §0) | tout, pour chaque session |
 
 Ce qui n'est pas encore branché est suivi en tâches sous le chantier « Standardiser les tâches », dans ce dépôt.
