@@ -13,6 +13,8 @@
 // peut lever (références à un secret, nombre de cas de test : scripts/relecture-regles.mjs) ET qu'une
 // relecture IA a approuvé CE commit (commentaire de verdict « Relecture IA »), le contrôle est vert.
 // Rouge = la PR attend, une issue `qui:marc` s'ouvre (d'abord) et un commentaire dit pourquoi (non bloquant).
+// Règle à part, pour TOUTE PR (protégée ou non) : elle doit citer une tâche ouverte (`Tâche : #n`, scripts/tache-liee.mjs).
+// Elle rend le même contrôle « Garde-fou » rouge, mais sans issue `qui:marc` : c'est à l'auteur de la PR de corriger.
 //
 // Sûreté : lancé par `pull_request_target`, donc depuis le workflow de la branche par défaut, que
 // la PR ne peut pas modifier. Il ne récupère JAMAIS le code de la PR : il lit la liste des
@@ -27,6 +29,7 @@ import {
   WORKFLOW_RELECTURE,
   toutesSurmontables,
 } from './relecture-regles.mjs';
+import { MARQUEUR_TACHE, controleTacheLiee, rapportTacheLiee } from './tache-liee.mjs';
 
 export const MARQUEUR = '<!-- garde-fou -->';
 
@@ -434,6 +437,10 @@ async function main() {
     return;
   }
 
+  // Pas de PR sans tâche (plan Gantt source de vérité, règle 2) : verdict à part, rapporté plus bas.
+  const lien = await controleTacheLiee({ api, depot: GITHUB_REPOSITORY, pr });
+  const texteLien = rapportTacheLiee(lien);
+
   const fichiers = [];
   for (let page = 1; ; page += 1) {
     const lot = await api('GET', `/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100&page=${page}`);
@@ -472,11 +479,12 @@ async function main() {
       'la PR attend la relecture IA (quelques minutes) ; si elle refuse, elle attend Marc.',
     );
   }
+  texte = `${texte}\n\n${texteLien}`;
   console.log(texte);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${texte}\n`);
   if (dry) {
     console.log('(DRY_RUN : rien écrit sur GitHub)');
-    process.exitCode = resultat.violations.length > 0 ? 1 : 0;
+    process.exitCode = resultat.violations.length > 0 || !lien.ok ? 1 : 0;
     return;
   }
 
@@ -524,7 +532,18 @@ async function main() {
     }
     if (issueOuverte) await fermerIssue('Levé : le garde-fou est vert, plus rien à faire.');
   }
-  process.exitCode = echec ? 1 : 0;
+  // Commentaire de la règle « tâche liée » : un seul, mis à jour, jamais d'issue `qui:marc`.
+  const ancienLien = commentaires.find((c) => c.body?.includes(MARQUEUR_TACHE));
+  if (!lien.ok || ancienLien) {
+    try {
+      const corps = `${MARQUEUR_TACHE}\n${lien.ok ? 'Tâche liée : vert, le blocage est levé.' : texteLien}`;
+      if (ancienLien) await api('PATCH', `/repos/${GITHUB_REPOSITORY}/issues/comments/${ancienLien.id}`, { body: corps });
+      else await api('POST', `/repos/${GITHUB_REPOSITORY}/issues/${numero}/comments`, { body: corps });
+    } catch (erreur) {
+      console.warn(`Garde-fou : commentaire « tâche liée » non posté (le verdict reste rouge). ${erreur.message}`);
+    }
+  }
+  process.exitCode = echec || !lien.ok ? 1 : 0;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

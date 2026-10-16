@@ -175,6 +175,7 @@ La procédure pas à pas est la compétence `livrer-une-tache`. Elle applique ce
   - **Avant :** / **Après :** / **Comment :** ;
   - **Fini quand :** ;
   - les captures, si un écran change.
+- **Pas de PR sans tâche** : le contrôle « Garde-fou » (déjà exigé dans les dix dépôts, `scripts/tache-liee.mjs`) est rouge si le corps de la PR ne cite aucune issue `niveau:tâche` OUVERTE. Dispensés : Dependabot, Mergify, GitHub Actions et la boîte du Réacteur ; Jules ne l'est pas. Un travail d'outillage a sa tâche dans `MoKarade/.github`. Corriger le corps, puis relancer le contrôle (Re-run jobs) ou pousser un commit.
 - **Jamais `Closes`, `Fixes` ni `Resolves`** (Jules et Mergify compris) : la fusion ne ferme pas l'issue, la preuve d'acceptation la ferme (§10). Si une PR en porte quand même un, GitHub ferme l'issue à la fusion et le garde-fou de preuve (§10 bis) la rouvre aussitôt avec `preuve-manquante`. La transition est finie : le Gantt relie les PR par `Tâche : #n`.
 - Taille : environ 400 lignes modifiées au plus, hors tests et fichiers générés. Au-delà, on découpe.
 - Commit et titre préfixés selon le dépôt : `feat:`, `fix:`, `docs:`… ou `[ID]`.
