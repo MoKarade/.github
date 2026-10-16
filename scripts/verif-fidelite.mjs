@@ -7,7 +7,8 @@
 //   I3 prise tracée : PR de tâche dont l'issue portait `en-cours` avant l'ouverture ; PR fusionnées sans tâche (hors
 //      robots) ; branches `claude/*` sans tâche ; `en-cours` posé depuis des heures sans PR. Mesuré depuis `--depuis`
 //      (par défaut la fusion du contrôle « tâche liée »), pour ne pas juger l'avant-règle
-//   I4 accord file/agents : une tâche lancée était-elle la `suivante` de `prochaines.json` au dernier calcul avant son
+//   I4 accord file/agents (mesuré depuis `--depuis-i4`, par défaut `--depuis` : la date où la boucle du Gantt est fiable ; un lancement sur
+//      une file de plus de 40 min est listé dans `perimes`) : une tâche lancée était-elle la `suivante` de `prochaines.json` au dernier calcul avant son
 //      lancement ? Les `suivante` de chaque calcul sont gardées dans `snapshots`.
 // L'historique n'est JAMAIS remis à zéro : `consecutifs_a_zero` compte les relevés de queue avec I1 = I2 = 0.
 // Fonctions pures d'un côté (`mesurer`, `ajouterAHistorique`), I/O de l'autre (`lireVivant`, `main` avec `gh api`).
@@ -23,6 +24,7 @@ export const BORNE_RELEVE = '2026-10-15T00:00:00Z'; // fetch.py ne lit que les i
 export const SEUIL_PRISE_H = 3;
 export const CIBLE_RELEVES = 20;
 const FENETRE_LANCEMENT_MIN = 60;
+export const SEUIL_PERIME_MIN = 40; // au-delà, la file qui a servi au lancement était périmée (la routine l'ignore aussi)
 const BRANCHES_IGNOREES = new Set(['claude/boite-reacteur']);
 // Ancienne forme que le relevé accepte encore : la PR est nommée dans le corps de l'issue, sans lien depuis la PR.
 const PR_DANS_LE_CORPS = /PR déjà ouverte\*\*\s*:\s*#(\d+)/;
@@ -140,18 +142,21 @@ function mesurerI4(releve, snapshots, depuis) {
   const ecarts = [];
   let accords = 0;
   let nonEvaluables = 0;
+  const perimes = [];
   for (const depot of releve.repos) {
     const vus = (snapshots[minuscule(depot.repo)] ?? []).slice().sort((a, b) => (a.asof < b.asof ? -1 : 1));
     for (const n of Object.values(depot.nodes).filter((x) => x.lvl === 'tâche' && x.start && x.start >= depuis && x.start <= releve.asof)) {
       const avant = vus.filter((s) => s.asof <= n.start && heures(n.start, s.asof) * 60 <= FENETRE_LANCEMENT_MIN).pop();
       const r = ref(depot.repo, n.n);
       if (!avant) { nonEvaluables += 1; continue; }
+      const age = Math.round(heures(n.start, avant.asof) * 60);
+      if (age > SEUIL_PERIME_MIN) perimes.push({ ref: r, lance: n.start, calcul: avant.asof, age_min: age });
       if (avant.suivante === r) accords += 1;
       else ecarts.push({ ref: r, lance: n.start, annoncee: avant.suivante ?? `(${avant.statut})`, calcul: avant.asof });
     }
   }
   const lancements = accords + ecarts.length;
-  return { lancements, accords, taux: lancements ? accords / lancements : null, ecarts, non_evaluables: nonEvaluables };
+  return { lancements, accords, taux: lancements ? accords / lancements : null, ecarts, non_evaluables: nonEvaluables, perimes };
 }
 
 /** Garde la `suivante` de ce calcul de prochaines.json, 72 h au plus, par dépôt. */
@@ -171,18 +176,19 @@ function majSnapshots(anciens, prochaines) {
 
 /**
  * Les quatre mesures d'un relevé.
- * @param entree { releve, vivant, prochaines, snapshots, depuis, defauts, seuilPriseH }
+ * @param entree { releve, vivant, prochaines, snapshots, depuis, depuisI4, defauts, seuilPriseH } ; `depuisI4` (défaut `depuis`) : début de la mesure I4
  */
-export function mesurer({ releve, vivant, prochaines = null, snapshots = {}, depuis = DEPUIS_DEFAUT, defauts = null, seuilPriseH = SEUIL_PRISE_H }) {
+export function mesurer({ releve, vivant, prochaines = null, snapshots = {}, depuis = DEPUIS_DEFAUT, defauts = null, seuilPriseH = SEUIL_PRISE_H, depuisI4 = depuis }) {
   const { parTache, toutes } = indexerPulls(vivant);
   const i2 = mesurerI2(releve, vivant, parTache);
   const i3 = mesurerI3(releve, vivant, toutes, depuis, seuilPriseH);
-  const i4 = mesurerI4(releve, snapshots, depuis);
+  const i4 = mesurerI4(releve, snapshots, depuisI4);
   const alertes = [];
   if (defauts === null) alertes.push('I1 non fourni (--defauts N) : le relevé ne compte pas pour la preuve');
   if (!prochaines) alertes.push('prochaines.json absent : I4 non mesurable sur ce relevé');
   if (i3.prises_sans_pr.length) alertes.push(`${i3.prises_sans_pr.length} tâche(s) en-cours sans PR depuis plus de ${seuilPriseH} h`);
-  return { releve_asof: releve.asof, depuis, i1: { defauts }, i2, i3, i4, alertes, snapshots: majSnapshots(snapshots, prochaines) };
+  if (i4.perimes.length) alertes.push(`${i4.perimes.length} lancement(s) sur une file de plus de ${SEUIL_PERIME_MIN} min : ${i4.perimes.map((x) => x.ref).join(', ')}`);
+  return { releve_asof: releve.asof, depuis, depuis_i4: depuisI4, i1: { defauts }, i2, i3, i4, alertes, snapshots: majSnapshots(snapshots, prochaines) };
 }
 
 const nul = (m) => m.i1.defauts === 0 && m.i2.ecarts.length === 0;
@@ -250,11 +256,12 @@ export function lireVivant(api, depots, { asof, depuis }) {
 }
 
 function lireArguments(argv) {
-  const o = { releve: null, prochaines: null, sortie: null, defauts: null, depuis: DEPUIS_DEFAUT, seuilPriseH: SEUIL_PRISE_H };
+  const o = { releve: null, prochaines: null, sortie: null, defauts: null, depuis: DEPUIS_DEFAUT, depuisI4: null, seuilPriseH: SEUIL_PRISE_H };
   for (let k = 0; k < argv.length; k += 1) {
     if (argv[k] === '--sortie') o.sortie = argv[++k];
     else if (argv[k] === '--defauts') o.defauts = Number(argv[++k]);
     else if (argv[k] === '--depuis') o.depuis = argv[++k];
+    else if (argv[k] === '--depuis-i4') o.depuisI4 = argv[++k];
     else if (argv[k] === '--seuil-prise-h') o.seuilPriseH = Number(argv[++k]);
     else if (!o.releve) o.releve = argv[k];
     else if (!o.prochaines) o.prochaines = argv[k];
@@ -265,14 +272,14 @@ function lireArguments(argv) {
 function main() {
   const o = lireArguments(process.argv.slice(2));
   if (!o.releve || !o.sortie) {
-    console.error('usage : node scripts/verif-fidelite.mjs backlog.json [prochaines.json] --sortie fiabilite.json [--defauts N] [--depuis ISO] [--seuil-prise-h H]');
+    console.error('usage : node scripts/verif-fidelite.mjs backlog.json [prochaines.json] --sortie fiabilite.json [--defauts N] [--depuis ISO] [--depuis-i4 ISO] [--seuil-prise-h H]');
     process.exit(2);
   }
   const releve = JSON.parse(readFileSync(o.releve, 'utf8'));
   const prochaines = o.prochaines && existsSync(o.prochaines) ? JSON.parse(readFileSync(o.prochaines, 'utf8')) : null;
   const precedent = existsSync(o.sortie) ? JSON.parse(readFileSync(o.sortie, 'utf8')) : null;
   const vivant = lireVivant(apiGh, releve.repos.map((d) => d.repo), { asof: releve.asof, depuis: o.depuis });
-  const mesure = mesurer({ releve, vivant, prochaines, snapshots: precedent?.snapshots ?? {}, depuis: o.depuis, defauts: Number.isFinite(o.defauts) ? o.defauts : null, seuilPriseH: o.seuilPriseH });
+  const mesure = mesurer({ releve, vivant, prochaines, snapshots: precedent?.snapshots ?? {}, depuis: o.depuis, depuisI4: o.depuisI4 ?? o.depuis, defauts: Number.isFinite(o.defauts) ? o.defauts : null, seuilPriseH: o.seuilPriseH });
   const fichier = ajouterAHistorique(precedent, mesure, new Date().toISOString());
   writeFileSync(`${o.sortie}.tmp`, `${JSON.stringify(fichier, null, 1)}\n`);
   renameSync(`${o.sortie}.tmp`, o.sortie);
