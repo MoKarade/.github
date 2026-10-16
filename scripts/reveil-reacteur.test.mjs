@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEPOT_BOITE, DEPOT_GITHUB, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, WORKFLOWS_BALAYAGE, WORKFLOWS_PR_OUVERTE, construireMotif, decider, estPanneRunner, heureQuebec, preuveAPoser, rougeDepuis, traiter } from './reveil-reacteur.mjs';
+import { DEPOT_BOITE, DEPOT_GITHUB, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, WORKFLOWS_BALAYAGE, WORKFLOWS_PR_OUVERTE, construireMotif, decider, estPanneRunner, heureQuebec, occupations, preuveAPoser, rougeDepuis, traiter } from './reveil-reacteur.mjs';
 
 // Fausse API GitHub en mémoire : les lectures viennent de `donnees`, les écritures sont gardées.
 function faux(donnees = {}) {
@@ -88,6 +88,66 @@ test('PR fusionnée : tâche d’un autre dépôt illisible : le réveil part qu
   });
   const d = await decider({ api, evt: { type: 'pr_fusionnee', depot: 'MoKarade/CarAI', pr: '3' } });
   assert.equal(d.motif, 'RÉACTEUR : MoKarade/CarAI libre ; PR #3 fusionnée');
+});
+
+// « Libre » seulement si le dépôt l'est vraiment (tâche MoKarade/.github#164) : plus de commentaire sur un dépôt occupé.
+const DEPOT = 'MoKarade/JobAI';
+const issuesEnCours = (numeros) => numeros.map((number) => ({ number, labels: [{ name: 'en-cours' }] }));
+const prOuverte = (number, corps, extra = {}) => ({ number, draft: false, body: corps, user: humain, head: { ref: `claude/x${number}` }, ...extra });
+
+test('occupations : issue en-cours ou jules, PR ouverte (brouillon compris) ; robots et boîte du Réacteur ne comptent pas', async () => {
+  assert.deepEqual(await occupations({ api: faux().api, depot: DEPOT }), []);
+  assert.deepEqual(await occupations({ api: faux({ [`/repos/${DEPOT}/issues`]: issuesEnCours([12]) }).api, depot: DEPOT }), ['#12']);
+  const prs = [
+    prOuverte(30, 'Tâche : #12', { draft: true }),
+    prOuverte(31, 'Bump', { user: { login: 'dependabot[bot]', type: 'Bot' } }),
+    prOuverte(58, '', { draft: true, user: { login: 'github-actions[bot]', type: 'Bot' }, head: { ref: 'claude/boite-reacteur' } }),
+  ];
+  assert.deepEqual(await occupations({ api: faux({ [`/repos/${DEPOT}/pulls`]: prs }).api, depot: DEPOT }), ['PR #30']);
+  // une pull request renvoyée par l'API des issues n'est pas une tâche prise
+  assert.deepEqual(await occupations({ api: faux({ [`/repos/${DEPOT}/issues`]: [{ number: 5, pull_request: {} }] }).api, depot: DEPOT }), []);
+});
+
+test('occupations : la tâche de la PR qui fusionne ne compte pas, sauf si une autre PR ouverte la cite', async () => {
+  const api = faux({ [`/repos/${DEPOT}/issues`]: issuesEnCours([12, 13]) }).api;
+  assert.deepEqual(await occupations({ api, depot: DEPOT, tachesExclues: [12] }), ['#13']);
+  const encore = faux({ [`/repos/${DEPOT}/issues`]: issuesEnCours([12]), [`/repos/${DEPOT}/pulls`]: [prOuverte(40, 'Tâche : #12')] }).api;
+  assert.deepEqual(await occupations({ api: encore, depot: DEPOT, tachesExclues: [12] }), ['#12', 'PR #40']);
+});
+
+test('occupations : une lecture qui échoue rend « libre » (un réveil de trop plutôt qu’un dépôt libre tu)', async () => {
+  assert.deepEqual(await occupations({ api: faux({ [`/repos/${DEPOT}/pulls`]: new Error('HTTP 403') }).api, depot: DEPOT }), []);
+});
+
+test('tâche fermée : dépôt occupé = aucun réveil ; libre = « libre » ; abandon réveille toujours, sans « libre » si occupé', async () => {
+  const occupe = faux({ [`/repos/${DEPOT}/issues`]: issuesEnCours([20]) });
+  const evt = { type: 'tache_fermee', depot: DEPOT, issue: '90', raison: 'completed' };
+  assert.deepEqual(await decider({ api: occupe.api, evt }), { action: 'rien', raison: 'dépôt encore occupé' });
+  assert.equal((await decider({ api: faux().api, evt })).motif, `RÉACTEUR : ${DEPOT} libre ; tâche ${DEPOT}#90 fermée`);
+  const abandon = await decider({ api: occupe.api, evt: { ...evt, raison: 'not_planned' } });
+  assert.equal(abandon.motif, `RÉACTEUR : tâche ${DEPOT}#90 fermée (abandonnée : vérifier la raison)`);
+});
+
+test('PR fusionnée : dépôt occupé par une autre tâche = aucun réveil ; la tâche de la PR fusionnée ne l’occupe plus', async () => {
+  const base = { [`/repos/${DEPOT}/pulls/7`]: { body: 'Tâche : #12', user: humain }, [`/repos/${DEPOT}/issues/12`]: tache({ labels: [{ name: 'niveau:tâche' }, { name: 'preuve-attendue' }] }), [`/repos/${DEPOT}/issues/12/comments`]: [] };
+  const evt = { type: 'pr_fusionnee', depot: DEPOT, pr: '7' };
+  // seule la tâche #12 de la PR est encore étiquetée en-cours : le dépôt est libre
+  assert.equal((await decider({ api: faux({ ...base, [`/repos/${DEPOT}/issues`]: issuesEnCours([12]) }).api, evt })).motif, `RÉACTEUR : ${DEPOT} libre ; PR #7 fusionnée`);
+  // une autre tâche est en cours : rien
+  assert.deepEqual(await decider({ api: faux({ ...base, [`/repos/${DEPOT}/issues`]: issuesEnCours([12, 21]) }).api, evt }), { action: 'rien', raison: 'dépôt encore occupé' });
+  // une autre PR de tâche est ouverte : rien
+  assert.equal((await decider({ api: faux({ ...base, [`/repos/${DEPOT}/pulls`]: [prOuverte(41, 'Tâche : #21')] }).api, evt })).action, 'rien');
+});
+
+test('PR fusionnée : dépôt occupé mais preuve à poser = réveil, sans la ligne « libre »', async () => {
+  const { api } = faux({
+    [`/repos/${DEPOT}/pulls/7`]: { body: 'Tâche : #115', user: humain },
+    [`/repos/${DEPOT}/issues/115`]: tache(),
+    [`/repos/${DEPOT}/issues/115/comments`]: [],
+    [`/repos/${DEPOT}/issues`]: issuesEnCours([21]),
+  });
+  const d = await decider({ api, evt: { type: 'pr_fusionnee', depot: DEPOT, pr: '7' } });
+  assert.equal(d.motif, `RÉACTEUR : PR #7 fusionnée ; preuve à poser sur ${DEPOT}#115`);
 });
 
 const roug = { type: 'ci_rouge', depot: 'MoKarade/DriveAI', evenement: 'pull_request', pr: '12', sha: 'abcdef1234567', run: '555', brancheDefaut: 'main' };
