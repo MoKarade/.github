@@ -276,3 +276,10 @@ test('traiter : PR d’un autre dépôt citée avec son nom', async () => {
   });
   assert.equal((await traiter({ api, depot: 'MoKarade/.github', numero: 7, config: cfg })).statut, 'acceptee');
 });
+
+test('traiter : PR d’un autre dépôt illisible (privé) → pas de réouverture pour ça ; PR du même dépôt introuvable → rouverte', async () => {
+  const autre = fauxGitHub({ issue: issueFermee(), commentaires: [commentaire(preuveOk.replace('PR #12', 'PR MoKarade/CarAI#12'))] });
+  assert.equal((await traiter({ api: autre.api, depot: 'MoKarade/.github', numero: 7, config: { deploiement: 'aucun' } })).statut, 'acceptee');
+  const meme = fauxGitHub({ issue: issueFermee(), commentaires: [commentaire(preuveOk)] });
+  assert.equal((await traiter({ api: meme.api, depot: 'MoKarade/.github', numero: 7, config: { deploiement: 'aucun' } })).statut, 'rouverte');
+});

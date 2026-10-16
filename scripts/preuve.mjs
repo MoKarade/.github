@@ -85,7 +85,9 @@ export function evaluer({ raison, commentaires, pr = null, fichiers = [], deploi
   if (!cite.pr && !cite.sansPr) {
     motifs.push('ni « PR #n fusionnée » ni « sans PR » : dis quelle PR livre la tâche, ou qu’il n’y en a pas');
   } else if (cite.pr) {
-    if (!pr) motifs.push(`PR #${cite.pr.numero} introuvable`);
+    if (pr?.illisible) {
+      // PR d'un autre dépôt, privé : le jeton de ce dépôt ne la lit pas. On ne rouvre pas pour ce que GitHub ne laisse pas voir.
+    } else if (!pr) motifs.push(`PR #${cite.pr.numero} introuvable`);
     else if (!pr.merged) motifs.push(`PR #${cite.pr.numero} non fusionnée`);
     else {
       const shas = [pr.merge_commit_sha, pr.head_sha].filter(Boolean);
@@ -181,6 +183,7 @@ export async function traiter({ api, depot, numero, config = {} }) {
     if (cite?.pr) {
       const cible = cite.pr.depot ? `MoKarade/${cite.pr.depot}` : depot;
       pr = await api(`/repos/${cible}/pulls/${cite.pr.numero}`).catch(() => null);
+      if (!pr && cible !== depot) pr = { illisible: true };
       if (pr?.merged) {
         fichiers = (await pages(api, `/repos/${cible}/pulls/${cite.pr.numero}/files`).catch(() => [])).map((f) => f.filename);
         pr = { merged: true, merged_at: pr.merged_at, merge_commit_sha: pr.merge_commit_sha, head_sha: pr.head?.sha };
@@ -188,7 +191,7 @@ export async function traiter({ api, depot, numero, config = {} }) {
           const d = await verifierDeploiement({ api, depot: cible, sha: pr.merge_commit_sha, fusionLe: pr.merged_at, workflows: config.workflows ?? [] });
           deploiement = { requis: true, ...d };
         }
-      } else if (pr) pr = { merged: false };
+      } else if (pr && !pr.illisible) pr = { merged: false };
     }
   }
 
