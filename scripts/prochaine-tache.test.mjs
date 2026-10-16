@@ -196,6 +196,40 @@ test('chantiers sans type : l’alternance n’est pas inventée, une alerte le 
   assert.match(r.alertes[0], /Alpha.*non calculable/);
 });
 
+test('chantiers sans type : l’alerte nomme le chantier à étiqueter', () => {
+  const noeuds = [
+    chantier(10, [11]), mission(11, [1]), tache(1, { state: 'closed', closed: '2026-10-16T10:00:00Z' }),
+    chantier(20, [21]), mission(21, [2]), tache(2),
+  ];
+  const r = calculer(releve(depot('a', noeuds, { name: 'Alpha' })));
+  assert.match(r.alertes[0], /a#10/);
+  assert.match(r.alertes[0], /a#20/);
+});
+
+test('mission sans chantier (imbriquée sous une mission) : pas de chantier inventé, pas d’alerte', () => {
+  // DriveAI#578 le 16/10 : tâche -> mission 497 -> mission commune ; aucun chantier au-dessus, donc rien à étiqueter.
+  const commun = depot('c', [mission(1, ['a#497'])]);
+  const a = depot('a', [
+    mission(497, [1], []), tache(1, { state: 'closed', closed: '2026-10-16T10:00:00Z' }), tache(2),
+    chantier(30, [31], ['chantier:standard']), mission(31, [3]), tache(3),
+  ]);
+  const r = calculer(releve(commun, a));
+  assert.deepEqual(r.alertes, []);
+  const file = etat(r).file;
+  assert.deepEqual(file.map((f) => [f.ref, f.tier, f.chantier]), [['a#2', 7, null], ['a#3', 7, 'a#30']]);
+  assert.equal(file[0].mission, null, 'une tâche libre n’est rattachée à aucune mission');
+});
+
+test('mission imbriquée sous une mission, elle-même sous un chantier : le chantier est trouvé', () => {
+  const noeuds = [
+    chantier(10, [11], ['chantier:standard']), mission(11, [12]), mission(12, [1, 2]),
+    tache(1, { state: 'closed', closed: '2026-10-16T10:00:00Z' }), tache(2),
+  ];
+  const r = calculer(releve(depot('a', noeuds)));
+  assert.deepEqual(etat(r).file.map((f) => [f.ref, f.tier, f.mission, f.chantier]), [['a#2', 4, 'a#12', 'a#10']]);
+  assert.deepEqual(r.alertes, []);
+});
+
 test('parent dans un autre dépôt (mission commune) : la tâche est rattachée à son chantier', () => {
   const commun = depot('c', [chantier(1, [2]), mission(2, ['a#1', 'a#2'])]);
   const a = depot('a', [tache(1, { state: 'closed', closed: '2026-10-16T10:00:00Z' }), tache(2), tache(3)]);
