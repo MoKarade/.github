@@ -168,11 +168,12 @@ test('chemins protégés : lus dans le garde-fou.yml du dépôt', () => {
 });
 
 test('garde-fou rouge : la dernière exécution décide', () => {
-  const run = (conclusion, t) => ({ name: 'Garde-fou', status: 'completed', conclusion, completed_at: t });
-  assert.equal(gardeFouRouge([run('failure', '2026-10-16T10:00:00Z')]), true);
-  assert.equal(gardeFouRouge([run('failure', '2026-10-16T10:00:00Z'), run('success', '2026-10-16T10:05:00Z')]), false);
+  const run = (status, conclusion, t) => ({ status, conclusion, created_at: t });
+  assert.equal(gardeFouRouge([run('completed', 'failure', '2026-10-16T10:00:00Z')]), true);
+  assert.equal(gardeFouRouge([run('completed', 'failure', '2026-10-16T10:00:00Z'), run('completed', 'success', '2026-10-16T10:05:00Z')]), false);
+  assert.equal(gardeFouRouge([run('in_progress', null, '2026-10-16T10:00:00Z')]), false); // rejouée : on attend
   assert.equal(gardeFouRouge([]), false);
-  assert.equal(gardeFouRouge([{ name: 'Gate', status: 'completed', conclusion: 'failure', completed_at: 'x' }]), false);
+  assert.equal(gardeFouRouge(undefined), false);
 });
 
 // ── Le garde-fou lit le statut ────────────────────────────────────────────────────

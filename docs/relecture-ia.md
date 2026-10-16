@@ -32,6 +32,11 @@ Test sauté ou supprimé, CI affaiblie (`continue-on-error`, `|| true`), seuil d
 - `RELECTURE_PAT` : jeton GitHub « fine-grained », propriétaire `MoKarade`, les 10 dépôts, droits : Actions (lecture et écriture), Commit statuses (lecture et écriture), Pull requests (lecture et écriture), Contents (lecture seule). Durée : la plus longue permise ; à renouveler à l'échéance (le job devient rouge sinon).
 Jamais par le chat.
 
+## Pannes et noms réservés
+- Une erreur de lecture sur une PR ou un dépôt (droit manquant, panne GitHub) n'arrête pas les autres : elle est notée, aucun avis n'est posé pour cette PR, et la dernière étape du job devient rouge avec la liste.
+- Le Garde-fou est lu par l'API des exécutions de workflow (droit Actions), pas par celle des contrôles : aucun droit « Checks » à donner au jeton.
+- Tout workflow dont le nom de fichier contient `garde-fou` ou `relecture` est traité comme le garde-fou lui-même : jamais levé par l'IA, fusion de Marc.
+
 ## Avant de modifier le workflow
 Lancer `actionlint` sur `relecture-ia.yml` : un workflow invalide ne s'exécute pas et n'affiche qu'une exécution « push » à zéro tâche (cas du 16/10/2026 : `runner.temp` n'existe pas dans `env:` du job).
 
