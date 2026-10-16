@@ -1,0 +1,40 @@
+name: Commentaire tâche liée
+
+# Pose, met à jour ou lève le commentaire « tâche liée » sur les PR ouvertes des dix dépôts (scripts/commenter-tache-liee.mjs).
+# Pourquoi ici : le jeton des workflows du Garde-fou n'a pas `pull-requests: write` (HTTP 403) ; le jeton fin
+# RELECTURE_PAT (Pull requests en lecture et écriture sur les dix dépôts, voir docs/relecture-ia.md) le peut, et un
+# seul fichier remplace dix PR sur des chemins protégés. Ce workflow ne change jamais le verdict : le contrôle requis
+# reste le « Garde-fou ». Même cadence que la relecture IA (aucune horloge de plus à comprendre).
+#
+# SÛRETÉ : le script vient de la branche main de ce dépôt et ne lit que le corps des PR (une donnée) ; ce fichier
+# fait partie de ce que le garde-fou refuse de laisser modifier seul.
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+# Aucun `paths:` : la règle vaut partout ici.
+permissions:
+  contents: read
+
+concurrency:
+  group: commentaire-tache-liee
+  cancel-in-progress: false
+
+jobs:
+  commenter:
+    name: Commentaire tâche liée
+    # Plafond : une passe lit quelques dizaines de PR ; un job figé ne doit pas tourner six heures.
+    timeout-minutes: 5
+    runs-on: ubuntu-latest # dépôt public : machines GitHub (gratuites)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+      - name: Commenter les PR sans tâche
+        env:
+          GH_PAT: ${{ secrets.RELECTURE_PAT }}
+        run: node scripts/commenter-tache-liee.mjs
