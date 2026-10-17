@@ -5,5 +5,5 @@
   {"nom": "hubperso", "depot": "MoKarade/Hubperso", "sante": "https://www.hubperso.com/api/sante", "vercel": "hubperso"},
   {"nom": "memoryai", "depot": "MoKarade/MemoryAI", "sante": null, "raison": "/api/sante absente (la route répond 401 derrière la connexion)"},
   {"nom": "driveai", "depot": "MoKarade/DriveAI", "sante": null, "raison": "/api/sante absente (404)"},
-  {"nom": "financeai", "depot": "MoKarade/FinanceAI", "sante": null, "raison": "/api/sante absente (la page d'accueil répond à la place)"}
+  {"nom": "financeai", "depot": "MoKarade/FinanceAI", "sante": "https://finance.hubperso.com/api/sante"}
 ]
