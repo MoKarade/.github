@@ -109,9 +109,28 @@ test('abandon : il faut la raison, écrite par une personne', () => {
 test('lireCitation lit PR, empreintes et preuve', () => {
   const c = lireCitation('**Acceptée** — PR MoKarade/Hubperso#12 fusionnée (ea239e9), run 38919470809, preuve : ça marche');
   assert.deepEqual(c.pr, { depot: 'Hubperso', numero: 12 });
-  assert.deepEqual(c.shas, ['ea239e9']);
+  // le numéro d'exécution (11 chiffres) est aussi une candidate : sans effet, seule l'empreinte du commit fusionné compte
+  assert.deepEqual(c.shas, ['ea239e9', '38919470809']);
   assert.equal(c.preuve, 'ça marche');
   assert.equal(lireCitation('aucune').pr, null);
+});
+
+test('lireCitation lit une empreinte de chiffres seuls ou de lettres seules (tâche .github#215)', () => {
+  assert.deepEqual(lireCitation('**Acceptée** — PR #12 fusionnée (9088582), preuve : ok').shas, ['9088582']);
+  assert.deepEqual(lireCitation('**Acceptée** — PR #12 fusionnée (abcdefa), preuve : ok').shas, ['abcdefa']);
+  assert.deepEqual(lireCitation('**Acceptée** — PR #12 fusionnée (908858251894f90aec9f), preuve : ok').shas, ['908858251894f90aec9f']);
+  // rejetés : moins de 7 caractères, majuscules, mot qui n'est pas hexadécimal
+  assert.deepEqual(lireCitation('**Acceptée** — PR #12 fusionnée (90885), ABCDEF12, fusionnée, preuve : ok').shas, []);
+});
+
+test('une empreinte de chiffres seuls est acceptée si elle est celle du commit fusionné, refusée sinon', () => {
+  const sha = '9088582' + 'a'.repeat(33);
+  const prChiffres = { merged: true, merged_at: FUSION, merge_commit_sha: sha, head_sha: 'f'.repeat(40) };
+  const ok = evaluer({ raison: 'completed', commentaires: [commentaire(preuveOk.replace('ea239e9', '9088582'))], pr: prChiffres, fichiers: [] });
+  assert.equal(ok.ok, true, ok.motifs.join(' | '));
+  const faux = evaluer({ raison: 'completed', commentaires: [commentaire(preuveOk.replace('ea239e9', '1234567'))], pr: prChiffres, fichiers: [] });
+  assert.equal(faux.ok, false);
+  assert.match(faux.motifs.join(' '), /aucune empreinte/);
 });
 
 test('lireCitation lit aussi « PR dépôt#n », avec ou sans MoKarade/ (tâche .github#195)', () => {

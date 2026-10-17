@@ -51,7 +51,10 @@ export function lireCitation(body) {
   const texte = String(body ?? '');
   // « PR #n », « PR dépôt#n » et « PR MoKarade/dépôt#n » (tâche .github#195 : « PR JobAI#180 » n'était pas reconnu, la tâche rouverte).
   const pr = /\bPR\s+(?:(?:MoKarade\/)?([\w.-]+))?#(\d+)\b/i.exec(texte);
-  const shas = [...texte.matchAll(/\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)([0-9a-f]{7,40})\b/g)].map((m) => m[1]);
+  // Toute suite de 7 à 40 caractères hexadécimaux est une empreinte candidate, y compris « 9088582 » (chiffres seuls) ou
+  // « abcdefa » (lettres seules) : tâche .github#215. Un nombre ordinaire ne fait rien de mal ici, puisque `evaluer` ne
+  // retient la preuve que si une candidate est le début de l'empreinte réelle du commit fusionné.
+  const shas = [...texte.matchAll(/\b([0-9a-f]{7,40})\b/g)].map((m) => m[1]);
   const preuve = /\bpreuve\s*:\s*([\s\S]*)/i.exec(texte);
   return {
     pr: pr ? { depot: pr[1] ?? null, numero: Number(pr[2]) } : null,
