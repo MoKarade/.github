@@ -139,6 +139,14 @@ Le même script lit le pourcentage hebdomadaire du quota Claude (`quota.json`, r
 - **Limite assumée** : le palier a jusqu'à une heure de retard, et les fils déjà lancés continuent. Le frein retarde le mur, il ne le supprime pas.
 - Lecteurs : le coordinateur et la routine continue lisent `frein` avant de lancer un fil ; la page de suivi affiche le palier (alerte « Frein de quota » du script, et état `frein` à ajouter à sa table des raisons).
 
+**Frein par rythme (décision de Marc, 17/10/2026, tâche #198).** Un seuil fixe ne distingue pas une nuit calme (+1 point en 9 h) d'une journée à +2 points/h. Le script projette le quota jusqu'à la remise à zéro : `projection = quota + rythme des 3 dernières heures × heures restantes` (rythme lu dans l'`historique` de la jauge Claude de `quota.json`, remise à zéro = `reset_utc`).
+
+- **Monter** : projection de 95 % ou plus (plafond 100 moins une marge de 5) = palier 1. Sous 95 %, les tâches partent. Le palier 2 reste celui du secours : 90 % de quota et plus, sans condition de projection (il se quitte sous 88 %). Le seuil de 80 % n'est plus un plancher quand la projection est calculable.
+- **Lever** (hystérésis) : le palier 1 n'est levé que lorsque la projection reste sous 90 % pendant 30 minutes de suite (3 calculs de 10 min ; `frein_detail.bas_depuis` garde le début, d'un calcul à l'autre). Entre 90 et 95 %, le palier en vigueur est gardé. Le seuil de levée est 90 et non 80 : à 80 % de quota la projection ne peut pas passer sous 80, un palier n'y serait jamais levé.
+- **Sans projection** (moins d'une heure d'historique dans la fenêtre, remise à zéro inconnue ou passée) ou mesure périmée (plus de 3 h) : comportement des seuils 80 / 90 décrit plus haut, dernier palier connu gardé si périmé.
+- **Lecture** : `frein_detail` dit `mode` (`rythme` ou `seuils`), `rythme_pt_h`, `heures_restantes`, `projection_pct`, `bas_depuis` et la raison en clair. Réglage : `FREIN_RYTHME` en tête de `scripts/prochaine-tache.mjs`.
+- **Limite connue** : le quota est un entier, le rythme sur 3 h est donc grossier (un point en 3 h = 0,3 point/h, soit +30 points projetés sur 90 h), et la projection compte les nuits au rythme du moment. Rejeu sur les mesures du 16-17/10 : la projection dépasse 95 % à chaque mesure (186 à 335 %, y compris à 63 % de quota), car le rythme observé (1 à 2 points/h) épuiserait réellement le quota avant la remise à zéro.
+
 ## 6. Répartition du travail
 
 **Qui lance** : un **événement** d'abord, un relevé à l'heure seulement en filet quotidien (décision de Marc, 15/10/2026 : « plus de vérifications toutes les X heures »). Une demande directe de Marc n'attend rien : le Coordinateur ouvre le fil tout de suite.
