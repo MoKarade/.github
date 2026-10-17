@@ -59,10 +59,11 @@ test('une autre tâche en tête de file est un autre couple : elle réveille aus
   assert.equal(r.reveils[0].ref, 'JobAI#9');
 });
 
-test('frein de quota actif : rien', () => {
-  const r = rejouer([depotLibre('MoKarade/JobAI')], 60, { extra: { frein: '1' } });
-  assert.deepEqual(r.tous, []);
-  assert.match(r.raison, /frein de quota actif/);
+test('frein de quota actif : un dépôt libre avec une suivante permise réveille, un dépôt « frein » (tout retenu) non', () => {
+  const retenu = { repo: 'MoKarade/CarAI', statut: 'frein', suivante: null };
+  const r = rejouer([depotLibre('MoKarade/JobAI'), retenu], 40, { extra: { frein: '1' } });
+  assert.equal(r.tous.length, 1);
+  assert.equal(r.tous[0].depot, 'MoKarade/JobAI');
 });
 
 test('dépôt occupé, ou libre sans tâche prenable : rien, et le compte repart de zéro', () => {
