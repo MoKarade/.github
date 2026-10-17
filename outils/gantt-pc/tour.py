@@ -6,7 +6,9 @@
 #   1. relevé GitHub (fetch.py) : léger si un relevé plein a moins d'1 h, sinon plein ; quotas (quota.py) à chaque tour, complets 1×/h
 #   2. build.py : prochaines.json, donnees.json
 #   3. fiabilité (verif-fidelite.mjs de MoKarade/.github) : mesure complète si la précédente a plus de 55 min, sinon instantané de file seul
-#   4. dépôt dans le dossier Google Drive synchronisé (--drive DOSSIER) : donnees.json.gz (lu par la page), prochaines.json,
+#   4. filet (filet-pc.mjs de MoKarade/.github, tâche #196) : un dépôt libre avec une tâche prenable et sans lancement depuis plus de
+#      30 min réveille le Coordinateur (boite-reacteur.yml d'app-template, avec le jeton gh du PC) ; aucun appel Claude
+#   5. dépôt dans le dossier Google Drive synchronisé (--drive DOSSIER) : donnees.json.gz (lu par la page), prochaines.json,
 #      fiabilite.json, quota.json, etat.json. Les fichiers sont RÉÉCRITS SUR PLACE : Drive garde alors le même identifiant.
 # Freins : le jeton du PC est celui de Marc, partagé avec tout le reste de son compte (5 000 appels/h). Sous 1 500 appels restants, tour
 # économe (relevé léger, quotas rapides, pas de mesure de fiabilité) ; sous 3 500, quotas Claude et coût API seuls ; sous 300, tour sauté ; « rate limit » au tour précédent = 30 min
@@ -110,9 +112,15 @@ def releve(econome=False, quota_complet=True):
     elif texte and '--snapshot-seulement' in texte:
         fid = f'mesure précédente reprise ({lire("fiabilite.json")["calcule_le"][11:16]}Z)'
         lancer([NODE, script, '--snapshot-seulement', 'prochaines.json', '--sortie', 'fiabilite.json'], '.refresh-fiab.log', 120, ajout=True)
+    # 4. filet du PC : n'écrit rien sur la page ni sur le Drive ; sa ligne se lit dans etat.json. Un échec ne fait pas échouer le tour.
+    filet = ''
+    script_filet = D + 'scripts-github/filet-pc.mjs'
+    if os.path.exists(script_filet):
+        lancer([NODE, script_filet, 'prochaines.json', '--etat', 'filet-pc-etat.json', '--executer'], '.refresh-filet.log', 120)
+        filet = ' · ' + (queue('.refresh-filet.log', 240) or 'filet PC : sans sortie')
     p = lire('prochaines.json')
     file = ' '.join(d['depot'] + '=' + (d['suivante']['ref'] if d.get('suivante') else d['statut']) for d in p['depots'])
-    return 0, f'OK {maintenant()} relevé {mode} {asof} · prochaines.json {p["calcule_le"]} {file} · fiabilité : {fid}{quota}'
+    return 0, f'OK {maintenant()} relevé {mode} {asof} · prochaines.json {p["calcule_le"]} {file} · fiabilité : {fid}{quota}{filet}'
 
 
 def main():
