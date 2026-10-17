@@ -138,12 +138,27 @@ function mesurerI3(releve, vivant, toutes, depuis, seuilPriseH) {
   };
 }
 
+/**
+ * Dépôt `occupe` au dernier calcul : la tâche lancée ensuite est un accord si c'était la tête de file (`si_libre`) ET si chaque occupant du
+ * calcul (`occupe_par`) était fermé avant le lancement (le fil a pris la tête de file dès que le dépôt s'est libéré). Un occupant encore ouvert,
+ * ou un occupant sans référence (fil actif), reste un écart : deux travaux en même temps.
+ */
+function apresLiberation(avant, r, depot, lance) {
+  if (avant.statut !== 'occupe' || avant.si_libre !== r || !avant.occupe_par?.length) return false;
+  return avant.occupe_par.every((o) => {
+    const num = Number(String(o).split('#')[1]);
+    const noeud = depot.nodes[num];
+    return noeud?.state === 'closed' && noeud.closed && noeud.closed <= lance;
+  });
+}
+
 /** I4 : chaque tâche lancée depuis `depuis` était-elle la suivante annoncée juste avant ? */
 function mesurerI4(releve, snapshots, depuis) {
   const ecarts = [];
   let accords = 0;
   let nonEvaluables = 0;
   const perimes = [];
+  const apresLiberations = [];
   for (const depot of releve.repos) {
     const vus = (snapshots[minuscule(depot.repo)] ?? []).slice().sort((a, b) => (a.asof < b.asof ? -1 : 1));
     for (const n of Object.values(depot.nodes).filter((x) => x.lvl === 'tâche' && x.start && x.start >= depuis && x.start <= releve.asof)) {
@@ -153,11 +168,12 @@ function mesurerI4(releve, snapshots, depuis) {
       const age = Math.round(heures(n.start, avant.asof) * 60);
       if (age > SEUIL_PERIME_MIN) perimes.push({ ref: r, lance: n.start, calcul: avant.asof, age_min: age });
       if (avant.suivante === r) accords += 1;
+      else if (apresLiberation(avant, r, depot, n.start)) { accords += 1; apresLiberations.push({ ref: r, lance: n.start, calcul: avant.asof }); }
       else ecarts.push({ ref: r, lance: n.start, annoncee: avant.suivante ?? `(${avant.statut})`, calcul: avant.asof });
     }
   }
   const lancements = accords + ecarts.length;
-  return { lancements, accords, taux: lancements ? accords / lancements : null, ecarts, non_evaluables: nonEvaluables, perimes };
+  return { lancements, accords, taux: lancements ? accords / lancements : null, ecarts, non_evaluables: nonEvaluables, perimes, accords_apres_liberation: apresLiberations };
 }
 
 /** Garde la `suivante` de ce calcul de prochaines.json, 72 h au plus, par dépôt. */
@@ -169,7 +185,9 @@ function majSnapshots(anciens, prochaines) {
   for (const d of prochaines.depots ?? []) {
     const cle = minuscule(d.repo);
     const liste = (sortie[cle] ?? []).filter((s) => s.asof >= limite && s.asof !== asof);
-    liste.push({ asof, statut: d.statut, suivante: d.suivante?.ref ?? null });
+    const point = { asof, statut: d.statut, suivante: d.suivante?.ref ?? null };
+    if (d.statut === 'occupe') { point.si_libre = d.si_libre ?? null; point.occupe_par = (d.occupe_par ?? []).map((o) => o.ref); }
+    liste.push(point);
     sortie[cle] = liste;
   }
   return sortie;

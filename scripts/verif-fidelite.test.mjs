@@ -127,6 +127,37 @@ test('I4 : accord, écart et lancement non évaluable', () => {
   assert.equal(i4.taux, 0.5);
 });
 
+test('I4 : dépôt occupé au calcul, la tête de file prise après la fermeture de l’occupant est un accord (comptée à part)', () => {
+  const r = releve([
+    noeud(1, { state: 'closed', closed: '2026-10-16T10:12:00Z', start: '2026-10-16T09:00:00Z' }),
+    noeud(2, { start: '2026-10-16T10:14:00Z' }),
+  ]);
+  const snapshots = { hubperso: [{ asof: '2026-10-16T10:10:00Z', statut: 'occupe', suivante: null, si_libre: 'hubperso#2', occupe_par: ['hubperso#1'] }] };
+  const { i4 } = mesure(r, vivant(), { snapshots, depuisI4: '2026-10-16T10:00:00Z' });
+  assert.equal(i4.accords, 1);
+  assert.deepEqual(i4.ecarts, []);
+  assert.deepEqual(i4.accords_apres_liberation.map((x) => x.ref), ['hubperso#2']);
+});
+
+test('I4 : dépôt occupé, occupant encore ouvert, occupant sans référence ou autre tâche que la tête de file = écart', () => {
+  const snapshots = (extra) => ({ hubperso: [{ asof: '2026-10-16T10:10:00Z', statut: 'occupe', suivante: null, si_libre: 'hubperso#2', occupe_par: ['hubperso#1'], ...extra }] });
+  const ouvert = releve([noeud(1, { start: '2026-10-16T09:00:00Z' }), noeud(2, { start: '2026-10-16T10:14:00Z' })]);
+  assert.equal(mesure(ouvert, vivant(), { snapshots: snapshots(), depuisI4: '2026-10-16T10:00:00Z' }).i4.accords, 0);
+  const ferme = [noeud(1, { state: 'closed', closed: '2026-10-16T10:12:00Z', start: '2026-10-16T09:00:00Z' })];
+  const autre = releve([...ferme, noeud(3, { start: '2026-10-16T10:14:00Z' })]);
+  assert.deepEqual(mesure(autre, vivant(), { snapshots: snapshots(), depuisI4: '2026-10-16T10:00:00Z' }).i4.ecarts.map((e) => e.ref), ['hubperso#3']);
+  const filActif = releve([...ferme, noeud(2, { start: '2026-10-16T10:14:00Z' })]);
+  assert.equal(mesure(filActif, vivant(), { snapshots: snapshots({ occupe_par: [null] }), depuisI4: '2026-10-16T10:00:00Z' }).i4.accords, 0);
+  const apres = releve([...ferme, noeud(2, { start: '2026-10-16T10:11:00Z' })]); // lancée AVANT la fermeture de l'occupant : deux travaux à la fois
+  assert.equal(mesure(apres, vivant(), { snapshots: snapshots(), depuisI4: '2026-10-16T10:00:00Z' }).i4.accords, 0);
+});
+
+test('les snapshots d’un dépôt occupé gardent la tête de file et les occupants, ceux d’un dépôt libre restent inchangés', () => {
+  const prochaines = { calcule_le: '2026-10-16T12:05:00Z', depots: [{ repo: 'Hubperso', statut: 'occupe', suivante: null, si_libre: 'hubperso#4', occupe_par: [{ ref: 'hubperso#3', motif: 'en-cours' }, { ref: null, motif: 'fil-actif' }] }] };
+  const m = mesure(releve([]), vivant(), { prochaines });
+  assert.deepEqual(m.snapshots.hubperso, [{ asof: '2026-10-16T12:05:00Z', statut: 'occupe', suivante: null, si_libre: 'hubperso#4', occupe_par: ['hubperso#3', null] }]);
+});
+
 test('I4 : `depuisI4` écarte les lancements d’avant la date de fiabilité sans toucher à I3', () => {
   const r = releve([
     noeud(1, { start: '2026-10-16T10:10:00Z' }),

@@ -253,6 +253,7 @@ export function calculer(backlog, { filsActifs = [], frein = null } = {}) {
       repo: depot.repo,
       statut,
       suivante: statut === 'libre' ? file[0] : null,
+      si_libre: file[0]?.ref ?? null,
       incidents: incidents.map((i) => ({ n: i.n, titre: i.t, url: i.url })),
       occupe_par: occupePar,
       derniere: refDerniere,
