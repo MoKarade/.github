@@ -62,17 +62,50 @@ const TIERS = {
 // `perimeHeures` heures n'est plus une mesure : on garde le dernier palier connu.
 export const FREIN = { seuil1: 80, seuil2: 90, hysteresis: 2, perimeHeures: 3 };
 
+// Frein par rythme (MoKarade/.github#198, décision de Marc 17/10/2026 « 3b ») : un seuil fixe ne distingue pas une nuit calme (+1 point en 9 h)
+// d'une journée à +2 points/h. On projette le quota hebdomadaire jusqu'à sa remise à zéro : projection = quota + rythme des `fenetreHeures`
+// dernières heures × heures restantes. Sous `plafond - marge` les tâches partent ; au-dessus, palier 1. Le palier 2 reste celui du seuil de
+// secours (`FREIN.seuil2`, 90 %), sans condition de projection. On ne lève le palier 1 que lorsque la projection reste sous `projectionBas`
+// pendant `leveeMin` minutes (3 calculs de 10 min) : entre `projectionBas` et `plafond - marge`, le palier en vigueur est gardé.
+// `projectionBas` est à 90 et non à 80 : à 80 % de quota la projection ne peut jamais passer SOUS 80, donc un palier restreint n'y serait
+// jamais levé (aucun rythme nul n'y suffit). Sans projection possible (historique trop court, remise à zéro inconnue), on retombe sur les seuils.
+export const FREIN_RYTHME = { plafond: 100, marge: 5, projectionBas: 90, leveeMin: 30, fenetreHeures: 3, spanMinHeures: 1 };
+
 const niveauDe = (palier) => (palier === 1 || palier === 2 ? palier : 0);
 const libelleDe = (niveau) => (niveau === 0 ? 'normal' : niveau);
+
+/**
+ * Projection du quota hebdomadaire à la remise à zéro, d'après le rythme des dernières heures.
+ * @param historique points { t, pct } du quota Claude ; @param resetUtc remise à zéro ; @param pct, mesure : la mesure courante (ms)
+ * Rend { rythme, heures, projection, points } ou null si elle n'est pas calculable (remise à zéro inconnue ou passée,
+ * moins de `spanMinHeures` d'historique dans la fenêtre). Un rythme négatif (remise à zéro entre deux points) vaut 0.
+ */
+export function projeter({ historique, resetUtc, pct, mesure, regle = FREIN_RYTHME }) {
+  const fin = Date.parse(resetUtc);
+  if (!Number.isFinite(fin) || fin <= mesure) return null;
+  const debut = mesure - regle.fenetreHeures * 3.6e6;
+  const points = (Array.isArray(historique) ? historique : [])
+    .map((x) => ({ t: Date.parse(x?.t), pct: x?.pct }))
+    .filter((x) => Number.isFinite(x.t) && typeof x.pct === 'number' && x.t >= debut && x.t < mesure)
+    .sort((x, y) => x.t - y.t);
+  points.push({ t: mesure, pct });
+  const heuresPoints = (points.at(-1).t - points[0].t) / 3.6e6;
+  if (points.length < 2 || heuresPoints < regle.spanMinHeures) return null;
+  const rythme = Math.max(0, (pct - points[0].pct) / heuresPoints);
+  const heures = (fin - mesure) / 3.6e6;
+  return { rythme, heures, projection: pct + rythme * heures, points: points.length, fenetre_h: Math.round(heuresPoints * 10) / 10 };
+}
 
 /**
  * Palier du frein pour un relevé de quota.
  * @param pct pourcentage hebdomadaire utilisé (nombre), @param mesureUtc date de la mesure (ISO)
  * @param precedent palier du calcul précédent (`normal`, 1 ou 2) ou undefined s'il est inconnu
+ * @param historique, resetUtc (optionnels) : de quoi projeter le quota jusqu'à la remise à zéro (frein par rythme, #198) ;
+ *   @param basDepuis date (ISO) depuis laquelle la projection est sous `projectionBas`, lue dans le calcul précédent
  * Rend { palier: 'normal'|1|2, detail }. Jamais un faux « normal » : relevé absent ou périmé = dernier palier connu, dit tel quel ;
  * sans relevé ni palier précédent, `normal` MAIS `detail.inconnu` vaut true (ce n'est pas une mesure).
  */
-export function calculerFrein({ pct, mesureUtc, precedent, maintenant = new Date(), seuils = FREIN } = {}) {
+export function calculerFrein({ pct, mesureUtc, precedent, historique, resetUtc, basDepuis, maintenant = new Date(), seuils = FREIN, regle = FREIN_RYTHME } = {}) {
   const seuilDe = (niveau) => (niveau === 2 ? seuils.seuil2 : seuils.seuil1);
   const avant = niveauDe(precedent);
   const mesure = Date.parse(mesureUtc);
@@ -80,23 +113,50 @@ export function calculerFrein({ pct, mesureUtc, precedent, maintenant = new Date
   const ageHeures = valide ? (maintenant.getTime() - mesure) / 3.6e6 : null;
   const perime = !valide || ageHeures > seuils.perimeHeures;
   const inconnu = perime && precedent === undefined && !valide;
+  const proj = !perime && valide ? projeter({ historique, resetUtc, pct, mesure, regle }) : null;
   let niveau;
+  let bas = null;
+  let tenue = false;
   if (perime && precedent !== undefined) niveau = avant;
   else if (!valide) niveau = 0;
-  else {
+  else if (proj) {
+    // Frein par rythme. Secours : au seuil 2 le palier 2 s'impose, quelle que soit la projection ; il ne se quitte que sous (seuil - hystérésis).
+    niveau = pct >= seuils.seuil2 ? 2 : avant === 2 && pct >= seuils.seuil2 - seuils.hysteresis ? 2 : Math.min(avant, 1);
+    if (niveau < 2) {
+      if (proj.projection >= regle.plafond - regle.marge) niveau = 1;
+      else if (proj.projection < regle.projectionBas && niveau === 1) {
+        // Levée : la projection doit rester basse `leveeMin` minutes de suite (la date de début vient du calcul précédent).
+        const debut = Date.parse(basDepuis);
+        bas = Number.isFinite(debut) && debut <= maintenant.getTime() ? basDepuis : maintenant.toISOString();
+        if (maintenant.getTime() - Date.parse(bas) >= regle.leveeMin * 60_000) { niveau = 0; bas = null; } else tenue = true;
+      }
+    }
+  } else {
     // Montée immédiate ; descente d'un palier à la fois, seulement sous (seuil - hystérésis).
     niveau = avant;
     while (niveau > 0 && pct < seuilDe(niveau) - seuils.hysteresis) niveau -= 1;
     niveau = Math.max(niveau, pct >= seuils.seuil2 ? 2 : pct >= seuils.seuil1 ? 1 : 0);
   }
   const quota = valide ? `${pct} % le ${mesureUtc}` : 'aucun relevé exploitable';
+  const restriction = niveau === 2 ? 'plus aucune nouvelle tâche (sécurité, incident et preuve due exceptés)' : 'seules les tâches prio:1, sécurité, incident et preuve due partent';
+  const arrondi = (x) => Math.round(x * 10) / 10;
+  const rythme = proj ? `rythme ${arrondi(proj.rythme)} point/h sur ${proj.fenetre_h} h × ${arrondi(proj.heures)} h restantes = ${Math.round(proj.projection)} % projetés à la remise à zéro` : '';
   const raison = inconnu ? 'aucun relevé de quota ni palier précédent : palier normal par défaut, ce n’est pas une mesure'
     : perime ? `quota périmé (${quota}${valide ? `, ${Math.round(ageHeures * 10) / 10} h` : ''}) : dernier palier connu gardé`
+    : proj ? (niveau === 0 ? `quota à ${pct} % : ${rythme} : rien ne change`
+      : tenue ? `quota à ${pct} % : ${rythme}, sous ${regle.projectionBas} % depuis ${Math.round((maintenant.getTime() - Date.parse(bas)) / 60_000)} min sur ${regle.leveeMin} : palier ${libelleDe(niveau)} gardé`
+      : `quota à ${pct} % : ${rythme} : ${restriction}`)
     : niveau === 0 ? `quota à ${pct} % : rien ne change`
-    : `quota à ${pct} % : ${niveau === 2 ? 'plus aucune nouvelle tâche (sécurité, incident et preuve due exceptés)' : 'seules les tâches prio:1, sécurité, incident et preuve due partent'}`;
+    : `quota à ${pct} % : ${restriction}`;
   return {
     palier: libelleDe(niveau),
-    detail: { pct: valide ? pct : null, mesure_utc: valide ? mesureUtc : null, age_heures: valide ? Math.round(ageHeures * 10) / 10 : null, perime, inconnu, precedent: libelleDe(avant), seuils: { palier1: seuils.seuil1, palier2: seuils.seuil2, hysteresis: seuils.hysteresis, perime_heures: seuils.perimeHeures }, raison },
+    detail: {
+      pct: valide ? pct : null, mesure_utc: valide ? mesureUtc : null, age_heures: valide ? Math.round(ageHeures * 10) / 10 : null, perime, inconnu, precedent: libelleDe(avant),
+      seuils: { palier1: seuils.seuil1, palier2: seuils.seuil2, hysteresis: seuils.hysteresis, perime_heures: seuils.perimeHeures },
+      mode: proj ? 'rythme' : 'seuils',
+      rythme_pt_h: proj ? arrondi(proj.rythme) : null, heures_restantes: proj ? arrondi(proj.heures) : null, projection_pct: proj ? Math.round(proj.projection) : null,
+      bas_depuis: bas, raison,
+    },
   };
 }
 
@@ -293,7 +353,10 @@ export function freinDepuisFichiers(dossier, { quota = null, precedent = null, m
   const q = lireJsonOuNull(quota ?? join(dossier, 'quota.json'));
   const av = lireJsonOuNull(precedent ?? join(dossier, 'prochaines.json'));
   const claude = q?.jauges?.claude;
-  return calculerFrein({ pct: claude?.utilise, mesureUtc: claude?.mesure_utc ?? claude?.source_asof, precedent: av?.frein, maintenant });
+  return calculerFrein({
+    pct: claude?.utilise, mesureUtc: claude?.mesure_utc ?? claude?.source_asof, precedent: av?.frein, maintenant,
+    historique: claude?.historique, resetUtc: claude?.reset_utc, basDepuis: av?.frein_detail?.bas_depuis,
+  });
 }
 
 function main() {
