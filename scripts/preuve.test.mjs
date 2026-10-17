@@ -114,6 +114,33 @@ test('lireCitation lit PR, empreintes et preuve', () => {
   assert.equal(lireCitation('aucune').pr, null);
 });
 
+test('lireCitation lit aussi « PR dépôt#n », avec ou sans MoKarade/ (tâche .github#195)', () => {
+  assert.deepEqual(lireCitation('**Acceptée** — PR JobAI#180 fusionnée (ea239e9), preuve : ok').pr, { depot: 'JobAI', numero: 180 });
+  assert.deepEqual(lireCitation('**Acceptée** — PR .github#152 fusionnée (7b30268), preuve : ok').pr, { depot: '.github', numero: 152 });
+  assert.deepEqual(lireCitation('**Acceptée** — PR MoKarade/.github#152 fusionnée (7b30268), preuve : ok').pr, { depot: '.github', numero: 152 });
+  assert.deepEqual(lireCitation('**Acceptée** — PR #152 fusionnée (7b30268), preuve : ok').pr, { depot: null, numero: 152 });
+  // rejetés : « PR » seul, une PR sans numéro ou un numéro sans « PR » ne valent pas citation
+  assert.equal(lireCitation('**Acceptée** — PR fusionnée (7b30268), preuve : ok').pr, null);
+  assert.equal(lireCitation('**Acceptée** — PR JobAI fusionnée #180, preuve : ok').pr, null);
+  assert.equal(lireCitation('**Acceptée** — voir JobAI#180, preuve : ok').pr, null);
+});
+
+test('PR citée en « PR dépôt#n » : introuvable ou non fusionnée, le motif nomme le dépôt', () => {
+  const cite = (txt) => evaluer({ raison: 'completed', commentaires: [commentaire(txt)], pr: null });
+  const long = 'preuve : GET /api/sante rend 200 et { ok: true } en production, lu à 10:05 (heure du Québec).';
+  const r = cite(`**Acceptée** — PR Inexistant#9 fusionnée (ea239e9), ${long}`);
+  assert.equal(r.ok, false);
+  assert.ok(r.motifs.some((m) => m === 'PR Inexistant#9 introuvable'));
+  assert.ok(cite(`**Acceptée** — PR #9 fusionnée (ea239e9), ${long}`).motifs.some((m) => m === 'PR #9 introuvable'));
+});
+
+test('« PR dépôt#n » fusionnée et bien prouvée est acceptée comme « PR #n »', () => {
+  const txt = preuveOk.replace('PR #12', 'PR Hubperso#12');
+  const r = evaluer({ raison: 'completed', commentaires: [commentaire(txt)], pr, fichiers: ['docs/a.md'] });
+  assert.deepEqual(r.motifs, []);
+  assert.equal(r.ok, true);
+});
+
 test('servi : docs, tests et CI ne comptent pas, le reste oui', () => {
   assert.equal(servi(['docs/a.md', '.github/workflows/x.yml', 'tests/a.test.ts', 'web/tests/b.ts', 'README.md', 'qualite/seuils.json']), false);
   assert.equal(servi(['docs/a.md', 'app/page.tsx']), true);

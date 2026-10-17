@@ -49,7 +49,8 @@ export function trouverPreuve(commentaires, entete = ENTETE_ACCEPTEE) {
 /** Ce que le commentaire cite : la PR, l'empreinte, le déploiement, le texte de preuve. */
 export function lireCitation(body) {
   const texte = String(body ?? '');
-  const pr = /\bPR\s+(?:MoKarade\/([\w.-]+))?#(\d+)\b/i.exec(texte);
+  // « PR #n », « PR dépôt#n » et « PR MoKarade/dépôt#n » (tâche .github#195 : « PR JobAI#180 » n'était pas reconnu, la tâche rouverte).
+  const pr = /\bPR\s+(?:(?:MoKarade\/)?([\w.-]+))?#(\d+)\b/i.exec(texte);
   const shas = [...texte.matchAll(/\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)([0-9a-f]{7,40})\b/g)].map((m) => m[1]);
   const preuve = /\bpreuve\s*:\s*([\s\S]*)/i.exec(texte);
   return {
@@ -59,6 +60,9 @@ export function lireCitation(body) {
     preuve: preuve ? preuve[1].replace(/\s+/g, ' ').trim() : '',
   };
 }
+
+/** « PR #12 » dans ce dépôt, « PR JobAI#12 » ailleurs : le motif dit quelle PR a été cherchée. */
+const nomPr = (pr) => `PR ${pr.depot ?? ''}#${pr.numero}`;
 
 const PREUVE_MIN = 40;
 const SANS_PR_MIN = 60;
@@ -91,12 +95,12 @@ export function evaluer({ raison, commentaires, pr = null, fichiers = [], deploi
   } else if (cite.pr) {
     if (pr?.illisible) {
       // PR d'un autre dépôt, privé : le jeton de ce dépôt ne la lit pas. On ne rouvre pas pour ce que GitHub ne laisse pas voir.
-    } else if (!pr) motifs.push(`PR #${cite.pr.numero} introuvable`);
-    else if (!pr.merged) motifs.push(`PR #${cite.pr.numero} non fusionnée`);
+    } else if (!pr) motifs.push(`${nomPr(cite.pr)} introuvable`);
+    else if (!pr.merged) motifs.push(`${nomPr(cite.pr)} non fusionnée`);
     else {
       const shas = [pr.merge_commit_sha, pr.head_sha].filter(Boolean);
       if (cite.shas.length === 0) motifs.push('l’empreinte (sha) du commit fusionné n’est pas dans le commentaire');
-      else if (!cite.shas.some((c2) => shas.some((s) => s.startsWith(c2)))) motifs.push(`aucune empreinte citée (${cite.shas.join(', ')}) n’est celle de la PR #${cite.pr.numero}`);
+      else if (!cite.shas.some((c2) => shas.some((s) => s.startsWith(c2)))) motifs.push(`aucune empreinte citée (${cite.shas.join(', ')}) n’est celle de la ${nomPr(cite.pr)}`);
       if (pr.merged_at && c.created_at < pr.merged_at) motifs.push('la preuve est datée d’avant la fusion de la PR');
       if (deploiement.requis && servi(fichiers) && deploiement.ok !== true) {
         motifs.push(`la PR change du code servi et aucun déploiement de production réussi n’est trouvé sur son commit (${deploiement.detail || 'non vérifié'})`);
