@@ -190,9 +190,17 @@ test('secret : dans un chemin protégé, une variable secrète sans repli est re
     '+const actif = Boolean(process.env.REVEIL_TOKEN);',
     '+const actif = typeof process.env.REVEIL_TOKEN === "string";',
     '+const a = process.env.REVEIL_TOKEN ? 1 : 0;',
+    '+const jeton = process.env["REVEIL_TOKEN"] ?? "";',
+    "+const jeton = Deno.env.get('REVEIL_TOKEN') ?? '';",
+    '+const jeton = (process.env.REVEIL_TOKEN) || null;',
   ]) {
     const ok = await regles([fichier('.github/scripts/x.mjs', { patch: patch(ligne) })]);
     assert.deepEqual(ok.violations, [], ligne);
+  }
+  // l'accès par crochets ou par Deno sans repli reste refusé (le reste de la lecture ne vaut pas repli)
+  for (const ligne of ['+const jeton = process.env["REVEIL_TOKEN"];', "+const jeton = Deno.env.get('REVEIL_TOKEN');", '+const jeton = (process.env.REVEIL_TOKEN);']) {
+    const ko = await regles([fichier('.github/scripts/x.mjs', { patch: patch(ligne) })]);
+    assert.deepEqual(ko.regles, ['secret'], ligne);
   }
   // `secrets.X` d'un workflow ne change pas
   const ci = await regles([fichier('.github/workflows/ci.yml', { patch: patch('+  TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}') })]);

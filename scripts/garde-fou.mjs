@@ -67,8 +67,9 @@ const DEFINITION_ENV = /^\s*#?\s*(?:export\s+)?([A-Za-z][A-Za-z0-9_]*)\s*=/;
 // Lecture optionnelle, sur la même ligne : valeur par défaut (`?? x`, `|| x`), test d'absence (`!process.env.X`, `typeof`,
 // `Boolean(...)`, `process.env.X ? a : b`, `process.env.X &&`). Sans repli, la variable est obligatoire : dans un chemin
 // protégé, c'est une dépendance à un secret que Marc doit voir.
+// `APRES_OPTIONNEL` passe d'abord le reste de la lecture (`']` de `process.env['X']`, `')` de `Deno.env.get('X')`, `)` d'une parenthèse).
 const AVANT_OPTIONNEL = /(?:!|typeof\s+|Boolean\(\s*|Number\(\s*|String\(\s*)$/;
-const APRES_OPTIONNEL = /^\s*(?:\?\?|\|\||&&|\?(?![.?]))/;
+const APRES_OPTIONNEL = /^(?:['"]\s*)?[\])\s]*(?:\?\?|\|\||&&|\?(?![.?]))/;
 const SECRET_LITTERAL =
   /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{30,}\b|\bsk-ant-[A-Za-z0-9_-]{20,}|\bxox[abprs]-[A-Za-z0-9-]{10,}|\bAIza[0-9A-Za-z_-]{35}\b/;
 
