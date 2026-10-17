@@ -13,7 +13,8 @@
 // Règles (fonctions pures, voir les tests) :
 //   - un dépôt compte s'il est `libre` avec une suivante dans `prochaines.json`, depuis plus de 30 min d'observations continues ;
 //   - un seul réveil par couple (dépôt, tâche) et par 2 h, et un seul message par tour pour tous les dépôts ;
-//   - frein de quota actif ou `prochaines.json` périmé (plus de 30 min) = rien ;
+//   - `prochaines.json` périmé (plus de 30 min) = rien. Le frein de quota n'a pas besoin d'un test à part : `suivante` ne contient que les tâches
+//     qu'il laisse passer (un dépôt dont tout est retenu est `frein`, pas `libre`) ; décision du Coordinateur, 17/10/2026 17:58 UTC ;
 //   - une observation plus ancienne que 40 min (PC éteint, tour sauté) casse la continuité : le compte repart de zéro ;
 //   - le message ne contient que des dépôts et des minutes, jamais le nom de la tâche suivante (règle MoKarade/.github#136).
 // Un échec du réveil ne fait JAMAIS échouer le tour (il se dit sur la ligne imprimée) et n'enregistre pas le signalement :
@@ -47,7 +48,6 @@ export function evaluerFilet({ prochaines, etat = {}, maintenant = new Date() })
 
   const age = minutesEntre(prochaines?.calcule_le ?? '', maintenant);
   if (!Number.isFinite(age) || age > PROCHAINES_PERIME_MIN) return { etat: suivant, reveils: [], raison: 'prochaines.json périmé' };
-  if ((prochaines.frein ?? 'normal') !== 'normal') return { etat: suivant, reveils: [], raison: `frein de quota actif (palier ${prochaines.frein})` };
 
   const reveils = [];
   for (const d of prochaines.depots ?? []) {
