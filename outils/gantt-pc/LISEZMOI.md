@@ -30,6 +30,10 @@ lançant, remplace la tâche si elle existe, et fait un premier tour visible.
 Le dossier d'état est `C:\dev\_pc-local\gantt-releve` (option `-Etat`), jamais AppData : lancé depuis l'app Claude, AppData
 est redirigé vers un dossier privé que la tâche planifiée ne voit pas, et le relevé restait figé sans erreur (16/10).
 Google Drive pour ordinateur ne doit pas être en pause : sinon les fichiers restent sur le PC et la page ne les voit pas.
+Python pour Windows n'a pas de base de fuseaux horaires (sans le paquet `tzdata`) : `quota.py` replie alors sur la règle d'heure
+d'Amérique du Nord, comme `build.py`. Sans ce repli, il mourait à chaque tour et le Drive n'avait pas de `quota.json` (17/10, .github#188).
+Un échec de `quota.py` s'écrit désormais dans `etat.json` (« quota : ÉCHEC … »). Sous 3 500 appels GitHub restants, seules les jauges
+Claude et coût API sont relevées (≈ 1 appel) : à froid, toutes les jauges coûtent ≈ 2 900 appels.
 
 ## Suivre et arrêter
 

@@ -11,12 +11,31 @@
 #   (sans option : tout, Actions sur le mois entier ; --rapide : Actions sur 36 h seulement, tout le reste identique)
 import re, json, sys, os, datetime, math, urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from zoneinfo import ZoneInfo
 import ghcache
 
 OPT = {a.split('=', 1)[0]: (a.split('=', 1) + [''])[1] for a in sys.argv[1:] if a.startswith('--')}
 D = os.path.dirname(os.path.abspath(__file__)) + '/'
-TZ = ZoneInfo('America/Toronto')
+def _dimanche(annee, mois, rang):
+    j = datetime.date(annee, mois, 1); return j + datetime.timedelta(days=(6 - j.weekday()) % 7 + 7 * (rang - 1))
+class _HeureEst(datetime.tzinfo):
+    # Repli quand Python n'a pas de base de fuseaux : c'est le cas sous Windows sans le paquet tzdata, et ZoneInfo y lève une exception
+    # dès l'import ; sur le PC de Marc, quota.py mourait donc à chaque tour sans écrire quota.json (.github#188). Règle d'Amérique du Nord :
+    # heure d'été du 2e dimanche de mars au 1er dimanche de novembre, à 2 h locale (même règle que build.py).
+    def _ete(self, naif):
+        a = naif.year
+        return datetime.datetime.combine(_dimanche(a, 3, 2), datetime.time(2)) <= naif < datetime.datetime.combine(_dimanche(a, 11, 1), datetime.time(2))
+    def utcoffset(self, dt): return datetime.timedelta(hours=-4 if self._ete(dt.replace(tzinfo=None)) else -5)
+    def dst(self, dt): return datetime.timedelta(hours=1 if self._ete(dt.replace(tzinfo=None)) else 0)
+    def tzname(self, dt): return 'EDT' if self._ete(dt.replace(tzinfo=None)) else 'EST'
+    def fromutc(self, dt):
+        u = dt.replace(tzinfo=None); a = u.year
+        ete = datetime.datetime.combine(_dimanche(a, 3, 2), datetime.time(7)) <= u < datetime.datetime.combine(_dimanche(a, 11, 1), datetime.time(6))
+        return (u + datetime.timedelta(hours=-4 if ete else -5)).replace(tzinfo=self)
+try:
+    from zoneinfo import ZoneInfo
+    TZ = ZoneInfo('America/Toronto')
+except Exception:
+    TZ = _HeureEst()
 UTC = datetime.timezone.utc
 NOW = datetime.datetime.now(UTC)
 REPOS = ['.github', 'FinanceAI', 'JobAI', 'batchchef-', 'driveai', 'Hubperso', 'carai', 'memoryai', 'app-template', 'hub-contract']
