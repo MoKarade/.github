@@ -14,7 +14,10 @@ le PC, le relevé tourne sans Claude.
    et lance `tour.py`.
 3. `tour.py` fait un tour : `fetch.py` (GitHub), `quota.py`, `build.py` (file du script `scripts/prochaine-tache.mjs`), mesure de
    fiabilité (`scripts/verif-fidelite.mjs`, au plus 1×/h, sinon instantané de file seul).
-4. Les sorties sont déposées dans le Drive, dossier `_Gantt` : `donnees.json.gz` (lu par la page avec le connecteur Google Drive),
+4. Filet (`scripts/filet-pc.mjs`, tâche #196) : si un dépôt reste libre avec une tâche prenable plus de 30 min sans lancement, le tour lance
+   `boite-reacteur.yml` d'`app-template` pour réveiller le Coordinateur (le `gh` du PC doit pouvoir lancer ce workflow). Son état est dans
+   `filet-pc-etat.json`, sa ligne dans `etat.json`.
+5. Les sorties sont déposées dans le Drive, dossier `_Gantt` : `donnees.json.gz` (lu par la page avec le connecteur Google Drive),
    `prochaines.json`, `fiabilite.json`, `quota.json`, `etat.json` (résultat du dernier tour).
 
 ## Installer

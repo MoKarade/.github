@@ -144,6 +144,12 @@ test('8 : préversions non coupées', () => {
 
 test('9 : ni Sentry, ni /api/sante, ni surveillance', () => {
   assert.equal(etats(depot({ retirer: ['app/api/sante/route.ts'] }))[9], 'rouge');
+  // app Vite : la fonction Vercel api/sante.ts vaut la route Next.js
+  const vite = depot({ retirer: ['app/api/sante/route.ts'], fichiers: { 'api/sante.ts': 'x' } });
+  assert.equal(etats(vite)[9], 'vert');
+  assert.doesNotMatch(detail(vite, 9), /route \/api\/sante absente/);
+  assert.equal(etats(depot({ retirer: ['app/api/sante/route.ts'], fichiers: { 'src/api/sante.ts': 'x' } }))[9], 'rouge', 'seul api/ à la racine compte');
+  assert.match(detail(depot({ retirer: ['app/api/sante/route.ts'] }), 9), /route \/api\/sante absente/);
   assert.equal(etats(depot({ api: { surveilles: [] } }))[9], 'rouge');
   assert.match(detail(depot({ api: { surveilles: ['MoKarade/autre'] } }), 9), /surveillance\/apps\.json/);
   assert.equal(etats(depot({ api: { surveilles: ['mokarade/X'] } }))[9], 'vert', 'la casse du nom de dépôt ne compte pas');

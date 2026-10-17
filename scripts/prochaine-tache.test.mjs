@@ -110,6 +110,47 @@ test('un incident ouvert rend le statut « incident » et masque la suivante', (
   assert.equal(etat(r).incidents[0].n, 50);
 });
 
+// Tâche #197 : une PR qui n'attend que Marc ne rend plus le dépôt occupé. Le relevé (fetch.py) donne `pr_attend_marc`.
+const avecAttenteMarc = (d, ...prs) => ({ ...d, pr_attend_marc: prs });
+
+test('#197 valide : la seule PR ouverte attend Marc et une autre tâche est prenable = dépôt libre', () => {
+  const r = calculer(releve(avecAttenteMarc(depot('a', [tache(1, { labels: ['en-cours'], pr: prOuverte(10) }), tache(2)]), 10)));
+  assert.equal(etat(r).statut, 'libre');
+  assert.equal(suivante(r), 'a#2');
+  assert.deepEqual(etat(r).occupe_par, []);
+  assert.deepEqual(etat(r).attend_marc, [{ ref: 'a#1', pr: 10 }]);
+});
+
+test('#197 valide : une tâche sans étiquette en-cours dont la PR attend Marc n’occupe pas non plus', () => {
+  const r = calculer(releve(avecAttenteMarc(depot('a', [tache(1, { pr: prOuverte(10) }), tache(2)]), 10)));
+  assert.equal(etat(r).statut, 'libre');
+  assert.equal(suivante(r), 'a#2');
+});
+
+test('#197 rejeté : une PR rouge de CI ordinaire (pas de geste de Marc) garde le dépôt occupé', () => {
+  const r = calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], pr: prOuverte(10) }), tache(2)])));
+  assert.equal(etat(r).statut, 'occupe');
+  assert.equal(suivante(r), null);
+  assert.deepEqual(etat(r).attend_marc, []);
+});
+
+test('#197 rejeté : le geste porte sur une autre PR, la PR de la tâche en cours occupe toujours', () => {
+  const r = calculer(releve(avecAttenteMarc(depot('a', [tache(1, { labels: ['en-cours'], pr: prOuverte(10) }), tache(2)]), 99)));
+  assert.equal(etat(r).statut, 'occupe');
+});
+
+test('#197 : un autre travail en cours (sans PR en attente de Marc) occupe encore le dépôt', () => {
+  const r = calculer(releve(avecAttenteMarc(depot('a', [tache(1, { labels: ['en-cours'], pr: prOuverte(10) }), tache(2, { labels: ['en-cours'] }), tache(3)]), 10)));
+  assert.equal(etat(r).statut, 'occupe');
+  assert.deepEqual(etat(r).occupe_par.map((o) => o.ref), ['a#2']);
+});
+
+test('#197 : la PR en attente de Marc fermée ou fusionnée ne compte plus (le relevé garde l’ancien numéro)', () => {
+  const r = calculer(releve(avecAttenteMarc(depot('a', [tache(1, { labels: ['en-cours'], pr: { n: 10, state: 'closed', merged: null } }), tache(2)]), 10)));
+  assert.equal(etat(r).statut, 'occupe', 'la tâche reste en-cours sans PR ouverte : le fil n’a pas fini');
+  assert.deepEqual(etat(r).attend_marc, []);
+});
+
 test('capacité : en-cours et jules occupent le dépôt, preuve-attendue ne l’occupe pas', () => {
   for (const [etiquette, motif] of [['en-cours', 'en-cours'], ['jules', 'jules']]) {
     const r = calculer(releve(depot('a', [tache(1, { labels: [etiquette] }), tache(2)])));
@@ -437,4 +478,124 @@ test('en ligne de commande : lit quota.json et le prochaines.json précédent à
   assert.equal(spawnSync(process.execPath, [script, entree, '--sortie', tmp], { encoding: 'utf8' }).status, 0);
   assert.equal(JSON.parse(readFileSync(tmp, 'utf8')).frein, 2);
   assert.equal(freinDepuisFichiers(dossier, { quota: join(dossier, 'absent.json'), precedent: join(dossier, 'absent.json') }).detail.inconnu, true);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Frein par rythme (MoKarade/.github#198) : le quota est projeté jusqu'à sa remise à zéro ; les seuils 80 / 90 ne sont plus que le secours.
+const T_MESURE = new Date('2026-10-17T12:00:00Z');
+const heuresAvant = (h, base = T_MESURE) => new Date(base.getTime() - h * 3.6e6).toISOString().slice(0, 16) + 'Z';
+const heuresApres = (h, base = T_MESURE) => new Date(base.getTime() + h * 3.6e6).toISOString().slice(0, 16) + 'Z';
+// Historique d'une mesure à `pct` qui monte de `rythme` point/h depuis 3 h, remise à zéro dans `restant` heures.
+const rythme = (pct, parHeure, restant, { precedent, basDepuis, maintenant = new Date(T_MESURE.getTime() + 5 * 60_000) } = {}) => calculerFrein({
+  pct, mesureUtc: heuresAvant(0), precedent, maintenant, basDepuis, resetUtc: heuresApres(restant),
+  historique: [3, 2, 1].map((h) => ({ t: heuresAvant(h), pct: pct - parHeure * h })),
+});
+
+test('frein par rythme : nuit calme à 80 % (0,1 point/h, 90 h restantes) = normal, avec la valeur et le motif', () => {
+  const r = rythme(80, 0.1, 90, { precedent: 'normal' });
+  assert.equal(r.palier, 'normal');
+  assert.equal(r.detail.mode, 'rythme');
+  assert.equal(r.detail.rythme_pt_h, 0.1);
+  assert.equal(r.detail.heures_restantes, 90);
+  assert.equal(r.detail.projection_pct, 89);
+  assert.match(r.detail.raison, /rythme 0\.1 point\/h sur 3 h × 90 h restantes = 89 % projetés/);
+});
+
+test('frein par rythme : journée à +2 points/h à 80 % = palier 1, jamais 2 sans le seuil de secours', () => {
+  const r = rythme(80, 2, 90, { precedent: 'normal' });
+  assert.equal(r.palier, 1);
+  assert.equal(r.detail.projection_pct, 260);
+  assert.match(r.detail.raison, /260 % projetés.*seules les tâches prio:1/);
+});
+
+test('frein par rythme : à 90 % le palier 2 s’impose même avec un rythme nul (secours)', () => {
+  assert.equal(rythme(90, 0, 90, { precedent: 'normal' }).palier, 2);
+  assert.equal(rythme(95, 0, 90, { precedent: 1 }).palier, 2);
+});
+
+test('frein par rythme : le palier 2 se quitte sous 88 % (hystérésis), vers le palier 1 si la projection est haute', () => {
+  assert.equal(rythme(89, 0, 90, { precedent: 2 }).palier, 2);
+  assert.equal(rythme(87, 2, 90, { precedent: 2 }).palier, 1);
+});
+
+test('frein par rythme : la marge — 95 % projetés = palier 1, 94 % projetés = pas de palier', () => {
+  assert.equal(rythme(80, 0.25, 60, { precedent: 'normal' }).palier, 1, '80 + 0,25 × 60 = 95');
+  assert.equal(rythme(80, 0.25, 59, { precedent: 'normal' }).palier, 'normal', '80 + 0,25 × 59 = 94,75');
+});
+
+test('frein par rythme : levée du palier 1 seulement après 30 min de projection basse', () => {
+  const t0 = new Date(T_MESURE.getTime() + 5 * 60_000);
+  const premier = rythme(80, 0.1, 90, { precedent: 1, maintenant: t0 });
+  assert.equal(premier.palier, 1, 'la projection vient de passer sous 90 : on attend');
+  assert.equal(premier.detail.bas_depuis, t0.toISOString());
+  assert.match(premier.detail.raison, /sous 90 % depuis 0 min sur 30 : palier 1 gardé/);
+  const vingt = rythme(80, 0.1, 90, { precedent: 1, basDepuis: t0.toISOString(), maintenant: new Date(t0.getTime() + 20 * 60_000) });
+  assert.equal(vingt.palier, 1);
+  assert.equal(vingt.detail.bas_depuis, t0.toISOString());
+  const trente = rythme(80, 0.1, 90, { precedent: 1, basDepuis: t0.toISOString(), maintenant: new Date(t0.getTime() + 30 * 60_000) });
+  assert.equal(trente.palier, 'normal');
+  assert.equal(trente.detail.bas_depuis, null);
+});
+
+test('frein par rythme : une projection qui remonte entre 90 et 95 % garde le palier et efface la levée en cours', () => {
+  const t0 = new Date(T_MESURE.getTime() + 5 * 60_000);
+  const r = rythme(80, 0.25, 45, { precedent: 1, basDepuis: t0.toISOString(), maintenant: new Date(t0.getTime() + 40 * 60_000) }); // 80 + 11,25 = 91,25
+  assert.equal(r.palier, 1);
+  assert.equal(r.detail.bas_depuis, null);
+});
+
+test('frein par rythme : une projection repartie à la hausse pendant la levée garde le palier 1', () => {
+  const t0 = new Date(T_MESURE.getTime() + 5 * 60_000);
+  const r = rythme(80, 2, 90, { precedent: 1, basDepuis: t0.toISOString(), maintenant: new Date(t0.getTime() + 40 * 60_000) });
+  assert.equal(r.palier, 1);
+  assert.equal(r.detail.bas_depuis, null);
+});
+
+test('frein par rythme : mesure périmée (plus de 3 h) = comportement actuel, dernier palier gardé', () => {
+  const r = calculerFrein({ pct: 10, mesureUtc: heuresAvant(0), precedent: 2, maintenant: new Date(T_MESURE.getTime() + 4 * 3.6e6), resetUtc: heuresApres(90), historique: [] });
+  assert.equal(r.palier, 2);
+  assert.equal(r.detail.perime, true);
+  assert.equal(r.detail.mode, 'seuils');
+});
+
+test('frein par rythme : sans historique exploitable, retour aux seuils 80 / 90 (comportement actuel)', () => {
+  const sans = (extra) => calculerFrein({ pct: 80, mesureUtc: heuresAvant(0), precedent: 'normal', maintenant: new Date(T_MESURE.getTime() + 5 * 60_000), ...extra });
+  assert.equal(sans({}).palier, 1, 'ni historique ni remise à zéro');
+  assert.equal(sans({ resetUtc: heuresApres(90), historique: [{ t: heuresAvant(0.5), pct: 80 }] }).palier, 1, 'moins d’une heure d’historique');
+  assert.equal(sans({ resetUtc: heuresAvant(1), historique: [{ t: heuresAvant(3), pct: 70 }] }).palier, 1, 'remise à zéro passée');
+  assert.equal(sans({}).detail.mode, 'seuils');
+});
+
+test('frein par rythme : une remise à zéro entre deux points (quota qui baisse) vaut un rythme nul', () => {
+  const r = calculerFrein({
+    pct: 82, mesureUtc: heuresAvant(0), precedent: 1, maintenant: new Date(T_MESURE.getTime() + 5 * 60_000), resetUtc: heuresApres(160),
+    historique: [{ t: heuresAvant(3), pct: 95 }, { t: heuresAvant(2), pct: 96 }, { t: heuresAvant(1), pct: 81 }],
+  });
+  assert.equal(r.detail.rythme_pt_h, 0);
+  assert.equal(r.detail.projection_pct, 82);
+});
+
+test('frein par rythme : freinDepuisFichiers lit l’historique et la remise à zéro de quota.json, et la date de levée du calcul précédent', () => {
+  const dossier = mkdtempSync(join(tmpdir(), 'frein-rythme-'));
+  const maintenant = new Date(T_MESURE.getTime() + 5 * 60_000);
+  const quota = { jauges: { claude: { utilise: 80, mesure_utc: heuresAvant(0), reset_utc: heuresApres(90), historique: [3, 2, 1].map((h) => ({ t: heuresAvant(h), pct: 80 - 0.1 * h })) } } };
+  writeFileSync(join(dossier, 'quota.json'), JSON.stringify(quota));
+  const depuis = new Date(maintenant.getTime() - 35 * 60_000).toISOString();
+  writeFileSync(join(dossier, 'prochaines.json'), JSON.stringify({ frein: 1, frein_detail: { bas_depuis: depuis } }));
+  const r = freinDepuisFichiers(dossier, { maintenant });
+  assert.equal(r.palier, 'normal', 'sous 90 depuis 35 min : levé');
+  assert.equal(r.detail.mode, 'rythme');
+});
+
+test('frein hybride : sous 80 % de quota le rythme ne joue pas, même à +2 points/h (mode normal des seuils)', () => {
+  const r = rythme(79, 2, 90, { precedent: 'normal' });
+  assert.equal(r.palier, 'normal');
+  assert.equal(r.detail.mode, 'seuils');
+  assert.equal(r.detail.projection_pct, null);
+  assert.equal(rythme(60, 2, 90, { precedent: 'normal' }).palier, 'normal');
+});
+
+test('frein hybride : le palier 1 pris à 80 % ou plus se quitte comme avant, sous 78 % (hystérésis de 2 points)', () => {
+  assert.equal(rythme(79, 2, 90, { precedent: 1 }).palier, 1);
+  assert.equal(rythme(77, 2, 90, { precedent: 1 }).palier, 'normal');
 });
