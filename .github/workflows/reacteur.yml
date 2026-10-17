@@ -24,8 +24,10 @@ on:
     types: [closed]
   schedule:
     # Filet quotidien à 6 h au Québec : 10 h UTC en heure d'été, 11 h UTC en heure d'hiver. Le script n'agit qu'à 6 h locale.
-    - cron: '0 10 * * *'
-    - cron: '0 11 * * *'
+    # Minute 11, jamais 0 : GitHub n'a lancé AUCUN des passages `0 10` et `0 11` du 17/10/2026 (heures rondes), alors que les
+    # planifications à minute décalée de .github tournent (MoKarade/.github#143, même leçon que le commentaire tâche liée, #144).
+    - cron: '11 10 * * *'
+    - cron: '11 11 * * *'
   workflow_dispatch:
 
 permissions: {}

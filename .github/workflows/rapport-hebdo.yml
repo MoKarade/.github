@@ -11,10 +11,11 @@ name: Rapport hebdomadaire
 # les lit pas), les métriques Vercel (aucun jeton), les tests instables (aucune source). Un chiffre absent s'affiche
 # « non mesuré », jamais 0.
 #
-# Lundi 10:00 UTC = 6 h au Québec en heure d'été, 5 h en heure normale (à corriger au 1er novembre si besoin).
+# Lundi 10:17 UTC = 6 h 17 au Québec en heure d'été, 5 h 17 en heure normale (à corriger au 1er novembre si besoin).
+# Minute 17, jamais 0 : GitHub laisse tomber les planifications des heures rondes (voir reacteur.yml, .github#143).
 on:
   schedule:
-    - cron: '0 10 * * 1'
+    - cron: '17 10 * * 1'
   workflow_dispatch:
 
 permissions:
