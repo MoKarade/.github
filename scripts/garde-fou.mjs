@@ -5,7 +5,8 @@
 // ne demande plus Marc SI ce contrôle est vert. Il est rouge quand la PR :
 //   1. retire ou saute un test (ou neutralise une étape de test de la CI) ;
 //   2. baisse un seuil de qualite/ (ou touche au mécanisme du cliquet) ;
-//   3. ajoute ou modifie une référence à un secret ;
+//   3. ajoute ou modifie une référence à un secret (CI, .env, valeur en clair, ou variable secrète lue dans un chemin
+//      protégé sans repli ; lire une variable d'environnement dans le code d'une app n'est pas un secret : tâche #199) ;
 //   4. contient une migration destructive (ou réécrit une migration existante) ;
 //   5. modifie le garde-fou lui-même (script, workflow, .mergify.yml, CODEOWNERS) ou la relecture IA :
 //      sans cela une PR pourrait desserrer ses propres règles puis se fusionner seule.
@@ -63,6 +64,11 @@ const NOM_SECRET =
 const REF_ENV_CODE =
   /(?:process\.env|import\.meta\.env)\s*(?:\.\s*|\[\s*['"])([A-Z][A-Z0-9_]*)|Deno\.env\.get\(\s*['"]([A-Z][A-Z0-9_]*)/g;
 const DEFINITION_ENV = /^\s*#?\s*(?:export\s+)?([A-Za-z][A-Za-z0-9_]*)\s*=/;
+// Lecture optionnelle, sur la même ligne : valeur par défaut (`?? x`, `|| x`), test d'absence (`!process.env.X`, `typeof`,
+// `Boolean(...)`, `process.env.X ? a : b`, `process.env.X &&`). Sans repli, la variable est obligatoire : dans un chemin
+// protégé, c'est une dépendance à un secret que Marc doit voir.
+const AVANT_OPTIONNEL = /(?:!|typeof\s+|Boolean\(\s*|Number\(\s*|String\(\s*)$/;
+const APRES_OPTIONNEL = /^\s*(?:\?\?|\|\||&&|\?(?![.?]))/;
 const SECRET_LITTERAL =
   /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{30,}\b|\bsk-ant-[A-Za-z0-9_-]{20,}|\bxox[abprs]-[A-Za-z0-9-]{10,}|\bAIza[0-9A-Za-z_-]{35}\b/;
 
@@ -237,9 +243,14 @@ export async function evaluer({ fichiers, proteges, contenu }) {
     }
     for (const l of ajoutees) {
       if (SECRET_LITTERAL.test(l)) ajouter('secret', nom, 'valeur qui ressemble à un secret en clair');
+      // Lire une variable d'environnement dans le code d'une app (hors chemin protégé) n'est pas un secret en dur : la valeur
+      // vient de l'hébergeur, rien n'est écrit dans le dépôt (décision de Marc, 17/10/2026, tâche #199). Dans un chemin
+      // protégé (workflow, script de la CI, qualite/), la lecture n'est permise que si elle est optionnelle sur la ligne.
+      if (!concerne(f)) continue;
       for (const m of l.matchAll(REF_ENV_CODE)) {
         const nomVar = m[1] ?? m[2];
-        if (NOM_SECRET.test(nomVar) && !retireesTexte.includes(nomVar)) {
+        const optionnelle = AVANT_OPTIONNEL.test(l.slice(0, m.index)) || APRES_OPTIONNEL.test(l.slice(m.index + m[0].length));
+        if (NOM_SECRET.test(nomVar) && !optionnelle && !retireesTexte.includes(nomVar)) {
           ajouter('secret', nom, `nouvelle référence à une variable secrète : ${nomVar}`);
         }
       }

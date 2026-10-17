@@ -161,14 +161,42 @@ test('secret : .env.example, .env versionné, valeur en clair, nouvelle variable
   assert.deepEqual(reel.regles, ['secret']);
   const clair = await regles([fichier('vercel.json'), fichier('lib/x.ts', { patch: patch('+const k = "AKIAABCDEFGHIJKLMNOP";') })]);
   assert.deepEqual(clair.regles, ['secret']);
-  const nouvelle = await regles([fichier('vercel.json'), fichier('lib/x.ts', { patch: patch('+const k = process.env.STRIPE_SECRET_KEY;') })]);
-  assert.deepEqual(nouvelle.regles, ['secret']);
-  const connue = await regles([
+  // Tâche #199 : lire une variable d'environnement dans le code d'une app n'est plus un secret (Sentry : SENTRY_DSN)
+  const app = await regles([
     fichier('vercel.json'),
-    fichier('lib/x.ts', { patch: patch('-const k = process.env.STRIPE_SECRET_KEY;') }),
-    fichier('lib/y.ts', { patch: patch('+const k = process.env.STRIPE_SECRET_KEY;') }),
+    fichier('instrumentation.ts', { patch: patch('+  Sentry.init(optionsSentry(process.env.SENTRY_DSN));') }),
+    fichier('next.config.mjs', { patch: patch('+    NEXT_PUBLIC_SENTRY_DSN: process.env.SENTRY_DSN,') }),
+    fichier('lib/x.ts', { patch: patch('+const k = process.env.STRIPE_SECRET_KEY;') }),
   ]);
-  assert.deepEqual(connue.violations, []);
+  assert.deepEqual(app.violations, []);
+  // … mais une valeur en clair dans ce même code reste refusée
+  const encore = await regles([
+    fichier('vercel.json'),
+    fichier('instrumentation.ts', { patch: patch('+  Sentry.init(optionsSentry(process.env.SENTRY_DSN));') }),
+    fichier('lib/x.ts', { patch: patch('+const k = "' + ['AK', 'IA', 'ABCDEFGHIJKLMNOP'].join('') + '";') }),
+  ]);
+  assert.deepEqual(encore.regles, ['secret']);
+});
+
+test('secret : dans un chemin protégé, une variable secrète sans repli est refusée, avec repli elle passe', async () => {
+  const sans = await regles([fichier('.github/scripts/x.mjs', { patch: patch('+const jeton = process.env.REVEIL_TOKEN;') })]);
+  assert.deepEqual(sans.regles, ['secret']);
+  const dsn = await regles([fichier('scripts/hooks/envoi.mjs', { patch: patch('+envoyer(process.env.SENTRY_DSN);') })]);
+  assert.deepEqual(dsn.regles, ['secret']);
+  for (const ligne of [
+    '+const jeton = process.env.REVEIL_TOKEN ?? "";',
+    '+const jeton = process.env.REVEIL_TOKEN || null;',
+    '+if (!process.env.REVEIL_TOKEN) return;',
+    '+const actif = Boolean(process.env.REVEIL_TOKEN);',
+    '+const actif = typeof process.env.REVEIL_TOKEN === "string";',
+    '+const a = process.env.REVEIL_TOKEN ? 1 : 0;',
+  ]) {
+    const ok = await regles([fichier('.github/scripts/x.mjs', { patch: patch(ligne) })]);
+    assert.deepEqual(ok.violations, [], ligne);
+  }
+  // `secrets.X` d'un workflow ne change pas
+  const ci = await regles([fichier('.github/workflows/ci.yml', { patch: patch('+  TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}') })]);
+  assert.deepEqual(ci.regles, ['secret']);
 });
 
 test('secret : le réglage du scan de secrets ne se desserre pas seul', async () => {
