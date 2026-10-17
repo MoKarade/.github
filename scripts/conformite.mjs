@@ -281,7 +281,8 @@ export function evaluer(ctx) {
   // 9. Sentry, santé, surveillance
   if (!estApp) resultats.push(sansObjet(9, 'pas une app déployée'));
   else {
-    const sante = fichiers.some((f) => /(^|\/)app\/api\/sante\/route\.[cm]?[jt]sx?$/.test(f));
+    // Next.js : app/api/sante/route.* ; app Vite (FinanceAI) : fonction Vercel api/sante.[cm]?[jt]s à la racine
+    const sante = fichiers.some((f) => /(^|\/)app\/api\/sante\/route\.[cm]?[jt]sx?$/.test(f) || /^api\/sante\.[cm]?[jt]s$/.test(f));
     resultats.push(
       ligne(9, [
         Object.keys(deps).some((d) => d.startsWith('@sentry/')) ? ok('Sentry en dépendance') : ko('aucune dépendance @sentry/*'),
