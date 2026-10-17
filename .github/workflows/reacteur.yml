@@ -12,8 +12,9 @@ name: Réacteur
 # valide la fermeture ; sans preuve valide il rouvre l'issue et personne n'est réveillé.
 # PR ouverte (MoKarade/.github#157) : le même workflow commun ne réveille personne, il lance seulement le commentaire tâche liée,
 # qui marque `en-cours` la tâche citée par la PR (la prise est tracée par la machine, pas par la mémoire du fil).
-# Filet quotidien (MoKarade/.github#143) : chaque jour à 6 h (heure du Québec), le même workflow commun relit le dépôt avec le
-# jeton du job (PR rouge depuis plus de 30 min, incident ouvert, branche par défaut rouge) et ne réveille que s'il y a un signal.
+# Filet quotidien (MoKarade/.github#143 et #194) : deux passages par jour, à toute heure (aucune garde d'heure), le même workflow
+# commun relit le dépôt avec le jeton du job (PR rouge depuis plus de 30 min, incident ouvert, branche par défaut rouge) et ne
+# réveille que s'il y a un signal qui n'a pas déjà été posté sur la boîte dans les 6 dernières heures.
 on:
   pull_request:
     types: [closed, opened, reopened, ready_for_review, edited]
@@ -23,7 +24,9 @@ on:
   issues:
     types: [closed]
   schedule:
-    # Filet quotidien à 6 h au Québec : 10 h UTC en heure d'été, 11 h UTC en heure d'hiver. Le script n'agit qu'à 6 h locale.
+    # Deux passages par jour, vers 6 h au Québec (10 h UTC en heure d'été, 11 h UTC en heure d'hiver). Le script agit à CHAQUE
+    # passage, même en retard de plusieurs heures (le 17/10/2026 GitHub a lancé ces crons avec 3 h de retard, MoKarade/.github#194) ;
+    # le second ne reposte pas un signal que le premier vient de poser.
     # Minute 11, jamais 0 : GitHub n'a lancé AUCUN des passages `0 10` et `0 11` du 17/10/2026 (heures rondes), alors que les
     # planifications à minute décalée de .github tournent (MoKarade/.github#143, même leçon que le commentaire tâche liée, #144).
     - cron: '11 10 * * *'

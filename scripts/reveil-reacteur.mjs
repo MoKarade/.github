@@ -7,11 +7,14 @@
 //   - tache_fermee : « D libre » (le garde-fou de preuve a déjà validé la fermeture, voir reacteur.yml) ;
 //   - ci_rouge : PR encore ouverte, hors brouillon, au même commit, sinon rien ; un échec de charge du robot (job mort
 //     sans étape en échec) est relancé UNE fois et ne réveille personne ; le reste réveille.
-//   - filet : une fois par jour à 6 h (heure du Québec), ce que les événements n'ont pas signalé, lu dans le dépôt
-//     appelant avec le jeton du job : PR rouge depuis plus de 30 min (hors brouillon, hors Dependabot et Mergify, hors
-//     Garde-fou qui attend Marc), issue `incident` ouverte, branche par défaut rouge ; le jeudi, dans .github seulement,
-//     le rappel de remesure de la consommation Claude. Un seul réveil par dépôt, rien à signaler = aucun réveil.
-//     Tâche MoKarade/.github#143.
+//   - filet : à CHAQUE passage (cron, même en retard de plusieurs heures, ou lancement manuel), ce que les événements n'ont
+//     pas signalé, lu dans le dépôt appelant avec le jeton du job : PR rouge depuis plus de 30 min (hors brouillon, hors
+//     Dependabot et Mergify, hors Garde-fou qui attend Marc), issue `incident` ouverte, branche par défaut rouge ; le jeudi,
+//     dans .github seulement, le rappel de remesure de la consommation Claude. Un seul réveil par dépôt, rien à signaler =
+//     aucun réveil. Aucune garde d'heure : GitHub a lancé les crons du 17/10/2026 avec 3 h de retard et la garde « 6 h au
+//     Québec » les a tous fait sauter. Pour qu'un même signal ne réveille pas deux fois quand deux passages tombent à quelques
+//     minutes d'écart, un motif identique déjà posté sur la boîte dans les 6 dernières heures n'est pas reposté.
+//     Tâches MoKarade/.github#143 et #194.
 // Puis il lance `boite-reacteur.yml` d'app-template, qui commente la boîte (app-template#58) en `github-actions[bot]` :
 // ce commentaire réveille le Coordinateur (un commentaire du compte de Marc ne réveille personne).
 //
@@ -45,8 +48,10 @@ export const LONGUEUR_MAX = 600;
 const ENTETE_ACCEPTEE = /^\s*\*\*\s*Accept[ée]e\s*\*\*/i;
 const ROBOTS = new Set(['dependabot[bot]', 'mergify[bot]', 'github-actions[bot]']);
 export const FUSEAU = 'America/Toronto';
-export const HEURE_FILET = 6;
 export const SEUIL_ROUGE_MIN = 30;
+// Le filet ne repose pas un motif identique déjà posté sur la boîte depuis cette durée (deux crons à quelques minutes d'écart).
+export const FENETRE_FILET_H = 6;
+export const NUMERO_BOITE = 58;
 export const DEPOT_GITHUB = 'MoKarade/.github';
 // Les deux balayages de `.github` qu'une planification GitHub ne lance presque jamais (MoKarade/.github#148) : sans entrée,
 // chacun relit toutes les PR ouvertes. Lancés après le réveil, sur les seuls événements d'une PR ou d'une tâche.
@@ -131,20 +136,37 @@ async function lignesDuFiletPour({ api, evt, maintenant }) {
   return lignes;
 }
 
-async function filet({ api, evt, maintenant }) {
-  // Deux horaires UTC (10 h et 11 h) couvrent l'heure d'été et l'heure d'hiver : seul celui qui tombe à 6 h au Québec agit.
-  if (evt.forcer !== 'true' && heureQuebec(maintenant).heure !== HEURE_FILET) {
-    return { action: 'rien', raison: `hors de l'heure du filet (${HEURE_FILET} h, Québec)` };
+/**
+ * Ce motif exact est-il déjà sur la boîte, posté par le robot dans les `FENETRE_FILET_H` dernières heures ? Une lecture qui
+ * échoue ne cache rien : on rend faux (un réveil en double coûte moins qu'un signal qu'on ne dit pas).
+ */
+async function dejaSignale({ api, motif, maintenant }) {
+  const limite = maintenant.getTime() - FENETRE_FILET_H * 3_600_000;
+  try {
+    const depuis = encodeURIComponent(new Date(limite).toISOString());
+    const commentaires = await commentairesDe(api, DEPOT_BOITE, NUMERO_BOITE, depuis);
+    return commentaires.some((c) => c.body === motif && c.user?.login === 'github-actions[bot]' && Date.parse(c.created_at ?? '') >= limite);
+  } catch {
+    return false;
   }
-  const lignes = await lignesDuFiletPour({ api, evt, maintenant });
-  if (lignes.length === 0) return { action: 'rien', raison: 'rien à signaler' };
-  return { action: 'reveiller', motif: construireMotif(lignes) };
 }
 
-async function commentairesDe(api, depot, numero) {
+async function filet({ api, evt, maintenant }) {
+  const lignes = await lignesDuFiletPour({ api, evt, maintenant });
+  if (lignes.length === 0) return { action: 'rien', raison: 'rien à signaler' };
+  const motif = construireMotif(lignes);
+  // « forcer » (lancement manuel) repose le réveil même si le même signal vient d'être posté : c'est une demande d'essai.
+  if (evt.forcer !== 'true' && (await dejaSignale({ api, motif, maintenant }))) {
+    return { action: 'rien', raison: `déjà signalé sur la boîte dans les ${FENETRE_FILET_H} dernières heures` };
+  }
+  return { action: 'reveiller', motif };
+}
+
+async function commentairesDe(api, depot, numero, depuis = '') {
   const sortie = [];
+  const filtre = depuis ? `&since=${depuis}` : '';
   for (let page = 1; page <= 5; page += 1) {
-    const lot = (await api('GET', `/repos/${depot}/issues/${numero}/comments?per_page=100&page=${page}`)) ?? [];
+    const lot = (await api('GET', `/repos/${depot}/issues/${numero}/comments?per_page=100${filtre}&page=${page}`)) ?? [];
     sortie.push(...lot);
     if (lot.length < 100) break;
   }

@@ -2,7 +2,7 @@ name: Réveil du Coordinateur (workflow commun)
 
 # Remplace la routine « Réacteur » (session Claude lancée à chaque événement, donc du quota). Écrit UNE fois ici ;
 # le `reacteur.yml` de chaque dépôt l'appelle quand une PR est fusionnée, quand la CI devient rouge, quand une
-# tâche est fermée ET prouvée, et une fois par jour à 6 h (heure du Québec) pour le filet (docs/cycle-de-vie-tache.md §6).
+# tâche est fermée ET prouvée, et deux fois par jour, sans garde d'heure, pour le filet (docs/cycle-de-vie-tache.md §6).
 # Tâches : MoKarade/.github#139 (événements) et #143 (filet).
 #
 #   reveiller:
@@ -73,7 +73,7 @@ on:
         type: string
         default: main
       forcer:
-        description: 'true : le filet passe même hors de 6 h au Québec (lancement manuel, essais).'
+        description: 'true : le filet reposte le réveil même si le même signal est déjà sur la boîte depuis moins de 6 h (lancement manuel, essais).'
         type: string
         default: ''
     secrets:
