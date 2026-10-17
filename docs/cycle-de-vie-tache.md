@@ -267,7 +267,7 @@ Décision de Marc, 16/10/2026 : « je veux toujours qu'une tâche soit prouvée 
 1. un commentaire commence par `**Acceptée**`, écrit par une personne ou par Claude (pas un robot, pas Jules) ; le dernier de ces commentaires fait foi ;
 2. il n'avoue aucun doute (§10, « Ce qui n'est PAS une preuve ») ;
 3. sa ligne `preuve : …` fait 40 caractères au moins (60 pour une tâche `sans PR`) ;
-4. il cite `PR #p` (ou `PR MoKarade/<dépôt>#p`), cette PR est fusionnée, l'empreinte citée est celle du commit fusionné, et le commentaire est postérieur à la fusion ; ou il dit `sans PR` ;
+4. il cite `PR #p` (ou `PR <dépôt>#p`, ou `PR MoKarade/<dépôt>#p`), cette PR est fusionnée, l'empreinte citée est celle du commit fusionné, et le commentaire est postérieur à la fusion ; ou il dit `sans PR` ;
 5. si la PR change autre chose que docs, tests, CI et qualité (et que le dépôt se déploie) : un déploiement de production réussi existe, après la fusion, sur le commit fusionné ou sur un commit qui le contient. Vercel : l'état de déploiement GitHub. Hors Vercel (moteur DriveAI, serveur MCP de FinanceAI) : une exécution réussie du workflow de déploiement dont un JOB de déploiement a réussi (un job ignoré ne compte pas : le serveur MCP est resté 27 jours sans déploiement sous une coche verte).
 
 Une fermeture `not_planned` ou doublon est valide avec un commentaire `**Abandonnée** — <raison>` (20 caractères au moins), pour que l'abandon ne soit jamais silencieux.
