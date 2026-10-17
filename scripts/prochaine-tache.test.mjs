@@ -122,6 +122,14 @@ test('capacité : en-cours et jules occupent le dépôt, preuve-attendue ne l’
   assert.equal(suivante(libre), 'a#2');
 });
 
+test('dépôt occupé : `si_libre` garde la tête de file, `suivante` reste vide', () => {
+  const r = calculer(releve(depot('a', [tache(1, { labels: ['en-cours'] }), tache(2), tache(3, { labels: ['niveau:tâche', 'prio:1'] })])));
+  assert.equal(etat(r).statut, 'occupe');
+  assert.equal(etat(r).suivante, null);
+  assert.equal(etat(r).si_libre, 'a#3');
+  assert.equal(etat(calculer(releve(depot('a', [])))).si_libre, null);
+});
+
 test('un fil actif passé en option occupe le dépôt (par nom, clé ou dépôt)', () => {
   for (const nom of ['a', 'Alpha', 'alp']) {
     const r = calculer(releve(depot('a', [tache(1)], { name: 'Alpha', key: 'alp' })), { filsActifs: [nom] });
