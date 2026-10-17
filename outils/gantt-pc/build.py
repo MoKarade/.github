@@ -59,7 +59,7 @@ def prochaines(sortie):
 def compacter_prochaines(p):
     # ce que la page affiche : la tâche suivante, la file dans l'ordre (rang, palier, raison), les écartées avec leur code ; titres et adresses viennent du relevé
     return {'version': p.get('version'), 'calcule_le': p.get('calcule_le'), 'source_asof': p.get('source_asof'), 'non_calcule': p.get('non_calcule', []),
-            'alertes': p.get('alertes', []), 'script': p.get('script'),
+            'alertes': p.get('alertes', []), 'script': p.get('script'), 'frein': p.get('frein'), 'frein_detail': p.get('frein_detail'),
             'depots': [{'repo': d['repo'], 'cle': d['cle'], 'nom': d['depot'], 'statut': d['statut'], 'suivante': d['suivante']['ref'] if d.get('suivante') else None,
                         'incidents': d.get('incidents', []), 'occupe_par': d.get('occupe_par', []), 'derniere': d.get('derniere'),
                         'file': [{k: f.get(k) for k in ('ref', 'rang', 'tier', 'prio', 'raison', 'mission', 'chantier')} for f in d.get('file', [])],
