@@ -313,16 +313,56 @@ test('rougeDepuis : rouge depuis plus de 30 min seulement, Garde-fou exclu', () 
   assert.equal(rougeDepuis([], VENDREDI_6H), false);
 });
 
-test('filet : hors de 6 h au Québec, rien (sans même lire GitHub) ; « forcer » passe outre', async () => {
-  const lectures = [];
-  const api = async (m, c) => { lectures.push(c); return []; };
-  const r = await decider({ api, evt: evtFilet(), maintenant: new Date('2026-10-16T11:00:00Z') });
+// Tâche MoKarade/.github#194 : plus de garde « 6 h au Québec ». Le 17/10/2026 les crons sont partis avec 3 h de retard et la garde
+// les a tous fait sauter. Le filet agit à toute heure ; un même signal n'est reposté qu'une fois par fenêtre de 6 h.
+const SIGNAL = {
+  '/repos/MoKarade/JobAI/pulls': [pr(3)],
+  '/repos/MoKarade/JobAI/commits/sha3/check-runs': { check_runs: [il(45)] },
+  '/repos/MoKarade/JobAI/issues': [],
+  '/repos/MoKarade/JobAI/commits/main/check-runs': { check_runs: [il(500, { conclusion: 'success' })] },
+};
+const MOTIF_SIGNAL = 'RÉACTEUR : PR rouge depuis plus de 30 min sur MoKarade/JobAI : #3';
+const BOITE = `/repos/${DEPOT_BOITE}/issues/58/comments`;
+const commentaireBoite = (corps, il_y_a_h, login = 'github-actions[bot]') => ({
+  body: corps,
+  user: { login },
+  created_at: new Date(NEUF_H_QUEBEC.getTime() - il_y_a_h * 3_600_000).toISOString(),
+});
+// 9 h au Québec (heure d'été) = 13:00 UTC : une heure où l'ancienne garde faisait sauter le filet.
+const NEUF_H_QUEBEC = new Date('2026-10-16T13:00:00Z');
+
+test('filet : à 9 h au Québec (cron en retard) il agit, sans garde d’heure', async () => {
+  const { api, ecritures } = faux(SIGNAL);
+  const r = await traiter({ api, evt: evtFilet(), jetonReveil: 'jeton', journal: () => {}, maintenant: NEUF_H_QUEBEC });
+  assert.equal(r.action, 'reveiller');
+  assert.equal(r.motif, MOTIF_SIGNAL);
+  assert.equal(ecritures.length, 1);
+  // et à minuit, ou à l'heure d'hiver : même chose
+  for (const t of ['2026-10-17T04:00:00Z', '2026-11-02T16:30:00Z']) {
+    assert.equal((await decider({ api, evt: evtFilet(), maintenant: new Date(t) })).action, 'reveiller');
+  }
+});
+
+test('filet : un même signal posté il y a moins de 6 h ne réveille pas deux fois ; passé 6 h, oui', async () => {
+  const dejaPose = (h) => faux({ ...SIGNAL, [BOITE]: [commentaireBoite(MOTIF_SIGNAL, h)] });
+  const { api, ecritures } = dejaPose(3);
+  const r = await traiter({ api, evt: evtFilet(), jetonReveil: 'jeton', journal: () => {}, maintenant: NEUF_H_QUEBEC });
   assert.equal(r.action, 'rien');
-  assert.deepEqual(lectures, []);
-  const f = await decider({ api, evt: evtFilet({ forcer: 'true' }), maintenant: new Date('2026-10-16T11:00:00Z') });
-  assert.equal(f.action, 'rien');
-  assert.match(f.raison, /rien à signaler/);
-  assert.ok(lectures.length > 0);
+  assert.match(r.raison, /déjà signalé/);
+  assert.deepEqual(ecritures, []);
+  // 7 h plus tard : le lendemain de la panne, le signal est de nouveau dit
+  assert.equal((await decider({ api: dejaPose(7).api, evt: evtFilet(), maintenant: NEUF_H_QUEBEC })).action, 'reveiller');
+});
+
+test('filet : seul le même motif posté par le robot compte ; un autre signal, un humain ou une lecture qui échoue réveillent', async () => {
+  const cas = (commentaires) => faux({ ...SIGNAL, [BOITE]: commentaires }).api;
+  const dec = (api, extra = {}) => decider({ api, evt: evtFilet(extra), maintenant: NEUF_H_QUEBEC });
+  assert.equal((await dec(cas([commentaireBoite('RÉACTEUR : incident ouvert sur MoKarade/JobAI : #12', 1)]))).action, 'reveiller');
+  assert.equal((await dec(cas([commentaireBoite(MOTIF_SIGNAL, 1, 'MoKarade')]))).action, 'reveiller');
+  assert.equal((await dec(faux({ ...SIGNAL, [BOITE]: new Error('HTTP 500') }).api)).action, 'reveiller');
+  // lancement manuel (« forcer ») : repose le réveil même si le signal vient d'être posté
+  assert.equal((await dec(cas([commentaireBoite(MOTIF_SIGNAL, 1)]), { forcer: 'true' })).action, 'reveiller');
+  assert.equal((await dec(cas([commentaireBoite(MOTIF_SIGNAL, 1)]))).action, 'rien');
 });
 
 test('filet : rien à signaler, aucun réveil et aucune écriture', async () => {
@@ -410,7 +450,7 @@ test('pr_ouverte : sans jeton un avertissement, aucune écriture ; balayage qui 
 
 // Le 17/10/2026 GitHub n'a lancé aucun passage planifié aux heures rondes (`0 10`, `0 11`) alors que les minutes décalées
 // de ce dépôt tournaient : un filet quotidien ou hebdomadaire ne retombe jamais sur une minute ronde (MoKarade/.github#143).
-test('horloges du filet : une minute fixe, ni ronde (0, 15, 30, 45), et les deux heures UTC qui couvrent 6 h au Québec', () => {
+test('horloges du filet : une minute fixe, ni ronde (0, 15, 30, 45), deux passages par jour', () => {
   const lire = (f) => readFileSync(new URL(`../.github/workflows/${f}`, import.meta.url), 'utf8');
   const crons = (f) => [...lire(f).matchAll(/^\s*- cron: '([^']+)'/gm)].map((m) => m[1].split(' '));
 
