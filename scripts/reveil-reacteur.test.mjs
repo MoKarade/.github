@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
+import { LABEL_ATTEND_MARC, TITRE_ATTEND_MARC, prAttendantMarc } from './attend-marc.mjs';
 import { DEPOT_BOITE, DEPOT_GITHUB, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, WORKFLOWS_BALAYAGE, WORKFLOWS_PR_OUVERTE, construireMotif, decider, estPanneRunner, heureQuebec, occupations, preuveAPoser, rougeDepuis, traiter } from './reveil-reacteur.mjs';
 
 // Fausse API GitHub en mémoire : les lectures viennent de `donnees`, les écritures sont gardées.
@@ -9,8 +10,9 @@ function faux(donnees = {}) {
   const api = async (methode, chemin, corps, jeton) => {
     if (methode !== 'GET') { ecritures.push({ methode, chemin, corps, jeton }); return null; }
     const [base] = chemin.split('?');
-    if (!(base in donnees)) return null;
-    const v = donnees[base];
+    const cle = chemin in donnees ? chemin : base;
+    if (!(cle in donnees)) return null;
+    const v = donnees[cle];
     if (v instanceof Error) throw v;
     return v;
   };
@@ -114,6 +116,36 @@ test('occupations : la tâche de la PR qui fusionne ne compte pas, sauf si une a
   assert.deepEqual(await occupations({ api, depot: DEPOT, tachesExclues: [12] }), ['#13']);
   const encore = faux({ [`/repos/${DEPOT}/issues`]: issuesEnCours([12]), [`/repos/${DEPOT}/pulls`]: [prOuverte(40, 'Tâche : #12')] }).api;
   assert.deepEqual(await occupations({ api: encore, depot: DEPOT, tachesExclues: [12] }), ['#12', 'PR #40']);
+});
+
+// Tâche #216 : même règle que prochaine-tache.mjs (#197), lue par scripts/attend-marc.mjs.
+const gestePr = (pr) => ({ number: 900 + pr, state: 'open', title: `Garde-fou : la PR #${pr} attend un geste de Marc`, labels: [{ name: 'qui:marc' }] });
+const GESTES = `/repos/${DEPOT}/issues?labels=qui:marc&state=open&per_page=100`;
+
+test('occupations : une PR qui n’attend que Marc (et sa tâche en-cours) n’occupe pas le dépôt', async () => {
+  const donnees = { [`/repos/${DEPOT}/issues`]: issuesEnCours([12]), [`/repos/${DEPOT}/pulls`]: [prOuverte(30, 'Tâche : #12')] };
+  // sans l'issue de geste : dépôt occupé par la tâche et par la PR
+  assert.deepEqual(await occupations({ api: faux({ ...donnees, [GESTES]: [] }).api, depot: DEPOT }), ['#12', 'PR #30']);
+  // avec « la PR #30 attend un geste de Marc » : libre
+  assert.deepEqual(await occupations({ api: faux({ ...donnees, [GESTES]: [gestePr(30)] }).api, depot: DEPOT }), []);
+});
+
+test('occupations : seule la PR qui attend Marc est écartée ; une autre PR, une PR rouge ordinaire ou un geste sur une autre PR occupent toujours', async () => {
+  const prs = [prOuverte(30, 'Tâche : #12'), prOuverte(31, 'Tâche : #13', { draft: true })];
+  const donnees = { [`/repos/${DEPOT}/issues`]: issuesEnCours([12, 13]), [`/repos/${DEPOT}/pulls`]: prs };
+  assert.deepEqual(await occupations({ api: faux({ ...donnees, [GESTES]: [gestePr(30)] }).api, depot: DEPOT }), ['#13', 'PR #31']);
+  assert.deepEqual(await occupations({ api: faux({ ...donnees, [GESTES]: [gestePr(99)] }).api, depot: DEPOT }), ['#12', '#13', 'PR #30', 'PR #31']);
+  // une autre PR ouverte cite encore la tâche #12 : elle reste prise
+  const double = { ...donnees, [`/repos/${DEPOT}/pulls`]: [...prs, prOuverte(32, 'Tâche : #12')], [GESTES]: [gestePr(30)] };
+  assert.deepEqual(await occupations({ api: faux(double).api, depot: DEPOT }), ['#12', '#13', 'PR #31', 'PR #32']);
+});
+
+test('tâche fermée : le dépôt dont la seule PR attend Marc est « libre » pour le Réacteur, et réveille', async () => {
+  const api = faux({ [`/repos/${DEPOT}/issues`]: issuesEnCours([12]), [`/repos/${DEPOT}/pulls`]: [prOuverte(30, 'Tâche : #12')], [GESTES]: [gestePr(30)] }).api;
+  const d = await decider({ api, evt: { type: 'tache_fermee', depot: DEPOT, issue: '90' } });
+  assert.equal(d.motif, `RÉACTEUR : ${DEPOT} libre ; tâche ${DEPOT}#90 fermée`);
+  const rouge = faux({ [`/repos/${DEPOT}/issues`]: issuesEnCours([12]), [`/repos/${DEPOT}/pulls`]: [prOuverte(30, 'Tâche : #12')], [GESTES]: [] }).api;
+  assert.equal((await decider({ api: rouge, evt: { type: 'tache_fermee', depot: DEPOT, issue: '90' } })).action, 'rien');
 });
 
 test('occupations : une lecture qui échoue rend « libre » (un réveil de trop plutôt qu’un dépôt libre tu)', async () => {
@@ -461,4 +493,31 @@ test('horloges du filet : une minute fixe, ni ronde (0, 15, 30, 45), deux passag
   for (const f of ['reacteur.yml', 'rapport-hebdo.yml']) {
     for (const [minute] of crons(f)) assert.ok(!['0', '15', '30', '45'].includes(minute), `${f} : minute ronde « ${minute} »`);
   }
+});
+
+// scripts/attend-marc.mjs (tâche #216) : testé ici, car ce fichier est celui que lance le contrôle `tests-reveil-reacteur`.
+const issueGeste = (extra = {}) => ({ number: 1, state: 'open', title: 'Garde-fou : la PR #12 attend un geste de Marc', labels: [{ name: 'qui:marc' }], ...extra });
+
+test('attend-marc : prAttendantMarc : lit le numéro de la PR dans le titre de l’issue ouverte qui:marc, trié, sans doublon', () => {
+  assert.deepEqual(prAttendantMarc([issueGeste(), issueGeste({ number: 2, title: 'Garde-fou : la PR #7 attend un geste de Marc' }), issueGeste({ number: 3 })]), [7, 12]);
+});
+
+test('attend-marc : prAttendantMarc : rejette autre titre, issue fermée, étiquette absente, pull request, entrée vide', () => {
+  assert.deepEqual(prAttendantMarc([
+    issueGeste({ title: 'Geste : fusionner la PR #12' }),
+    issueGeste({ state: 'closed' }),
+    issueGeste({ labels: [{ name: 'prio:1' }] }),
+    issueGeste({ pull_request: {} }),
+    issueGeste({ title: 'Garde-fou : la PR #12 attend un geste de Marc (bis)' }),
+  ]), []);
+  assert.deepEqual(prAttendantMarc(undefined), []);
+  assert.equal(LABEL_ATTEND_MARC, 'qui:marc');
+});
+
+test('attend-marc : le relevé du Gantt (fetch.py) lit le même titre que le Réacteur : aucune dérive entre les deux expressions', () => {
+  const py = readFileSync(new URL('../outils/gantt-pc/fetch.py', import.meta.url), 'utf8');
+  const m = /^ATTEND_MARC = re\.compile\(r'(.+)'\)$/m.exec(py);
+  assert.ok(m, 'ATTEND_MARC introuvable dans fetch.py');
+  assert.equal(m[1], TITRE_ATTEND_MARC.source);
+  assert.match(py, /l\['name'\] == 'qui:marc'/);
 });
