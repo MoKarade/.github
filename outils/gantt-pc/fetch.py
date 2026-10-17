@@ -242,12 +242,17 @@ def calculer(repo, rl, i, pr):
             n['pa'], n['pa_u'] = pa, pa_u
     return n
 
+ATTEND_MARC = re.compile(r'^Garde-fou : la PR #(\d+) attend un geste de Marc$')
 def traiter(rk):
     repo, key, name = rk
     rl = repo.lower()
     ouvertes, fermees, _, issues_all, incidents_all = LISTES[repo]
     issues = [i for i in issues_all if 'pull_request' not in i and any(l['name'].startswith('niveau:') for l in i['labels'])]
     incidents = [{'n': i['number'], 't': i['title'], 'url': i['html_url']} for i in incidents_all if 'pull_request' not in i]
+    # PR dont le seul obstacle est un geste de Marc : le Garde-fou (.github, scripts/garde-fou.mjs) ouvre alors « Garde-fou : la PR #n attend un geste
+    # de Marc » en `qui:marc`. Lu dans la liste déjà chargée, sans appel de plus ; prochaine-tache.mjs ne compte plus ces PR comme occupant le dépôt (#197).
+    pr_attend_marc = sorted(int(m.group(1)) for i in issues_all if 'pull_request' not in i and i['state'] == 'open'
+                            and any(l['name'] == 'qui:marc' for l in i['labels']) for m in [ATTEND_MARC.match(i['title'] or '')] if m)
     nodes, reutilises = {}, 0
     for i in issues:
         pr = pr_de(f'{rl}#{i["number"]}')
@@ -267,7 +272,7 @@ def traiter(rk):
     hors = [{'n': p['number'], 't': p['title'], 'url': p['html_url'], 'bot': p['user']['type'] == 'Bot', 'draft': p['draft'], 'c': p['created_at']}
             for p in ouvertes if not liens(p.get('body'), repo)]
     print(name, len(nodes), 'issues', f'({reutilises} reprises)' if LEGER else '', file=sys.stderr)
-    return {'repo': repo, 'key': key, 'name': name, 'nodes': nodes, 'hors': hors, 'incidents': incidents}, reutilises
+    return {'repo': repo, 'key': key, 'name': name, 'nodes': nodes, 'hors': hors, 'incidents': incidents, 'pr_attend_marc': pr_attend_marc}, reutilises
 with ThreadPoolExecutor(5) as ex:
     sorties = list(ex.map(traiter, REPOS))
 res['repos'] = [s[0] for s in sorties]

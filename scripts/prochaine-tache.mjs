@@ -16,7 +16,8 @@
 // toutes les tâches attendues fermées ; aucune PR ouverte ne la cite ; un « Fini quand » écrit.
 // Frein de quota (palier `frein` en tête du fichier) : retient les tâches non permises, état `frein` si c'est tout ce qui reste.
 // Capacité : un seul travail par dépôt. Le dépôt est occupé par une tâche `en-cours` ou `jules` ouverte, une PR de
-// tâche ouverte, ou un fil actif passé en option. Une tâche `preuve-attendue` n'occupe pas le dépôt.
+// tâche ouverte, ou un fil actif passé en option. Une tâche `preuve-attendue` n'occupe pas le dépôt, ni une tâche dont la PR
+// ouverte n'attend plus qu'un geste de Marc (`pr_attend_marc` du dépôt dans le relevé, tâche #197) : elle sort de `occupe_par`, reste dans `attend_marc`.
 //
 // Frein de quota (MoKarade/.github#184, docs/cycle-de-vie-tache.md §5 bis) : le pourcentage hebdomadaire du quota Claude,
 // relevé par la tâche du PC (`quota.json`, .github#45), fixe un palier `frein` (`normal`, `1`, `2`) qui ne laisse passer
@@ -201,10 +202,15 @@ export function calculer(backlog, { filsActifs = [], frein = null } = {}) {
       if (e) exclues[ref(depot.repo, n.n)] = e;
       else prenables.push(n);
     }
+    // Une PR dont le seul obstacle est un geste de Marc (le Garde-fou a ouvert « la PR #n attend un geste de Marc », `qui:marc`) n'occupe
+    // plus le dépôt : le fil qui l'a ouverte n'a plus rien à faire dessus (tâche #197). La PR garde son état, le geste reste chez Marc.
+    const attendMarc = new Set(depot.pr_attend_marc ?? []);
+    const enAttenteMarc = taches.filter((n) => n.pr?.state === 'open' && attendMarc.has(n.pr.n));
+    const attend = new Set(enAttenteMarc);
     // Capacité : un seul travail à la fois.
     const occupePar = [
-      ...taches.filter((n) => n.labels.includes('en-cours') || n.labels.includes('jules')).map((n) => ({ ref: ref(depot.repo, n.n), motif: n.labels.includes('jules') ? 'jules' : 'en-cours' })),
-      ...taches.filter((n) => n.pr?.state === 'open' && !n.labels.includes('en-cours') && !n.labels.includes('jules')).map((n) => ({ ref: ref(depot.repo, n.n), motif: 'pr-ouverte' })),
+      ...taches.filter((n) => !attend.has(n) && (n.labels.includes('en-cours') || n.labels.includes('jules'))).map((n) => ({ ref: ref(depot.repo, n.n), motif: n.labels.includes('jules') ? 'jules' : 'en-cours' })),
+      ...taches.filter((n) => !attend.has(n) && n.pr?.state === 'open' && !n.labels.includes('en-cours') && !n.labels.includes('jules')).map((n) => ({ ref: ref(depot.repo, n.n), motif: 'pr-ouverte' })),
       ...(actifs.has(minuscule(depot.repo)) || actifs.has(minuscule(depot.name)) || actifs.has(minuscule(depot.key)) ? [{ ref: null, motif: 'fil-actif' }] : []),
     ];
 
@@ -256,6 +262,7 @@ export function calculer(backlog, { filsActifs = [], frein = null } = {}) {
       si_libre: file[0]?.ref ?? null,
       incidents: incidents.map((i) => ({ n: i.n, titre: i.t, url: i.url })),
       occupe_par: occupePar,
+      attend_marc: enAttenteMarc.map((n) => ({ ref: ref(depot.repo, n.n), pr: n.pr.n })),
       derniere: refDerniere,
       file,
       exclues,
