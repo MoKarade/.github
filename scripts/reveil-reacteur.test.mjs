@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { DEPOT_BOITE, DEPOT_GITHUB, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, WORKFLOWS_BALAYAGE, WORKFLOWS_PR_OUVERTE, construireMotif, decider, estPanneRunner, heureQuebec, occupations, preuveAPoser, rougeDepuis, traiter } from './reveil-reacteur.mjs';
 
@@ -405,4 +406,19 @@ test('pr_ouverte : sans jeton un avertissement, aucune écriture ; balayage qui 
   const r = await traiter({ api, evt: { type: 'pr_ouverte', depot: 'MoKarade/CarAI', pr: '12' }, jetonReveil: 'jeton', journal: (l) => lignes2.push(l) });
   assert.deepEqual(r.balayages, []);
   assert.ok(lignes2.some((l) => l.includes('commentaire-tache-liee.yml non lancé')));
+});
+
+// Le 17/10/2026 GitHub n'a lancé aucun passage planifié aux heures rondes (`0 10`, `0 11`) alors que les minutes décalées
+// de ce dépôt tournaient : un filet quotidien ou hebdomadaire ne retombe jamais sur une minute ronde (MoKarade/.github#143).
+test('horloges du filet : une minute fixe, ni ronde (0, 15, 30, 45), et les deux heures UTC qui couvrent 6 h au Québec', () => {
+  const lire = (f) => readFileSync(new URL(`../.github/workflows/${f}`, import.meta.url), 'utf8');
+  const crons = (f) => [...lire(f).matchAll(/^\s*- cron: '([^']+)'/gm)].map((m) => m[1].split(' '));
+
+  const filet = crons('reacteur.yml');
+  assert.deepEqual(filet.map((c) => c[1]).sort(), ['10', '11']);
+  for (const c of filet) assert.match(c[0], /^\d+$/);
+
+  for (const f of ['reacteur.yml', 'rapport-hebdo.yml']) {
+    for (const [minute] of crons(f)) assert.ok(!['0', '15', '30', '45'].includes(minute), `${f} : minute ronde « ${minute} »`);
+  }
 });
