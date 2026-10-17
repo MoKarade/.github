@@ -110,6 +110,47 @@ test('un incident ouvert rend le statut « incident » et masque la suivante', (
   assert.equal(etat(r).incidents[0].n, 50);
 });
 
+// Tâche #197 : une PR qui n'attend que Marc ne rend plus le dépôt occupé. Le relevé (fetch.py) donne `pr_attend_marc`.
+const avecAttenteMarc = (d, ...prs) => ({ ...d, pr_attend_marc: prs });
+
+test('#197 valide : la seule PR ouverte attend Marc et une autre tâche est prenable = dépôt libre', () => {
+  const r = calculer(releve(avecAttenteMarc(depot('a', [tache(1, { labels: ['en-cours'], pr: prOuverte(10) }), tache(2)]), 10)));
+  assert.equal(etat(r).statut, 'libre');
+  assert.equal(suivante(r), 'a#2');
+  assert.deepEqual(etat(r).occupe_par, []);
+  assert.deepEqual(etat(r).attend_marc, [{ ref: 'a#1', pr: 10 }]);
+});
+
+test('#197 valide : une tâche sans étiquette en-cours dont la PR attend Marc n’occupe pas non plus', () => {
+  const r = calculer(releve(avecAttenteMarc(depot('a', [tache(1, { pr: prOuverte(10) }), tache(2)]), 10)));
+  assert.equal(etat(r).statut, 'libre');
+  assert.equal(suivante(r), 'a#2');
+});
+
+test('#197 rejeté : une PR rouge de CI ordinaire (pas de geste de Marc) garde le dépôt occupé', () => {
+  const r = calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], pr: prOuverte(10) }), tache(2)])));
+  assert.equal(etat(r).statut, 'occupe');
+  assert.equal(suivante(r), null);
+  assert.deepEqual(etat(r).attend_marc, []);
+});
+
+test('#197 rejeté : le geste porte sur une autre PR, la PR de la tâche en cours occupe toujours', () => {
+  const r = calculer(releve(avecAttenteMarc(depot('a', [tache(1, { labels: ['en-cours'], pr: prOuverte(10) }), tache(2)]), 99)));
+  assert.equal(etat(r).statut, 'occupe');
+});
+
+test('#197 : un autre travail en cours (sans PR en attente de Marc) occupe encore le dépôt', () => {
+  const r = calculer(releve(avecAttenteMarc(depot('a', [tache(1, { labels: ['en-cours'], pr: prOuverte(10) }), tache(2, { labels: ['en-cours'] }), tache(3)]), 10)));
+  assert.equal(etat(r).statut, 'occupe');
+  assert.deepEqual(etat(r).occupe_par.map((o) => o.ref), ['a#2']);
+});
+
+test('#197 : la PR en attente de Marc fermée ou fusionnée ne compte plus (le relevé garde l’ancien numéro)', () => {
+  const r = calculer(releve(avecAttenteMarc(depot('a', [tache(1, { labels: ['en-cours'], pr: { n: 10, state: 'closed', merged: null } }), tache(2)]), 10)));
+  assert.equal(etat(r).statut, 'occupe', 'la tâche reste en-cours sans PR ouverte : le fil n’a pas fini');
+  assert.deepEqual(etat(r).attend_marc, []);
+});
+
 test('capacité : en-cours et jules occupent le dépôt, preuve-attendue ne l’occupe pas', () => {
   for (const [etiquette, motif] of [['en-cours', 'en-cours'], ['jules', 'jules']]) {
     const r = calculer(releve(depot('a', [tache(1, { labels: [etiquette] }), tache(2)])));
