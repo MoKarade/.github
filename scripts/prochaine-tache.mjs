@@ -68,7 +68,8 @@ export const FREIN = { seuil1: 80, seuil2: 90, hysteresis: 2, perimeHeures: 3 };
 // secours (`FREIN.seuil2`, 90 %), sans condition de projection. On ne lève le palier 1 que lorsque la projection reste sous `projectionBas`
 // pendant `leveeMin` minutes (3 calculs de 10 min) : entre `projectionBas` et `plafond - marge`, le palier en vigueur est gardé.
 // `projectionBas` est à 90 et non à 80 : à 80 % de quota la projection ne peut jamais passer SOUS 80, donc un palier restreint n'y serait
-// jamais levé (aucun rythme nul n'y suffit). Sans projection possible (historique trop court, remise à zéro inconnue), on retombe sur les seuils.
+// jamais levé (aucun rythme nul n'y suffit). Le rythme ne s'applique qu'à partir de `FREIN.seuil1` (80 %) : en dessous, mode normal des seuils.
+// Sans projection possible (historique trop court, remise à zéro inconnue), on retombe sur les seuils.
 export const FREIN_RYTHME = { plafond: 100, marge: 5, projectionBas: 90, leveeMin: 30, fenetreHeures: 3, spanMinHeures: 1 };
 
 const niveauDe = (palier) => (palier === 1 || palier === 2 ? palier : 0);
@@ -113,7 +114,9 @@ export function calculerFrein({ pct, mesureUtc, precedent, historique, resetUtc,
   const ageHeures = valide ? (maintenant.getTime() - mesure) / 3.6e6 : null;
   const perime = !valide || ageHeures > seuils.perimeHeures;
   const inconnu = perime && precedent === undefined && !valide;
-  const proj = !perime && valide ? projeter({ historique, resetUtc, pct, mesure, regle }) : null;
+  // Hybride (choix recommandé au 17/10/2026) : le rythme ne joue qu'à partir de `seuil1` (80 %) ; en dessous, mode normal des seuils.
+  // Rejeu des mesures du 16-17/10 : la projection dépassait 95 % même à 63 % de quota, ce qui freinait plus que les seuils d'origine.
+  const proj = !perime && valide && pct >= seuils.seuil1 ? projeter({ historique, resetUtc, pct, mesure, regle }) : null;
   let niveau;
   let bas = null;
   let tenue = false;

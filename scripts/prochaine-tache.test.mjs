@@ -519,8 +519,8 @@ test('frein par rythme : le palier 2 se quitte sous 88 % (hystérésis), vers le
 });
 
 test('frein par rythme : la marge — 95 % projetés = palier 1, 94 % projetés = pas de palier', () => {
-  assert.equal(rythme(75, 0.25, 80, { precedent: 'normal' }).palier, 1, '75 + 0,25 × 80 = 95');
-  assert.equal(rythme(75, 0.25, 79, { precedent: 'normal' }).palier, 'normal', '75 + 0,25 × 79 = 94,75');
+  assert.equal(rythme(80, 0.25, 60, { precedent: 'normal' }).palier, 1, '80 + 0,25 × 60 = 95');
+  assert.equal(rythme(80, 0.25, 59, { precedent: 'normal' }).palier, 'normal', '80 + 0,25 × 59 = 94,75');
 });
 
 test('frein par rythme : levée du palier 1 seulement après 30 min de projection basse', () => {
@@ -539,7 +539,7 @@ test('frein par rythme : levée du palier 1 seulement après 30 min de projectio
 
 test('frein par rythme : une projection qui remonte entre 90 et 95 % garde le palier et efface la levée en cours', () => {
   const t0 = new Date(T_MESURE.getTime() + 5 * 60_000);
-  const r = rythme(77, 0.17, 90, { precedent: 1, basDepuis: t0.toISOString(), maintenant: new Date(t0.getTime() + 40 * 60_000) }); // 77 + 15,3 = 92,3
+  const r = rythme(80, 0.25, 45, { precedent: 1, basDepuis: t0.toISOString(), maintenant: new Date(t0.getTime() + 40 * 60_000) }); // 80 + 11,25 = 91,25
   assert.equal(r.palier, 1);
   assert.equal(r.detail.bas_depuis, null);
 });
@@ -568,11 +568,11 @@ test('frein par rythme : sans historique exploitable, retour aux seuils 80 / 90 
 
 test('frein par rythme : une remise à zéro entre deux points (quota qui baisse) vaut un rythme nul', () => {
   const r = calculerFrein({
-    pct: 5, mesureUtc: heuresAvant(0), precedent: 1, maintenant: new Date(T_MESURE.getTime() + 5 * 60_000), resetUtc: heuresApres(160),
-    historique: [{ t: heuresAvant(3), pct: 97 }, { t: heuresAvant(2), pct: 98 }, { t: heuresAvant(1), pct: 1 }],
+    pct: 82, mesureUtc: heuresAvant(0), precedent: 1, maintenant: new Date(T_MESURE.getTime() + 5 * 60_000), resetUtc: heuresApres(160),
+    historique: [{ t: heuresAvant(3), pct: 95 }, { t: heuresAvant(2), pct: 96 }, { t: heuresAvant(1), pct: 81 }],
   });
   assert.equal(r.detail.rythme_pt_h, 0);
-  assert.equal(r.detail.projection_pct, 5);
+  assert.equal(r.detail.projection_pct, 82);
 });
 
 test('frein par rythme : freinDepuisFichiers lit l’historique et la remise à zéro de quota.json, et la date de levée du calcul précédent', () => {
@@ -585,4 +585,17 @@ test('frein par rythme : freinDepuisFichiers lit l’historique et la remise à 
   const r = freinDepuisFichiers(dossier, { maintenant });
   assert.equal(r.palier, 'normal', 'sous 90 depuis 35 min : levé');
   assert.equal(r.detail.mode, 'rythme');
+});
+
+test('frein hybride : sous 80 % de quota le rythme ne joue pas, même à +2 points/h (mode normal des seuils)', () => {
+  const r = rythme(79, 2, 90, { precedent: 'normal' });
+  assert.equal(r.palier, 'normal');
+  assert.equal(r.detail.mode, 'seuils');
+  assert.equal(r.detail.projection_pct, null);
+  assert.equal(rythme(60, 2, 90, { precedent: 'normal' }).palier, 'normal');
+});
+
+test('frein hybride : le palier 1 pris à 80 % ou plus se quitte comme avant, sous 78 % (hystérésis de 2 points)', () => {
+  assert.equal(rythme(79, 2, 90, { precedent: 1 }).palier, 1);
+  assert.equal(rythme(77, 2, 90, { precedent: 1 }).palier, 'normal');
 });
