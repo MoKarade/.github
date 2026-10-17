@@ -280,7 +280,7 @@ if not LEGER: res['ecarts_enfants'] = ECARTS_ENFANTS     # plein : les enfants v
 print(f"{res['mode']} : {res['appels']} appels comptés ({res['n304']} en 304 gratuits sur {res['reqs']}), {res['duree_s']} s, {res['reutilises']} reprises" + (f", écarts enfants {len(ECARTS_ENFANTS)}" if not LEGER else ''), file=sys.stderr)
 # Miroir local des scripts de MoKarade/.github que la page fait tourner : UN calcul de la file (prochaine-tache.mjs) et UNE mesure de fidélité
 # (verif-fidelite.mjs), les mêmes pour la page et pour la routine. Relus à chaque relevé (un 304 ne coûte rien) ; leurs imports relatifs suivent.
-SCRIPTS_ENTREES = ['prochaine-tache.mjs', 'verif-fidelite.mjs']
+SCRIPTS_ENTREES = ['prochaine-tache.mjs', 'verif-fidelite.mjs', 'filet-pc.mjs']
 SCRIPTS_DIR = D + 'scripts-github/'
 def git_sha(b): return hashlib.sha1(b'blob %d\0' % len(b) + b).hexdigest()
 def miroir_scripts():
