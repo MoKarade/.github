@@ -37,6 +37,7 @@
 // injecté : les tests n'ont besoin ni de réseau ni de jeton). Le jeton de réveil n'est lu que dans `main`.
 // Ne fait jamais échouer le job (un avertissement dit ce qui n'a pas marché) : le filet de 6 h reprend la main.
 import { pathToFileURL } from 'node:url';
+import { prAttendantMarc } from './attend-marc.mjs';
 import { dispense, extraireTaches } from './tache-liee.mjs';
 
 export const DEPOT_BOITE = 'MoKarade/app-template';
@@ -176,14 +177,18 @@ async function commentairesDe(api, depot, numero, depuis = '') {
 /**
  * Ce qui occupe encore le dépôt : ["#12", "PR #30"…], vide = libre. `tachesExclues` : numéros de tâches du dépôt que la PR
  * qui vient de fusionner citait ; leur étiquette `en-cours` n'est remplacée par `preuve-attendue` qu'après la fusion, elles
- * ne comptent donc pas, sauf si une autre PR ouverte les cite encore. Une lecture qui échoue ne cache rien : on rend vide
- * (libre), car un réveil de trop coûte moins qu'un dépôt libre qu'on ne signale pas.
+ * ne comptent donc pas, sauf si une autre PR ouverte les cite encore. Même règle pour une PR qui n'attend plus qu'un geste
+ * de Marc (`prAttendantMarc`, tâche #216, comme `prochaine-tache.mjs`) : elle et ses tâches n'occupent pas le dépôt. Une
+ * lecture qui échoue ne cache rien : on rend vide (libre), car un réveil de trop coûte moins qu'un dépôt libre qu'on ne signale pas.
  */
 export async function occupations({ api, depot, tachesExclues = [] }) {
   try {
-    const prs = ((await api('GET', `/repos/${depot}/pulls?state=open&per_page=30`)) ?? []).filter((pr) => !dispense(pr));
-    const encore = new Set(prs.flatMap((pr) => extraireTaches(pr.body, depot).filter((t) => t.depot === depot).map((t) => t.numero)));
-    const exclues = new Set(tachesExclues.filter((n) => !encore.has(n)));
+    const ouvertes = ((await api('GET', `/repos/${depot}/pulls?state=open&per_page=30`)) ?? []).filter((pr) => !dispense(pr));
+    const attendMarc = new Set(prAttendantMarc((await api('GET', `/repos/${depot}/issues?labels=qui:marc&state=open&per_page=100`)) ?? []));
+    const tachesDe = (prs) => prs.flatMap((pr) => extraireTaches(pr.body, depot).filter((t) => t.depot === depot).map((t) => t.numero));
+    const prs = ouvertes.filter((pr) => !attendMarc.has(pr.number));
+    const encore = new Set(tachesDe(prs));
+    const exclues = new Set([...tachesExclues, ...tachesDe(ouvertes.filter((pr) => attendMarc.has(pr.number)))].filter((n) => !encore.has(n)));
     const prises = new Set();
     for (const label of LABELS_OCCUPE) {
       const lot = (await api('GET', `/repos/${depot}/issues?labels=${label}&state=open&per_page=30`)) ?? [];
