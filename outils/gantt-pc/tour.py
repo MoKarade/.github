@@ -9,7 +9,7 @@
 #   4. dépôt dans le dossier Google Drive synchronisé (--drive DOSSIER) : donnees.json.gz (lu par la page), prochaines.json,
 #      fiabilite.json, quota.json, etat.json. Les fichiers sont RÉÉCRITS SUR PLACE : Drive garde alors le même identifiant.
 # Freins : le jeton du PC est celui de Marc, partagé avec tout le reste de son compte (5 000 appels/h). Sous 1 500 appels restants, tour
-# économe (relevé léger, quotas rapides, pas de mesure de fiabilité) ; sous 300, tour sauté ; « rate limit » au tour précédent = 30 min
+# économe (relevé léger, quotas rapides, pas de mesure de fiabilité) ; sous 3 500, quotas Claude et coût API seuls ; sous 300, tour sauté ; « rate limit » au tour précédent = 30 min
 # d'attente. Un seuil unique à 3 000 sautait des tours entiers dès que le compte servait ailleurs (PC de Marc, 16/10 : 1 911 restants).
 # Lancer : python -X utf8 tour.py --drive "G:\Mon disque\_Gantt"   (un tour, puis sortie ; code 0 = OK ou tour sauté, 1 = échec)
 import argparse, datetime, gzip, json, os, shutil, socket, subprocess, sys, time
@@ -67,7 +67,7 @@ def sur_place(src, dst, gz=False):
     with open(dst, 'r+b' if os.path.exists(dst) else 'wb') as fh: fh.seek(0); fh.write(b); fh.truncate()
 
 
-def releve(econome=False):
+def releve(econome=False, quota_complet=True):
     # 1. relevé GitHub
     mode = 'plein'
     try:
@@ -80,8 +80,15 @@ def releve(econome=False):
         else: return 1, f'ÉCHEC {maintenant()} relevé GitHub ({mode}) : {queue(".refresh-fetch.log")}'
     if mode.startswith('plein'): touche('.dernier-plein')
     rapide = econome or (age_min('.dernier-quota-plein') is not None and age_min('.dernier-quota-plein') < 55)
-    if lancer([PY, 'quota.py'] + (['--rapide'] if rapide else []), '.refresh-quota.log', 900) == 0:
-        if not rapide: touche('.dernier-quota-plein')
+    # un échec de quota.py ne bloque pas le relevé, mais il se DIT dans etat.json : ignoré en silence, il a laissé le Drive sans quota.json
+    # (et le frein de quota sans pourcentage) sans que rien ne le montre depuis le cloud (.github#188)
+    quota = ''
+    # jauges Claude et coût API seules (≈ 1 appel GitHub) quand le compte est entamé : à froid, toutes les jauges coûtent ≈ 2 900 appels
+    # (mesuré le 17/10, cache ETag vide), de quoi vider le jeton de Marc. La jauge Claude est celle que lit le frein de quota.
+    seule = [] if quota_complet else ['--seulement=claude,api']
+    if lancer([PY, 'quota.py'] + (['--rapide'] if rapide else []) + seule, '.refresh-quota.log', 900) == 0:
+        if not rapide and not seule: touche('.dernier-quota-plein')
+    else: quota = ' · quota : ÉCHEC ' + queue('.refresh-quota.log', 200)
     # 2. file du script + données de la page
     if lancer([PY, 'build.py'], '.refresh-build.log', 600) != 0: return 1, f'ÉCHEC {maintenant()} build.py : {queue(".refresh-build.log")}'
     asof = lire('backlog.json')['asof']
@@ -105,7 +112,7 @@ def releve(econome=False):
         lancer([NODE, script, '--snapshot-seulement', 'prochaines.json', '--sortie', 'fiabilite.json'], '.refresh-fiab.log', 120, ajout=True)
     p = lire('prochaines.json')
     file = ' '.join(d['depot'] + '=' + (d['suivante']['ref'] if d.get('suivante') else d['statut']) for d in p['depots'])
-    return 0, f'OK {maintenant()} relevé {mode} {asof} · prochaines.json {p["calcule_le"]} {file} · fiabilité : {fid}'
+    return 0, f'OK {maintenant()} relevé {mode} {asof} · prochaines.json {p["calcule_le"]} {file} · fiabilité : {fid}{quota}'
 
 
 def main():
@@ -132,7 +139,7 @@ def main():
         except (OSError, ValueError, subprocess.TimeoutExpired): reste = 99999
         if reste < 300: code, res = 0, f'tour sauté : {reste} appels GitHub restants dans l\'heure'
         else:
-            code, res = releve(econome=reste < 1500)
+            code, res = releve(econome=reste < 1500, quota_complet=reste >= 3500)
             if code == 0 and reste < 1500: res += f' · tour économe ({reste} appels restants)'
             res = res.replace(f'relevé ', f'relevé en {int(time.time() - t0)} s, ', 1) if code == 0 else res
         ecrire_etat(debut, res)
