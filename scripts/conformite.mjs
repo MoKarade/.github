@@ -65,11 +65,16 @@ const json = (texte) => {
 
 /** Chemins des scripts du dépôt qu'une commande lance avec `node` (`node scripts/x.mjs && next build` → ['scripts/x.mjs']), sans `./` ni sortie du dossier. */
 export function scriptsAppeles(commande) {
+  // Découpage par mots plutôt qu'une regex : pas de répétition imbriquée, donc pas de retour arrière coûteux.
+  const mots = String(commande).split(/\s+/);
   const chemins = [];
-  for (const m of String(commande).matchAll(/\bnode\s+(?:--?[\w=.-]+\s+)*(\S+\.[cm]?[jt]s)\b/g)) {
-    const chemin = m[1].replace(/^\.\//, '');
+  mots.forEach((mot, i) => {
+    if (mot !== 'node') return;
+    const cible = mots.slice(i + 1).find((m) => !m.startsWith('-'));
+    if (!cible || !/\.[cm]?[jt]s$/.test(cible)) return;
+    const chemin = cible.replace(/^\.\//, '');
     if (!chemin.startsWith('/') && !chemin.split('/').includes('..') && !chemins.includes(chemin)) chemins.push(chemin);
-  }
+  });
   return chemins;
 }
 
