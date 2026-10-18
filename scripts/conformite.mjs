@@ -63,6 +63,21 @@ const json = (texte) => {
   }
 };
 
+/** Chemins des scripts du dépôt qu'une commande lance avec `node` (`node scripts/x.mjs && next build` → ['scripts/x.mjs']), sans `./` ni sortie du dossier. */
+export function scriptsAppeles(commande) {
+  // Découpage par mots plutôt qu'une regex : pas de répétition imbriquée, donc pas de retour arrière coûteux.
+  const mots = String(commande).split(/\s+/);
+  const chemins = [];
+  mots.forEach((mot, i) => {
+    if (mot !== 'node') return;
+    const cible = mots.slice(i + 1).find((m) => !m.startsWith('-'));
+    if (!cible || !/\.[cm]?[jt]s$/.test(cible)) return;
+    const chemin = cible.replace(/^\.\//, '');
+    if (!chemin.startsWith('/') && !chemin.split('/').includes('..') && !chemins.includes(chemin)) chemins.push(chemin);
+  });
+  return chemins;
+}
+
 /** Découpe un workflow en jobs (blocs à 2 espaces sous `jobs:`) : [{ nom, bloc }]. */
 /**
  * Sombre seul VOULU : `color-scheme: dark` déclaré à la racine (`:root`, `html` ou `body`) d'une règle de premier
@@ -297,8 +312,13 @@ export function evaluer(ctx) {
   // 10. Base
   if (!aBase) resultats.push(sansObjet(10, 'pas de base de données'));
   else {
-    const migre = fichiers.some((f) => /(^|\/)lib\/migrations\.[jt]s$/.test(f)) || /db:migrate/.test(pkg?.scripts?.['vercel-build'] ?? '');
-    resultats.push(ligne(10, [migre ? ok('migrations automatiques') : ko('ni lib/migrations.ts ni db:migrate dans vercel-build'), inconnu('sauvegarde de la nuit : elle vit sur le PC, à relire à la main')]));
+    const vb = pkg?.scripts?.['vercel-build'] ?? '';
+    // vercel-build peut déléguer à un script du dépôt (`node scripts/vercel-build.mjs`) : db:migrate s'y cherche aussi.
+    const delegues = scriptsAppeles(vb);
+    const dansDelegue = delegues.some((chemin) => /db:migrate/.test(lire(sous(chemin)) ?? ''));
+    const migre = fichiers.some((f) => /(^|\/)lib\/migrations\.[jt]s$/.test(f)) || /db:migrate/.test(vb) || dansDelegue;
+    const raison = delegues.length ? `ni lib/migrations.ts ni db:migrate dans vercel-build (ni dans ${delegues.join(', ')})` : 'ni lib/migrations.ts ni db:migrate dans vercel-build';
+    resultats.push(ligne(10, [migre ? ok('migrations automatiques') : ko(raison), inconnu('sauvegarde de la nuit : elle vit sur le PC, à relire à la main')]));
   }
 
   // 11. Docs
