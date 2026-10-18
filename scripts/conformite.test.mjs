@@ -233,6 +233,14 @@ test('sombreSeulDeclare : entrées vides ou illisibles', () => {
   assert.equal(sombreSeulDeclare(':root{color-scheme:dark}'), true);
 });
 
+test('sombreSeulDeclare : une instruction de premier niveau terminée par « ; » (@import…) ne masque pas :root', () => {
+  assert.equal(sombreSeulDeclare('@import "tailwindcss"; :root { color-scheme: dark }'), true, 'valide : @import en tête, sombre seul sur :root');
+  assert.equal(sombreSeulDeclare('@import "x"; .terminal { color-scheme: dark }'), false, 'rejeté : sur un composant, l\u2019@import ne change rien');
+  assert.equal(sombreSeulDeclare('@charset "utf-8";\n@import "a";\n@plugin "b";\nhtml, body { color-scheme: dark; }'), true, 'plusieurs instructions, plusieurs sélecteurs');
+  assert.equal(sombreSeulDeclare('@import "tailwindcss";\n@media (min-width: 1px) { :root { color-scheme: dark } }'), false, 'dans un @media, toujours refusé');
+  assert.equal(sombreSeulDeclare('@import "tailwindcss";\n:root { --a: #fff; }\n.x { color-scheme: dark }'), false, 'un « ; » dans un corps ne remet rien à zéro');
+});
+
 test('13 : action épinglée par tag ; appel d’un workflow commun en @main toléré', () => {
   assert.equal(etats(depot({ fichiers: { '.github/workflows/ci.yml': CI.replace(`@${SHA}`, '@v7') } }))[13], 'rouge');
   assert.equal(etats(depot({ fichiers: { '.github/workflows/ci.yml': CI.replace('securite.yml@main', 'securite.yml@v1') } }))[13], 'rouge');
