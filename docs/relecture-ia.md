@@ -15,7 +15,7 @@ Le blocage principal n'était pas le Garde-fou mais la règle « avis du code ow
 Tant que l'IA n'a pas rendu d'avis, le Garde-fou est rouge « en attente de la relecture » et n'ouvre PAS d'issue `qui:marc` ; il l'ouvre seulement si l'IA refuse.
 
 ## Ce que l'IA peut lever (`scripts/relecture-regles.mjs`, seule liste)
-- référence à un secret de la CI (`secrets.X`) ou à une variable secrète lue dans le code ;
+- référence à un secret de la CI (`secrets.X`) ou à une variable secrète lue sans repli dans un chemin protégé (lire une variable dans le code d'une app n'est plus une violation : tâche #199) ;
 - moins de cas de test qu'avant, étapes de contrôle retirées de la CI.
 
 ## Ce qui reste à Marc, quoi que dise l'IA
