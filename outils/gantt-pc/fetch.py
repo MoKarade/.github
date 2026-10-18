@@ -144,7 +144,10 @@ for repo, key, name in REPOS:
         vus = {x['n'] for x in nouveaux}
         nouveaux += [x for x in PREV_PRLOG if x['r'] == key and x['n'] not in vus and x['m'] >= CUTOFF]
     PRLOG += nouveaux
-    for p in ouvertes + fermees:
+    # fus couvre toutes les fusions de la fenêtre (plusieurs pages en plein) : sans elles, une PR fusionnée sortie de la 1re page
+    # des fermées (100 plus récemment modifiées) perdait son lien et la tâche passait à « aucune PR » (écart I2, .github#31 et #60)
+    vus_pr = {p['number'] for p in ouvertes + fermees}
+    for p in ouvertes + fermees + [x for x in fus if x['number'] not in vus_pr]:
         for rl, num, kind in liens(p.get('body'), repo):
             d = {'n': p['number'], 'repo': repo, 'created': p['created_at'], 'url': p['html_url'], 'state': p['state'], 'draft': p.get('draft', False),
                  'merged': p.get('merged_at'), 'closed': p.get('closed_at'), 'upd': p.get('updated_at'), 'kind': kind}

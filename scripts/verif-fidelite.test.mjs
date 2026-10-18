@@ -252,6 +252,17 @@ test('lireVivant : ouvertes, fermées récentes, PR, branches claude/* ; les PR 
   assert.ok(appels.some((c) => c.includes('labels=niveau%3At%C3%A2che') && c.includes('state=closed') && c.includes('since=2026-10-15T00:00:00Z')));
 });
 
+test('lireVivant : les PR fermées se lisent jusqu\'à la borne du relevé, pas jusqu\'au début de la fenêtre des tâches (DriveAI#464 / PR #439)', () => {
+  const recentes = Array.from({ length: 100 }, (_, i) => ({ number: 1000 + i, updated_at: '2026-10-16T01:00:00Z' }));
+  const api = (chemin) => {
+    if (/\/issues\?/.test(chemin) || /\/pulls\?state=open/.test(chemin) || /\/branches\?/.test(chemin)) return [];
+    if (/\/pulls\?state=closed/.test(chemin)) return /page=1$/.test(chemin) ? recentes : [{ number: 439, updated_at: '2026-10-15T16:03:41Z' }];
+    throw new Error(`chemin inattendu : ${chemin}`);
+  };
+  const v = lireVivant(api, ['DriveAI'], { asof: '2026-10-18T03:00:00Z', depuis: '2026-10-16T18:00:13Z' });
+  assert.ok(v.DriveAI.pulls.some((p) => p.number === 439));
+});
+
 const prochaines = (calcule_le, suivante) => ({ calcule_le, depots: [{ repo: 'Hubperso', statut: suivante ? 'libre' : 'occupe', suivante: suivante ? { ref: suivante } : null }] });
 
 test('ajouterSnapshot : ajoute la file du calcul sans toucher au reste, un seul point par calcul, 72 h au plus', () => {
