@@ -17,6 +17,10 @@
 //     qu'il laisse passer (un dépôt dont tout est retenu est `frein`, pas `libre`) ; décision du Coordinateur, 17/10/2026 17:58 UTC ;
 //   - une observation plus ancienne que 40 min (PC éteint, tour sauté) casse la continuité : le compte repart de zéro ;
 //   - le message ne contient que des dépôts et des minutes, jamais le nom de la tâche suivante (règle MoKarade/.github#136).
+// Second rôle (tâche MoKarade/.github#143, incident du 18/10/2026) : le passage QUOTIDIEN du Réacteur. Les crons de `reacteur.yml`
+// (best-effort chez GitHub) ne sont pas partis le 18/10 à 6 h 11 (Québec) dans les dix dépôts, comme le 17/10 où ils étaient arrivés
+// avec 3 h de retard. Le PC, qui voit l'heure du Québec, lance donc `reacteur.yml` (workflow_dispatch, mode filet, `forcer`) une
+// fois par jour et par dépôt dès 6 h 00 ; les crons de GitHub restent en renfort et ne reposteront pas un signal déjà posté.
 // Un échec du réveil ne fait JAMAIS échouer le tour (il se dit sur la ligne imprimée) et n'enregistre pas le signalement :
 // le tour suivant réessaie.
 import { execFileSync } from 'node:child_process';
@@ -80,6 +84,58 @@ export function annulerSignalements(etat, reveils) {
   return copie;
 }
 
+export const DEPOTS_FILET = ['MoKarade/.github', 'MoKarade/app-template', 'MoKarade/batchchef-', 'MoKarade/CarAI', 'MoKarade/DriveAI', 'MoKarade/FinanceAI', 'MoKarade/hub-contract', 'MoKarade/Hubperso', 'MoKarade/JobAI', 'MoKarade/MemoryAI'];
+export const WORKFLOW_FILET = 'reacteur.yml';
+export const HEURE_FILET_MIN = 6 * 60; // 6 h 00, heure du Québec (America/Toronto : même fuseau, heure d'été comprise)
+export const ESSAIS_MAX = 3;
+
+/** Jour (AAAA-MM-JJ) et minute du jour à Québec. */
+export function dateQuebec(maintenant) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Toronto', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    .formatToParts(maintenant).map((x) => [x.type, x.value]));
+  return { jour: `${p.year}-${p.month}-${p.day}`, minutes: Number(p.hour) * 60 + Number(p.minute) };
+}
+
+/** Quels dépôts lancer maintenant. Pure. `etat` : { jour, faits: [dépôt], essais: { [dépôt]: n } } ; repart de zéro à chaque jour du Québec. */
+export function evaluerQuotidien({ etat = {}, maintenant = new Date(), depots = DEPOTS_FILET }) {
+  const { jour, minutes } = dateQuebec(maintenant);
+  const du_jour = etat?.jour === jour ? etat : { jour, faits: [], essais: {} };
+  const suivant = { jour, faits: [...(du_jour.faits ?? [])], essais: { ...(du_jour.essais ?? {}) } };
+  if (minutes < HEURE_FILET_MIN) return { etat: suivant, a_lancer: [], raison: 'avant 6 h (heure du Québec)' };
+  const a_lancer = depots.filter((d) => !suivant.faits.includes(d) && (suivant.essais[d] ?? 0) < ESSAIS_MAX);
+  return { etat: suivant, a_lancer, raison: a_lancer.length ? '' : 'passage du jour déjà fait' };
+}
+
+/** Lance `reacteur.yml` d'un dépôt (branche par défaut) avec le jeton `gh` du PC. Lève si `gh` échoue. */
+export function lancerFilet(depot, lancer = execFileSync) {
+  lancer('gh', ['workflow', 'run', WORKFLOW_FILET, '--repo', depot], { stdio: 'pipe', timeout: 60_000 });
+}
+
+/** Le passage quotidien : lance `reacteur.yml` dans chaque dépôt une fois par jour. Rend la ligne à afficher ; ne lève jamais. */
+export function tourQuotidien({ fichierEtat, executer = false, aBlanc = false, maintenant = new Date(), lancer = execFileSync, depots = DEPOTS_FILET }) {
+  try {
+    const r = evaluerQuotidien({ etat: lireJson(fichierEtat, {}), maintenant, depots });
+    if (r.a_lancer.length === 0) {
+      if (!aBlanc) ecrireJson(fichierEtat, r.etat);
+      return `filet quotidien : rien (${r.raison})`;
+    }
+    if (aBlanc) return `filet quotidien : à blanc, lancerait ${r.a_lancer.length} dépôt(s)`;
+    if (!executer) { ecrireJson(fichierEtat, r.etat); return `filet quotidien : ${r.a_lancer.length} dépôt(s) décidés, non lancés`; }
+    const echecs = [];
+    for (const depot of r.a_lancer) {
+      try { lancerFilet(depot, lancer); r.etat.faits.push(depot); } catch (e) {
+        r.etat.essais[depot] = (r.etat.essais[depot] ?? 0) + 1;
+        echecs.push(`${depot} : ${String(e.stderr || e.message).replace(/\s+/g, ' ').slice(0, 100)}`);
+      }
+    }
+    ecrireJson(fichierEtat, r.etat);
+    const ok = r.a_lancer.length - echecs.length;
+    return `filet quotidien : ${ok} lancé(s) sur ${r.a_lancer.length}, ${r.etat.faits.length}/${depots.length} faits aujourd'hui` + (echecs.length ? ` · ÉCHEC (${echecs.join(' ; ')})` : '');
+  } catch (e) {
+    return `filet quotidien : ÉCHEC (${String(e.message).slice(0, 160)})`;
+  }
+}
+
 function lireJson(f, parDefaut) {
   if (!existsSync(f)) return parDefaut;
   try { return JSON.parse(readFileSync(f, 'utf8')); } catch { return parDefaut; }
@@ -128,11 +184,11 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   if (!fichierProchaines || fichierProchaines.startsWith('--')) {
     console.log('usage : filet-pc.mjs prochaines.json --etat filet-pc-etat.json [--executer | --a-blanc]');
   } else {
-    console.log(tour({
-      fichierProchaines,
-      fichierEtat: arg('--etat') ?? 'filet-pc-etat.json',
-      executer: process.argv.includes('--executer'),
-      aBlanc: process.argv.includes('--a-blanc'),
-    }));
+    const fichierEtat = arg('--etat') ?? 'filet-pc-etat.json';
+    const options = { executer: process.argv.includes('--executer'), aBlanc: process.argv.includes('--a-blanc') };
+    // Une seule ligne sur la sortie : la tâche du PC la reprend telle quelle dans etat.json. Le passage quotidien a son propre fichier d'état.
+    const reveil = tour({ fichierProchaines, fichierEtat, ...options });
+    const quotidien = tourQuotidien({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-quotidien.json'), ...options });
+    console.log(`${reveil} · ${quotidien}`);
   }
 }
