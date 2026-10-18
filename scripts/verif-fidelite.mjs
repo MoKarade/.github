@@ -267,7 +267,9 @@ export function lireVivant(api, depots, { asof, depuis }) {
       ...pages(api, `${base}/issues?state=open&${etiquette}`).filter(sansPr),
       ...pages(api, `${base}/issues?state=closed&${etiquette}&since=${debut}`).filter(sansPr),
     ];
-    const limite = depuis < debut ? depuis : debut;
+    // Une tâche fermée dans la fenêtre peut avoir sa PR fusionnée bien avant (DriveAI#464 : PR #439 du 15/10, tâche fermée le 16/10) : les PR fermées
+    // se lisent donc jusqu'à la borne du relevé, comme fetch.py, et non jusqu'au début de la fenêtre des tâches (écart I2 « PR liée », 18/10).
+    const limite = [depuis, debut, BORNE_RELEVE].reduce((a, b) => (a < b ? a : b));
     const pulls = [
       ...pages(api, `${base}/pulls?state=open`),
       ...pages(api, `${base}/pulls?state=closed&sort=updated&direction=desc`, { max: 5, arret: (lot) => lot[lot.length - 1].updated_at < limite }),
