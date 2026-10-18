@@ -95,6 +95,9 @@ export function sombreSeulDeclare(css) {
       if (profondeur === 0) prelude = texte.slice(debut, i).trim();
       profondeur++;
       debut = i + 1;
+    } else if (c === ';' && profondeur === 0) {
+      // Instruction de premier niveau (`@import "tailwindcss";`, `@charset`, `@plugin`…) : le sélecteur suivant repart de zéro.
+      debut = i + 1;
     } else if (c === '}') {
       profondeur = Math.max(0, profondeur - 1);
       if (profondeur === 0) {
