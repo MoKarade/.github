@@ -37,7 +37,7 @@ Le tableau ligne par ligne s'écrit dans le résumé du job. Le workflow « Essa
 | 7 | Versions | Next ≥ 16, React ≥ 19, vitest ≥ 5, zod ≥ 4, TypeScript ≥ 5.9 et `strict`, Node 24, contrat hub au dernier tag. La version INSTALLÉE (`package-lock.json`) fait foi |
 | 8 | Vercel | `vercel.json` : seule la branche par défaut se déploie, le motif générique est désactivé |
 | 9 | Surveillance | dépendance `@sentry/*`, route `app/api/sante` (Next.js) ou `api/sante.ts` (fonction Vercel d'une app Vite), dépôt listé avec une route de santé dans `surveillance/apps.json` (MoKarade/.github) |
-| 10 | Base | `lib/migrations.ts` ou `db:migrate` dans `vercel-build` ; la sauvegarde vit sur le PC : toujours « à relire » |
+| 10 | Base | `lib/migrations.ts` ou `db:migrate` dans `vercel-build`, ou dans le script du dépôt que `vercel-build` lance avec `node` (lu sous le dossier de l’app) ; la sauvegarde vit sur le PC : toujours « à relire » |
 | 11 | Docs | `CLAUDE.md` ≤ 60 lignes, `HANDOVER.md`, `docs/adr/`, `BACKLOG.md` ≤ 20 lignes avec un renvoi vers les issues, `docs/COMPTE-RENDU.md` |
 | 12 | Socle visuel | `app/globals.css` en variables, thème sombre (`prefers-color-scheme: dark` ou `data-theme`, ou un sombre seul voulu : `color-scheme: dark` posé à la racine `:root`, `html` ou `body`, hors `@media`), verrou `tests/theme.test.*` |
 | 13 | Actions épinglées | chaque `uses:` finit par un SHA de 40 caractères. Exceptions : `./…`, `docker://…` et l'appel d'un workflow commun `MoKarade/.github/.github/workflows/<nom>.yml@main` |

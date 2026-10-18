@@ -2,7 +2,7 @@
 // Aucune dépendance, aucun réseau (`node --test scripts/conformite.test.mjs`). Chaque ligne a un cas vert ET un cas rouge.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cronQuotidien, evaluer, jobsDe, sombreSeulDeclare, tableau } from './conformite.mjs';
+import { cronQuotidien, evaluer, jobsDe, scriptsAppeles, sombreSeulDeclare, tableau } from './conformite.mjs';
 
 const SHA = 'a'.repeat(40);
 const CI = `name: CI
@@ -164,6 +164,30 @@ test('10 : base sans migration automatique ; la sauvegarde reste « à relire »
   const sans = depot({ retirer: ['lib/migrations.ts'], fichiers: { 'package.json': JSON.stringify(pkg) } });
   assert.equal(etats(sans)[10], 'rouge');
   assert.match(detail(depot(), 10), /sauvegarde/);
+});
+
+test('10 : vercel-build qui délègue à un script du dépôt — db:migrate y est cherché', () => {
+  const avec = (script, racine = '.') => {
+    const pkg = JSON.parse(depot().lire('package.json'));
+    pkg.scripts['vercel-build'] = 'node scripts/vercel-build.mjs';
+    const chemin = (c) => (racine === '.' ? c : `${racine}/${c}`);
+    return depot({
+      retirer: ['lib/migrations.ts'],
+      fichiers: { [chemin('package.json')]: JSON.stringify(pkg), [chemin('vercel.json')]: depot().lire('vercel.json'), [chemin('package-lock.json')]: depot().lire('package-lock.json'), ...(script === null ? {} : { [chemin('scripts/vercel-build.mjs')]: script }) },
+      api: { racine },
+    });
+  };
+  const migrations = avec("run('npm', ['run', 'db:migrate']);\nrun('npm', ['run', 'db:verifier-migrations']);");
+  assert.equal(etats(migrations)[10], 'non-verifiable', 'valide : le script appelé contient db:migrate (la sauvegarde reste « à relire »)');
+  assert.match(detail(migrations, 10), /migrations automatiques/);
+  const sans = avec("run('npm', ['run', 'build']);");
+  assert.equal(etats(sans)[10], 'rouge', 'rejeté : le script appelé ne contient pas db:migrate');
+  assert.match(detail(sans, 10), /ni lib\/migrations\.ts ni db:migrate dans vercel-build \(ni dans scripts\/vercel-build\.mjs\)/);
+  assert.equal(etats(avec(null))[10], 'rouge', 'rejeté : le script appelé est introuvable');
+  assert.match(detail(avec("run('npm', ['run', 'db:migrate']);", 'web'), 10), /migrations automatiques/, 'le chemin du script se lit sous le dossier de l\u2019app (web/)');
+  assert.deepEqual(scriptsAppeles('node scripts/a.mjs && next build'), ['scripts/a.mjs']);
+  assert.deepEqual(scriptsAppeles('node ./scripts/a.mjs && node --max-old-space-size=4096 scripts/b.js'), ['scripts/a.mjs', 'scripts/b.js']);
+  assert.deepEqual(scriptsAppeles('node ../hors.mjs && node /abs/x.mjs && npm run db:migrate && next build'), [], 'ni sortie du dossier, ni chemin absolu');
 });
 
 test('11 : CLAUDE.md trop long, HANDOVER, adr, BACKLOG non réduit, COMPTE-RENDU', () => {
