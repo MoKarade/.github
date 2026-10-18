@@ -17,6 +17,9 @@ le PC, le relevé tourne sans Claude.
 4. Filet (`scripts/filet-pc.mjs`, tâche #196) : si un dépôt reste libre avec une tâche prenable plus de 30 min sans lancement, le tour lance
    `boite-reacteur.yml` d'`app-template` pour réveiller le Coordinateur (le `gh` du PC doit pouvoir lancer ce workflow). Son état est dans
    `filet-pc-etat.json`, sa ligne dans `etat.json`.
+   Même script, passage quotidien du Réacteur (tâche #143) : dès 6 h 00 heure du Québec, une fois par jour, il lance `reacteur.yml` dans les dix dépôts
+   (`gh workflow run`, le `gh` du PC doit pouvoir lancer des workflows sur les dix dépôts) parce que les `schedule` de GitHub ne sont pas garantis. État :
+   `filet-pc-etat-quotidien.json`, ligne « filet quotidien : … » dans `etat.json`.
 5. Les sorties sont déposées dans le Drive, dossier `_Gantt` : `donnees.json.gz` (lu par la page avec le connecteur Google Drive),
    `prochaines.json`, `fiabilite.json`, `quota.json`, `etat.json` (résultat du dernier tour).
 
