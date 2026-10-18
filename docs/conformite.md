@@ -46,7 +46,7 @@ Le tableau ligne par ligne s'écrit dans le résumé du job. Le workflow « Essa
 
 ## Sombre seul voulu (ligne 12)
 
-Une app qui reste en sombre seul sur décision de Marc (Hubperso, JobAI) le déclare par `color-scheme: dark` dans une règle de premier niveau sur `:root`, `html` ou `body` de `app/globals.css`. Les variables CSS et le verrou `tests/theme.test.*` restent exigés. Ne comptent pas : `color-scheme: light dark`, la même déclaration sur un composant, dans un `@media` ou en commentaire.
+Une app qui reste en sombre seul sur décision de Marc (Hubperso, JobAI) le déclare par `color-scheme: dark` dans une règle de premier niveau sur `:root`, `html` ou `body` de `app/globals.css`. Les variables CSS et le verrou `tests/theme.test.*` restent exigés. Une instruction de premier niveau en tête de fichier (`@import "tailwindcss";`, `@charset`, `@plugin`) ne gêne pas la lecture. Ne comptent pas : `color-scheme: light dark`, la même déclaration sur un composant, dans un `@media` ou en commentaire.
 
 ## Limites connues
 
