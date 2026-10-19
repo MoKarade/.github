@@ -69,6 +69,7 @@ Un « Fini quand » non vérifiable (« c'est mieux ») est refusé. Un « Fini 
 | `prio:1` / `prio:2` / `prio:3` | 1 passe devant tout, sauf la panne. Pas d'étiquette = `prio:3` | Marc (`prio:1`), Claude (2 et 3) |
 | `en-cours` | Prise par un fil. C'est l'heure de début | Le fil, en la prenant ; sinon le balayage « tâche liée », dans les 10 minutes de l'ouverture de la PR qui cite la tâche (§8) |
 | `jules` | Confiée à Jules | La routine |
+| `faisable-jules` | Réservée à Jules : petite, corps au gabarit. Claude ne la prend pas ; le filet du PC la confie (`jules`) quand le dépôt est libre (§5 quater) | Celui qui écrit ou range la tâche |
 | `qui:marc` | Attend un geste de Marc, décrit en commentaire | Celui qui découvre le geste |
 | `bloqué` | Attend autre chose qu'une tâche, dit en commentaire | Celui qui découvre le blocage |
 | `preuve-attendue` | PR fusionnée, mais la preuve n'est pas possible tout de suite (événement futur, geste de Marc). La tâche reste **ouverte et non finie** ; elle ne bloque pas le dépôt (§10) | Le fil, en remplaçant `en-cours` |
@@ -168,6 +169,16 @@ Sont invalides, avec leur cause : `bloquee-sans-reprise` (`bloqué` sans rien de
 **Une preuve n'attend jamais Marc.** `preuve-attendue` veut dire : le travail est livré, **Claude** doit prouver, automatiquement, quitte à ouvrir un navigateur (Playwright, Chromium est dans les conteneurs) et à aller voir la production. Elle est exclue comme `preuve-attendue` (jamais « attend ton geste »), hors de la file de Marc, et son propriétaire est la preuve elle-même. `qui:marc` + `preuve-attendue` sur la même tâche est une contradiction (`preuve-chez-marc`) : le fil retire l'une des deux. Si la preuve exige VRAIMENT une action de Marc dans son compte (un secret à poser, un bouton à presser dans une application qui lui est réservée), le fil le lui dit UNE fois, avec la raison, dans une **tâche de geste séparée** (`qui:marc`, la raison dans son « Avant »), et la tâche à prouver l'attend par `**Attend** : #geste` : elle est alors « en attente » d'un geste nommé, et le geste de Marc n'est jamais « prouver ».
 
 **Sortie** (`prochaines.json`) : `etats` (une entrée par tâche ouverte : état, ce qu'elle attend, propriétaire, depuis, cause si invalide), `oubliees` (les invalides, les gestes de Marc en retard, les fils silencieux), `attentes`, `file_marc` (les gestes de Marc par racine, le plus bloquant en tête), `liens_manquants`, `seuils_oubli`. Le format de `exclues` ne change pas. `node scripts/filet-pc.mjs prochaines.json --etat <fichier> --a-blanc` décide sans rien envoyer ni poser.
+
+## 5 quater. Jules avance seul, sans quota Claude (demande de Marc, 19/10/2026)
+
+Jules ne consomme pas le quota Claude. Le filet du PC (`filet-pc.mjs`, `scripts/jules-auto.mjs`, sans IA) lui confie donc, à chaque tour, des tâches **réservées** :
+
+1. **Réserver** : celui qui écrit ou range une tâche petite pose l'étiquette `faisable-jules`. Le filet ne devine rien. Une tâche réservée sort de la file de Claude (`jules-reservee` dans `exclues`, liste `reservees_jules` du dépôt) : sinon Claude et Jules la prendraient tous les deux. Une dépendance ouverte, un geste de Marc ou une PR ouverte passent avant la réserve.
+2. **Dépôt libre** : aucun incident, aucune issue `jules` ou `en-cours` ouverte, aucune PR ouverte (hors robots et boîte `app-template#58`), vérifié EN DIRECT au moment de confier. Au plus **trois** tâches Jules en même temps sur les dix dépôts (une chose à la fois par dépôt, §6).
+3. **Corps complet** : les huit sections du gabarit (`docs/jules-gabarit-issue.md` : Avant, Après, Fini quand, Fichiers permis, À faire, À ne pas faire, Vérifier, À citer dans la PR), non vides et sans `<crochets>`, au plus deux fichiers permis, aucun chemin de Claude (`.github/`, `scripts/`, `surveillance/`, `qualite/`, `.mergify.yml`, secrets, authentification, base de données, dépendances, `BACKLOG.md`/`HANDOVER.md`/`CLAUDE.md`/`AGENTS.md`, moteur DriveAI, dépôt `hub-contract`), pas de « OU », `Tâche : #n` avec son propre numéro et jamais `Fixes`. Aucune étiquette `sécurité`, `qui:marc`, `bloqué`, `en-cours`.
+
+Confier, c'est poser l'étiquette `jules` et un commentaire d'une ligne. Le ménage du §7 retire l'étiquette après 24 h sans PR ; une tâche déjà confiée deux fois ne l'est plus. **Une tâche réservée dont le corps n'est pas prêt n'est pas oubliée en silence** : elle est « en attente » de Jules, et si rien ne bouge en 24 h elle sort en `fil-silencieux` (§5 ter) et réveille le Coordinateur, qui fait corriger le corps. La ligne `jules : …` d'`etat.json` dit ce qui est confié et, pour chaque réservée non confiée, la première raison (« sections absentes : À ne pas faire », « dépôt occupé (PR #12 ouverte) »…). Claude relit la PR de Jules et pose la preuve « Acceptée » ; le Réacteur le réveille à la fusion comme pour toute PR.
 
 ## 6. Répartition du travail
 
