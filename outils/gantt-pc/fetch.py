@@ -10,6 +10,9 @@
 #   « Preuve attendue » est aussi lue dans les commentaires (le dernier avec une date lisible l'emporte sur le corps) ;
 #   « **Attend** : rien (PR #n) » n'attend rien ; `jules_at` = les instants où l'étiquette `jules` a été posée (mesure des lancements Jules) ;
 #   les scripts de MoKarade/.github que la page fait tourner (`prochaine-tache.mjs`, `verif-fidelite.mjs`) sont relus à chaque relevé (build.py et refresh.sh les lancent).
+# v9 (19/10/2026) : demande de Marc (la fiche montre les étapes d'une tâche et ce que Jules peut faire).
+#   `et` = la suite des étapes d'une tâche lue dans ses événements (en cours, attend Marc, bloquée, preuve attendue, correction, faite) ;
+#   `pr.au` = l'auteur de la PR ; `pr.jf` = sa portée (nombre de fichiers, lignes, premier chemin protégé) ; `fp` = nombre de « Fichiers permis » (gabarit Jules).
 # Usage : python3 fetch.py [--leger] [--sans-quota] [--prev=fichier.json] [--depots=a,b] [sortie.json]
 import json, subprocess, sys, datetime, re, os, time, threading, base64, hashlib
 from concurrent.futures import ThreadPoolExecutor
@@ -72,9 +75,51 @@ def liens(body, repo):
 
 # Taille d'une PR hors tests et fichiers générés (§1 : environ 400 lignes au plus)
 HORS_TAILLE = re.compile(r'(^|/)(tests?|__tests__|e2e|fixtures?|__snapshots__|dist|captures)/|\.(test|spec)\.[cm]?[jt]sx?$|\.snap$|(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$|\.lock$', re.I)
-def taille(repo, n):
-    files = flat(gh(f'repos/MoKarade/{repo}/pulls/{n}/files?per_page=100'))
+def taille(files):
     return sum(f['additions'] + f['deletions'] for f in files if not HORS_TAILLE.search(f['filename']))
+# Portée de Jules (cycle de vie §6 et docs/jules-gabarit-issue.md : deux fichiers au plus, environ 150 lignes, aucun chemin protégé).
+# Le relevé donne les mesures ; la page applique les seuils et dit lequel manque.
+PROTEGE = re.compile(r'(^|/)(\.github|\.claude|scripts/hooks|qualite|drizzle|migrations?)/|(^|/)(vercel\.json|\.mergify\.yml|CODEOWNERS|appsscript\.json'
+                     r'|package(-lock)?\.json|AGENTS\.md|CLAUDE\.md)$|(^|/)\.env|\.gs$', re.I)
+def portee_jules(files):
+    p = next((f['filename'] for f in files if PROTEGE.search(f['filename'])), None)
+    return {'f': len(files), 'l': sum(f['additions'] + f['deletions'] for f in files), 'p': p}
+# Gabarit Jules : « **Fichiers permis** (aucun autre) : » suivi d'une liste ; le nombre d'éléments dit que la tâche a été préparée pour Jules
+FP = re.compile(r'^\s*\*\*\s*Fichiers permis\s*\*\*[^\n]*\n((?:[ \t]*[-*][^\n]*(?:\n|$))+)', re.I | re.M)
+def fichiers_permis(body):
+    m = FP.search(body or '')
+    return len([l for l in m.group(1).splitlines() if l.strip()]) if m else None
+
+# Étapes d'une tâche (demande de Marc, 19/10) : à chaque événement, l'étape est celle de l'étiquette d'état la plus forte.
+# Sortie : [[étape, début ISO], ...] ; une étape court jusqu'au début de la suivante, la dernière jusqu'au relevé (la page le calcule).
+# « corr » = rouverte (garde-fou de preuve ou à la main) jusqu'à la fermeture suivante ; « pause » = commencée, puis plus aucune étiquette d'état.
+ETAPE_LB = {'en-cours', 'jules', 'qui:marc', 'bloqué', 'preuve-attendue', 'preuve-manquante'}
+def etape_de(lb, ferme, rouverte):
+    if ferme: return 'faite'
+    if 'qui:marc' in lb: return 'marc'
+    if 'bloqué' in lb: return 'blk'
+    if 'preuve-attendue' in lb: return 'preuve'
+    if rouverte or 'preuve-manquante' in lb: return 'corr'
+    if 'en-cours' in lb or 'jules' in lb: return 'cours'
+    return None
+def etapes(ev):
+    lb, ferme, rouverte, vu_cours, out = set(), False, False, False, []
+    def t(iso): return datetime.datetime.fromisoformat(iso.replace('Z', '+00:00')).timestamp()
+    for e in sorted(ev, key=lambda e: e['created_at']):
+        k, nom = e['event'], (e.get('label') or {}).get('name')
+        if k == 'labeled' and nom in ETAPE_LB: lb.add(nom)
+        elif k == 'unlabeled' and nom in ETAPE_LB: lb.discard(nom)
+        elif k == 'closed': ferme, rouverte = True, False
+        elif k == 'reopened': ferme, rouverte = False, True
+        else: continue
+        et = etape_de(lb, ferme, rouverte) or ('pause' if vu_cours else 'file')
+        vu_cours = vu_cours or et == 'cours'
+        # un changement fait en plusieurs gestes à quelques secondes d'écart (retirer en-cours, poser qui:marc) est une seule transition
+        quand = e['created_at']
+        if out and t(quand) - t(out[-1][1]) < 30: quand = out.pop()[1]
+        if not out or out[-1][0] != et: out.append([et, quand])
+    while out and out[0][0] == 'file': out.pop(0)        # avant tout état, la tâche attendait simplement dans la file
+    return out
 
 # Gabarits des corps (§2) et extraction des champs affichés dans la fiche
 GAB = {'chantier': ['Objectif', 'Pourquoi', 'Fini quand', 'Source'], 'mission': ['Résultat', 'Fini quand', 'Source'],
@@ -150,7 +195,7 @@ for repo, key, name in REPOS:
     for p in ouvertes + fermees + [x for x in fus if x['number'] not in vus_pr]:
         for rl, num, kind in liens(p.get('body'), repo):
             d = {'n': p['number'], 'repo': repo, 'created': p['created_at'], 'url': p['html_url'], 'state': p['state'], 'draft': p.get('draft', False),
-                 'merged': p.get('merged_at'), 'closed': p.get('closed_at'), 'upd': p.get('updated_at'), 'kind': kind}
+                 'merged': p.get('merged_at'), 'closed': p.get('closed_at'), 'upd': p.get('updated_at'), 'kind': kind, 'au': (p.get('user') or {}).get('login')}
             L = LIEN.setdefault(f'{rl}#{num}', {})
             # une PR citée deux fois (Tâche et Closes) garde le lien « tache »
             if (repo, p['number']) not in L or kind == 'tache': L[(repo, p['number'])] = d
@@ -187,15 +232,17 @@ def calculer(repo, rl, i, pr):
          'gab': [c for c in GAB.get(lvl, []) if champ(body, c) is None],
          'av': champ(body, 'Avant'), 'ap': champ(body, 'Après'), 'fq': champ(body, 'Fini quand'),
          'res': champ(body, 'Résultat') or champ(body, 'Objectif'),
-         'pa': champ(body, 'Preuve attendue')}
+         'pa': champ(body, 'Preuve attendue'), 'fp': fichiers_permis(body)}
     m = VIEILLE.search(body)
     if not pr and m:
         # ancienne forme : la PR est nommée dans le corps de l'issue, sans lien depuis la PR
         p = gh(f'repos/MoKarade/{repo}/pulls/{m.group(1)}')
         pr = {'n': p['number'], 'repo': repo, 'created': p['created_at'], 'url': p['html_url'], 'state': p['state'], 'draft': p.get('draft', False),
               'merged': p.get('merged_at'), 'kind': 'corps'}
-    if pr and pr['state'] == 'open' and lvl == 'tâche':
-        pr['lignes'] = taille(pr['repo'], pr['n'])
+    if pr and lvl == 'tâche':
+        fs = flat(gh(f"repos/MoKarade/{pr['repo']}/pulls/{pr['n']}/files?per_page=100"))
+        if pr['state'] == 'open': pr['lignes'] = taille(fs)
+        pr['jf'] = portee_jules(fs)
     if pr and lvl == 'tâche' and 'c0' not in pr:
         # le travail réel : première et dernière modification (commits) de la PR
         cs = flat(gh(f"repos/MoKarade/{pr['repo']}/pulls/{pr['n']}/commits?per_page=100"))
@@ -217,7 +264,7 @@ def calculer(repo, rl, i, pr):
         n['kids'] = [s['number'] if s['repository_url'].rsplit('/', 1)[1].lower() == rl
                      else f"{s['repository_url'].rsplit('/', 1)[1].lower()}#{s['number']}"
                      for s in flat(gh(f'repos/MoKarade/{repo}/issues/{i["number"]}/sub_issues?per_page=100'))]
-    if lvl == 'tâche' and ({'en-cours', 'jules', 'bloqué'} & set(labels) or i['state'] == 'closed'):
+    if lvl == 'tâche' and (ETAPE_LB & set(labels) or i['state'] == 'closed' or i.get('state_reason') == 'reopened'):
         ev = flat(gh(f'repos/MoKarade/{repo}/issues/{i["number"]}/events?per_page=100'))
         lab = lambda nom: [e['created_at'] for e in ev if e['event'] == 'labeled' and e.get('label', {}).get('name') == nom]
         t = sorted(lab('en-cours') + lab('jules'))
@@ -226,6 +273,7 @@ def calculer(repo, rl, i, pr):
         n['jules_at'] = lab('jules')
         b = lab('bloqué')
         n['bloque_depuis'] = b[-1] if b and 'bloqué' in labels else None
+        n['et'] = etapes(ev)
     geste_ou_ferme = lvl == 'tâche' and (('qui:marc' in labels and i['state'] == 'open') or (i['state'] == 'closed' and i.get('state_reason') == 'completed'))
     # une échéance de preuve peut n'être écrite que dans un commentaire : on lit les commentaires des tâches ouvertes qui l'attendent
     pa_possible = lvl == 'tâche' and i['state'] == 'open' and ('preuve-attendue' in labels or bool(pr and pr.get('merged')) or 'preuve attendue' in body.lower())
