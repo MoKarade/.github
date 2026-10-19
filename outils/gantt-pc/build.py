@@ -16,7 +16,7 @@ UTC = datetime.timezone.utc
 def iso(d): return d.astimezone(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')
 def pr_c(p):
     if not p: return None
-    return {k: p.get(k) for k in ('n', 'repo', 'url', 'state', 'draft', 'merged', 'closed', 'upd', 'created', 'kind', 'lignes', 'c0', 'c1', 'nc', 'cs') if p.get(k) is not None}
+    return {k: p.get(k) for k in ('n', 'repo', 'url', 'state', 'draft', 'merged', 'closed', 'upd', 'created', 'kind', 'lignes', 'c0', 'c1', 'nc', 'cs', 'au', 'jf') if p.get(k) is not None}
 
 # --- « Preuve attendue : AAAA-MM-JJ HH:MM (heure du Québec) — événement » -> instant UTC -------------------------------------------------
 # La zone est celle que le texte nomme : UTC/GMT/Z si c'est écrit, sinon l'heure du Québec (gabarit du cycle de vie, §10). Lue en UTC par erreur,
@@ -71,7 +71,7 @@ for r in gh['repos']:
     for n in r['nodes'].values():
         c = {'n': n['n'], 't': n['title'], 'l': n['lvl'], 'lb': [x for x in n['labels'] if not x.startswith('niveau:')], 'st': n['state'],
              'c': n['created'], 'x': n['closed'], 's': n['start'], 'k': n['kids'], 'pr': pr_c(n['pr']), 'd': n.get('deps', [])}
-        for src, dst in (('reason', 'r'), ('av', 'av'), ('ap', 'ap'), ('fq', 'fq'), ('res', 'res'), ('pa', 'pa'), ('pa_u', 'pu'), ('geste', 'g'), ('preuve', 'pv'), ('bloque_depuis', 'bs'), ('upd', 'u')):
+        for src, dst in (('reason', 'r'), ('av', 'av'), ('ap', 'ap'), ('fq', 'fq'), ('res', 'res'), ('pa', 'pa'), ('pa_u', 'pu'), ('geste', 'g'), ('preuve', 'pv'), ('bloque_depuis', 'bs'), ('upd', 'u'), ('et', 'et'), ('fp', 'fp')):
             if n.get(src): c[dst] = n[src]
         if n.get('jules'): c['j'] = 1
         if n.get('jules_at'): c['ja'] = n['jules_at']
