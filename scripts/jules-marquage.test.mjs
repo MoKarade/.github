@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { dependancesEcrites, marquerFaisables, RESERVE_MAX } from './jules-marquage.mjs';
+import { dependancesEcrites, marquerFaisables, retirerPerimees, RESERVE_MAX } from './jules-marquage.mjs';
 import { tourJulesSuivi } from './filet-pc.mjs';
 
 const corps = (n, { attend = '**Attend** : aucune', sections = {} } = {}) => {
@@ -27,6 +27,7 @@ function github({ issues = [], prs = [], etats = {}, natives = {} }) {
   const appels = [];
   const gh = (methode, chemin, corpsAppel) => {
     appels.push({ methode, chemin, corps: corpsAppel });
+    if (methode === 'GET' && /labels=faisable-jules/.test(chemin)) return issues.filter((i) => i.labels.some((l) => l.name === 'faisable-jules'));
     if (methode === 'GET' && /\/issues\?labels=jules/.test(chemin)) return [];
     if (methode === 'GET' && /\/issues\?state=closed/.test(chemin)) return [];
     if (methode === 'GET' && /\/issues\?state=open/.test(chemin)) return issues;
@@ -132,4 +133,29 @@ test('une tâche qui ajoute un outil MCP reste hors du full auto (corps ou titre
   assert.deepEqual(r.marquees, []);
   assert.equal(r.refusees, 3);
   assert.equal(ecritures(g.appels).length, 0);
+});
+
+test('retirerPerimees : une étiquette faisable-jules sur un corps que evaluerJules refuse se retire, avec un commentaire qui dit pourquoi', () => {
+  const incomplet = tache(198, ['faisable-jules'], '**Avant** : x.\n\n**Après** : y.\n');
+  const mcp = tache(199, ['faisable-jules'], corps(199).replace('Un test couvre', 'Un outil MCP de test couvre'));
+  const bonne = tache(195, ['faisable-jules']);
+  const g = github({ issues: [incomplet, mcp, bonne] });
+  const r = retirerPerimees({ depot: 'MoKarade/JobAI', gh: g.gh });
+  assert.deepEqual(r, ['JobAI#198', 'JobAI#199']);
+  const w = ecritures(g.appels);
+  assert.deepEqual(w.filter((a) => a.methode === 'DELETE').map((a) => a.chemin), [
+    'repos/MoKarade/JobAI/issues/198/labels/faisable-jules',
+    'repos/MoKarade/JobAI/issues/199/labels/faisable-jules',
+  ]);
+  assert.match(w.find((a) => a.chemin.includes('198/comments')).corps.body, /sections absentes/);
+  assert.match(w.find((a) => a.chemin.includes('199/comments')).corps.body, /MCP/);
+});
+
+test('retirerPerimees : une tâche déjà confiée (jules, en-cours) ou à dépendance ouverte garde son étiquette ; à blanc rien ne s\'écrit', () => {
+  const g = github({ issues: [tache(1, ['faisable-jules', 'jules'], '**Avant** : x.'), tache(2, ['faisable-jules', 'en-cours'], '**Avant** : x.'), tache(3, ['faisable-jules'], corps(3, { attend: '**Attend** : #12 — raison' }))], etats: { 'JobAI#12': 'open' } });
+  assert.deepEqual(retirerPerimees({ depot: 'MoKarade/JobAI', gh: g.gh }), []);
+  assert.equal(ecritures(g.appels).length, 0);
+  const g2 = github({ issues: [tache(198, ['faisable-jules'], '**Avant** : x.')] });
+  assert.deepEqual(retirerPerimees({ depot: 'MoKarade/JobAI', gh: g2.gh, aBlanc: true }), ['JobAI#198']);
+  assert.equal(ecritures(g2.appels).length, 0);
 });
