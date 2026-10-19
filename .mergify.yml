@@ -7,6 +7,9 @@ queue_rules:
   - name: default
     merge_method: squash
     batch_size: 1
+    # Sans cette ligne Mergify calcule le délai (`auto`) d'après la durée récente des contrôles de la file :
+    # environ une minute ici, alors que le CI de la file en prend près de deux, d'où des PR vertes sorties de la file (« Checks timed out »).
+    checks_timeout: 30 min
     queue_conditions:
       - base = main
       - -draft

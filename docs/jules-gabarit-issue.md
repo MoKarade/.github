@@ -4,7 +4,7 @@ Pour qui : Claude, quand il rédige une issue à confier à Jules (étiquette `j
 
 Mise en place : MoKarade/.github#76. Proposition d'origine : `commun/plans/2026-10-16_jules-a-plein-regime.md`.
 
-**Automatique** : une issue qui porte l'étiquette `faisable-jules` et dont le corps respecte ce gabarit (sections non vides, deux fichiers au plus, aucun chemin de la liste « à garder pour Claude » ci-dessous) est confiée à Jules par le filet du PC, sans Claude, dès que son dépôt est libre ; règles exactes dans `docs/cycle-de-vie-tache.md` §5 quater et `scripts/jules-auto.mjs`. Une issue au gabarit est donc prête à partir seule : pose `faisable-jules` en la rédigeant.
+**Automatique** : une issue qui porte l'étiquette `faisable-jules` et dont le corps respecte ce gabarit (sections non vides, cinq fichiers au plus, aucun chemin de la liste « à garder pour Claude » ci-dessous) est confiée à Jules par le filet du PC, sans Claude, dès que son dépôt est libre ; règles exactes dans `docs/cycle-de-vie-tache.md` §5 quater et `scripts/jules-auto.mjs`. Une issue au gabarit est donc prête à partir seule : pose `faisable-jules` en la rédigeant.
 
 ## Gabarit à copier dans le corps de l'issue
 
@@ -39,17 +39,19 @@ Mise en place : MoKarade/.github#76. Proposition d'origine : `commun/plans/2026-
 1. Un seul objectif. Pas de « OU » : Jules fait alors les deux (constat Hubperso#146).
 2. Des chemins exacts, vérifiés (Grep ou carnet NotebookLM `carnet`), jamais devinés.
 3. Un « Fini quand » qu'un script peut contrôler ; sinon la tâche n'est pas prête.
-4. Une tâche tient en cinq fichiers au plus et environ 400 lignes de diff (limite levée par Marc le 19/10/2026, avant : deux fichiers et 150 lignes) ; au-delà, on découpe.
+4. Une tâche tient en cinq fichiers au plus et environ 400 lignes de diff (Marc, 19/10/2026) ; au-delà, on découpe.
 5. Aucune donnée personnelle dans l'issue (dépôts publics). Exemples et jeux d'essai fictifs.
 6. Écrire en toutes lettres le numéro de l'issue et le préfixe de commit permis : Jules copie sinon l'ID de la ligne « Source » (constat Hubperso#147 : `[H-25]` et `Tâche : #25`). Hubperso : `HORS-BACKLOG:` tant que `BACKLOG.md` n'est pas un fichier permis.
 
 ## Tâches qui conviennent à Jules
 
-Depuis le 19/10/2026 (Marc a levé les exclusions 1 à 5) : petits changements d'écran (captures avant/après, tests de thème verts), workflows de `.github/` sans secret ni garde-fou touché, longs fichiers `.md` (consigne française explicite dans `AGENTS.md`), mises à jour de dépendances mineures avec `npm audit --omit=dev` à 0. Restent exclus : secrets, jetons, Sentry, authentification, base de données et migrations. Cas habituels : tests unitaires d'une fonction pure existante ; test de liens ou de présence de fichiers ; doc courte (un fichier de moins de 150 lignes ou une section ciblée) ; commentaire de code manquant ; remplacement mécanique d'un terme sur une liste fermée de fichiers ; ajout d'un cas dans un tableau de données de test.
+Tests unitaires d'une fonction pure existante ; test de liens ou de présence de fichiers ; doc courte (un fichier de moins de 150 lignes ou une section ciblée) ; commentaire de code manquant ; remplacement mécanique d'un terme sur une liste fermée de fichiers ; ajout d'un cas dans un tableau de données de test.
 
 ## Tâches à garder pour Claude
 
-Chemin protégé, base de données, migration, authentification, secret, dépendances, moteur DriveAI, contrat, `BACKLOG.md` / `HANDOVER.md` / autre long `.md` à réécrire (Jules y abîme des mots français, voir Hubperso#197), tout ce qui change un écran sans captures, tout ce qui demande un choix de conception.
+Chemin protégé (`scripts/`, `surveillance/`, `qualite/`, Garde-fou, relecture, Mergify, CODEOWNERS), base de données, migration, authentification, secret, jeton, Sentry, moteur DriveAI, contrat, `BACKLOG.md` / `HANDOVER.md` / `CLAUDE.md` / `AGENTS.md`, tout ce qui demande un choix de conception.
+
+**Permis depuis le 19/10/2026 (Marc), avec la preuve dans le corps** : petits écrans (captures avant/après et `tests/theme.test.ts` vert dans « Vérifier ») ; workflows `.github/workflows/*.yml` listés dans « Fichiers permis », sans secret ; autres `.md` (écrire « en français, tous les accents » dans « À faire » ou « À ne pas faire », et un test des mots) ; montées mineures/patch de dépendances (`npm audit` à 0 dans « Vérifier »).
 
 ## Après la PR de Jules
 
