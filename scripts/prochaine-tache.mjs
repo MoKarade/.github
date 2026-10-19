@@ -23,7 +23,14 @@
 // relevé par la tâche du PC (`quota.json`, .github#45), fixe un palier `frein` (`normal`, `1`, `2`) qui ne laisse passer
 // que les tâches permises. Aucune IA, aucun réseau : un nombre, deux seuils, une hystérésis.
 //
-// Fonctions pures d'un côté (`calculer`, `calculerFrein`), I/O de l'autre (`main`) : les tests n'ont besoin ni de réseau ni de fichier.
+// Tâches oubliées (MoKarade/.github, demande de Marc du 19/10/2026) : pour chaque tâche ouverte qui n'est pas prenable, `attentes` dit
+// ce qui la retient VRAIMENT (la racine de sa chaîne d'attente), qui peut le lever (`marc`, `fil`, `preuve`, `file`, `frein`, `mission`
+// ou `personne`) et depuis combien d'heures. Une tâche est `oubliee` quand personne ne peut la lever (bloquée sans dépendance ouverte,
+// dépendance illisible, « Fini quand » absent, boucle), quand un geste de Marc dort depuis ATTENTE.marcHeures, ou quand le fil qui la tient
+// est silencieux depuis ATTENTE.filHeures. `oubliees` les liste ; `file_marc` regroupe les gestes de Marc par racine (combien de tâches
+// chacun retient). Le filet du PC (`filet-pc.mjs`) réveille le Coordinateur pour chacune : la reprise ne dépend de la mémoire de personne.
+//
+// Fonctions pures d'un côté (`calculer`, `calculerFrein`, `analyserAttentes`), I/O de l'autre (`main`) : les tests n'ont besoin ni de réseau ni de fichier.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -244,13 +251,91 @@ function ecart(n, depot, idx) {
   return null;
 }
 
+// Seuils des tâches oubliées : LE seul endroit où les régler (en heures).
+// Un geste de Marc qui retient d'autres tâches dort à partir de `marcHeures` ; un geste isolé (il ne retient rien d'autre) à partir de `marcIsoleHeures`.
+export const ATTENTE = { marcHeures: 48, marcIsoleHeures: 168, filHeures: 24 };
+
+// Qui peut lever l'obstacle d'après son code. Un code absent de la table n'a PERSONNE pour le lever.
+const PROPRIETAIRE = { 'geste-marc': 'marc', 'preuve-attendue': 'preuve', 'en-cours': 'fil', jules: 'fil', 'pr-ouverte': 'fil', 'frein-quota': 'frein', prenable: 'file', mission: 'mission' };
+const CAUSE_SANS_PROPRIETAIRE = { bloquee: 'bloquee-sans-reprise', 'attend-inconnue': 'dependance-illisible', 'fini-quand-absent': 'fini-quand-absent', cycle: 'dependance-circulaire' };
+
+const heuresDepuis = (t, maintenant) => (t ? (maintenant.getTime() - Date.parse(t)) / 3_600_000 : null);
+const plusRecent = (...dates) => dates.filter(Boolean).sort().pop() ?? null;
+
+/**
+ * Ce qui retient chaque tâche ouverte non prenable : la racine de sa chaîne d'attente, qui peut la lever, depuis quand, et si elle est oubliée.
+ * Pure : `resultats` est la liste des dépôts de `calculer` (avec `exclues`, `file`, `attend_marc`), `idx` l'index de `indexer`.
+ */
+export function analyserAttentes(resultats, idx, maintenant = new Date(), seuils = ATTENTE) {
+  const etat = new Map();
+  for (const d of resultats) {
+    const attendMarc = new Set((d.attend_marc ?? []).map((a) => a.ref));
+    for (const [r, e] of Object.entries(d.exclues)) {
+      // `qui:marc` + `preuve-attendue` : la preuve a une date de contrôle (docs/cycle-de-vie-tache.md §7), c'est elle qui lève l'attente.
+      const dateeParLaPreuve = (idx.noeuds.get(r)?.noeud.labels ?? []).includes('preuve-attendue');
+      etat.set(r, { code: dateeParLaPreuve ? 'preuve-attendue' : attendMarc.has(r) ? 'geste-marc' : e.code, detail: e.detail });
+    }
+    for (const f of d.file) etat.set(f.ref, { code: 'prenable' });
+  }
+  const noeud = (r) => idx.noeuds.get(r)?.noeud ?? null;
+  const ouvertes = (n) => (n?.deps ?? []).map(minuscule).filter((d) => noeud(d)?.state === 'open' && !idx.fusionnees.has(d));
+  // Suit « attend X » jusqu'à la première tâche qui n'attend plus personne d'ouvert.
+  const racineDe = (r, chaine = []) => {
+    if (chaine.includes(r)) return { ref: r, code: 'cycle', chaine };
+    const e = etat.get(r);
+    if (!e) return { ref: r, code: noeud(r) ? 'mission' : 'inconnue', chaine: [...chaine, r] };
+    const suite = e.code === 'attend-ouverte' ? minuscule(e.detail) : e.code === 'bloquee' ? ouvertes(noeud(r))[0] : null;
+    if (suite) return racineDe(suite, [...chaine, r]);
+    return { ref: r, code: e.code, chaine: [...chaine, r] };
+  };
+  const attentes = {};
+  for (const [r, e] of etat) {
+    if (e.code === 'prenable') continue;
+    const racine = racineDe(r);
+    const n = noeud(racine.ref);
+    const proprietaire = PROPRIETAIRE[racine.code] ?? 'personne';
+    // Depuis quand l'obstacle racine dure : l'heure où le geste a été demandé, la dernière trace du fil, ou la dernière mise à jour.
+    const depuis = proprietaire === 'marc' ? (n?.marc_depuis ?? n?.upd ?? n?.created ?? null)
+      : proprietaire === 'fil' ? plusRecent(n?.upd, n?.pr?.upd, n?.start)
+        : (racine.code === 'bloquee' ? n?.bloque_depuis : null) ?? n?.upd ?? n?.created ?? null;
+    const heures = heuresDepuis(depuis, maintenant);
+    attentes[r] = { racine: racine.ref, code: racine.code, proprietaire, depuis, heures: heures === null ? null : Math.round(heures), oubliee: null, chaine: racine.chaine };
+  }
+  // Combien de tâches chaque racine retient (elle-même exclue) : un geste qui en retient d'autres dort moins longtemps qu'un geste isolé.
+  const retenues = {};
+  for (const [r, a] of Object.entries(attentes)) if (r !== a.racine) retenues[a.racine] = (retenues[a.racine] ?? 0) + 1;
+  for (const [r, a] of Object.entries(attentes)) {
+    const h = a.heures;
+    if (a.proprietaire === 'personne') a.oubliee = CAUSE_SANS_PROPRIETAIRE[a.code] ?? 'sans-responsable';
+    else if (a.proprietaire === 'marc' && (h === null || h >= (retenues[a.racine] ? seuils.marcHeures : seuils.marcIsoleHeures))) a.oubliee = 'geste-marc-en-retard';
+    else if (a.proprietaire === 'fil' && (h === null || h >= seuils.filHeures)) a.oubliee = 'fil-silencieux';
+  }
+  const titre = (r) => noeud(r)?.title ?? r;
+  const lien = (r) => noeud(r)?.url ?? null;
+  const oubliees = Object.entries(attentes).filter(([, a]) => a.oubliee)
+    .map(([r, a]) => ({ ref: r, titre: titre(r), url: lien(r), cause: a.oubliee, racine: a.racine, proprietaire: a.proprietaire, depuis: a.depuis, heures: a.heures }))
+    .sort((a, b) => (b.heures ?? Infinity) - (a.heures ?? Infinity) || a.ref.localeCompare(b.ref));
+  // Les gestes de Marc par racine : le premier à faire est celui qui retient le plus de tâches.
+  const parRacine = new Map();
+  for (const [r, a] of Object.entries(attentes)) {
+    if (a.proprietaire !== 'marc') continue;
+    const g = parRacine.get(a.racine) ?? { racine: a.racine, titre: titre(a.racine), url: lien(a.racine), depuis: attentes[a.racine]?.depuis ?? null, heures: attentes[a.racine]?.heures ?? null, retient: [] };
+    if (r !== a.racine) g.retient.push(r);
+    parRacine.set(a.racine, g);
+  }
+  const fileMarc = [...parRacine.values()].map((g) => ({ ...g, retient: g.retient.sort(), retient_n: g.retient.length, en_retard: g.heures === null || g.heures >= (g.retient.length ? seuils.marcHeures : seuils.marcIsoleHeures) }))
+    .sort((a, b) => b.retient_n - a.retient_n || (b.heures ?? Infinity) - (a.heures ?? Infinity) || a.racine.localeCompare(b.racine));
+  return { attentes, oubliees, file_marc: fileMarc };
+}
+
 /**
  * Calcule la file de chaque dépôt.
  * @param backlog le contenu de backlog.json
  * @param options.filsActifs dépôts (nom ou clé) où un fil de ce projet travaille déjà
  * @param options.frein résultat de `calculerFrein` (absent : palier normal, rien n'est retenu)
+ * @param options.maintenant l'heure de référence des tâches oubliées (défaut : maintenant)
  */
-export function calculer(backlog, { filsActifs = [], frein = null } = {}) {
+export function calculer(backlog, { filsActifs = [], frein = null, maintenant = new Date() } = {}) {
   const idx = indexer(backlog);
   const actifs = new Set(filsActifs.map(minuscule));
   const palier = frein?.palier ?? 'normal';
@@ -331,7 +416,8 @@ export function calculer(backlog, { filsActifs = [], frein = null } = {}) {
       exclues,
     };
   });
-  return { version: VERSION, source_asof: backlog.asof, non_calcule: NON_CALCULE, frein: palier, frein_detail: frein?.detail ?? null, alertes, depots };
+  const { attentes, oubliees, file_marc } = analyserAttentes(depots, idx, maintenant);
+  return { version: VERSION, source_asof: backlog.asof, non_calcule: NON_CALCULE, frein: palier, frein_detail: frein?.detail ?? null, alertes, depots, attentes, oubliees, file_marc, seuils_oubli: ATTENTE };
 }
 
 function lireArguments(argv) {

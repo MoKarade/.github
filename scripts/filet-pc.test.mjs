@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
-import { DEPOTS_FILET, annulerSignalements, dateQuebec, evaluerFilet, evaluerQuotidien, lancerFilet, motifDuFilet, reveiller, tour, tourQuotidien } from './filet-pc.mjs';
+import { DEPOTS_FILET, annulerSignalements, dateQuebec, evaluerFilet, evaluerOublis, evaluerQuotidien, grouperOublis, lancerFilet, ligneOubli, motifDesOublis, motifDuFilet, reveiller, tour, tourOublis, tourQuotidien } from './filet-pc.mjs';
 
 const T0 = new Date('2026-10-17T18:00:00Z');
 const apres = (min, base = T0) => new Date(base.getTime() + min * 60_000);
@@ -246,4 +246,81 @@ test('tourQuotidien : état illisible ou dossier absent = une ligne, jamais une 
   writeFileSync(f.etat, '{pas du json');
   assert.match(tourQuotidien({ fichierEtat: f.etat, executer: true, maintenant: QC('2026-10-18T10:20:00Z'), lancer: () => {} }), /10 lancé/);
   assert.match(tourQuotidien({ fichierEtat: join(f.d, 'absent', 'e.json'), executer: true, maintenant: QC('2026-10-18T10:20:00Z'), lancer: () => {} }), /ÉCHEC/);
+});
+
+
+// ---- Tâches oubliées : un réveil par racine et par 24 h ----
+const oubliee = (ref, racine, extra = {}) => ({ ref, titre: `Tâche ${ref}`, cause: 'geste-marc-en-retard', racine, proprietaire: 'marc', heures: 96, ...extra });
+const avecOublis = (oubliees, maintenant = T0) => ({ calcule_le: iso(maintenant), depots: [], oubliees });
+const GESTE = [oubliee('a#1', 'a#1'), oubliee('a#2', 'a#1'), oubliee('a#3', 'a#1')];
+
+test('oublis : les tâches retenues par un même geste donnent UN signal, qui dit combien d’autres attendent', () => {
+  const g = grouperOublis(GESTE);
+  assert.equal(g.length, 1);
+  assert.equal(ligneOubli(g[0]), 'geste de Marc en retard depuis 4 j : a#1 (retient 2 autres)');
+});
+
+test('oublis : sans responsable, fil silencieux et geste de Marc ont chacun leur ligne, Marc en premier', () => {
+  const g = grouperOublis([
+    oubliee('c#1', 'c#1', { proprietaire: 'fil', cause: 'fil-silencieux', heures: 32 }),
+    oubliee('b#1', 'b#1', { proprietaire: 'personne', cause: 'bloquee-sans-reprise' }),
+    oubliee('a#1', 'a#1'),
+  ]);
+  assert.deepEqual(g.map(ligneOubli), ['geste de Marc en retard depuis 4 j : a#1', 'sans responsable (bloquee-sans-reprise) : b#1', 'fil silencieux depuis 32 h : c#1']);
+});
+
+test('oublis : un réveil, puis plus rien pendant 24 h, puis il recommence tant que la tâche est oubliée', () => {
+  const p = (m) => avecOublis(GESTE, m);
+  const r1 = evaluerOublis({ prochaines: p(T0), etat: {}, maintenant: T0 });
+  assert.equal(r1.reveils.length, 1);
+  assert.equal(motifDesOublis(r1.reveils), 'RÉACTEUR : oubli : geste de Marc en retard depuis 4 j : a#1 (retient 2 autres)');
+  const r2 = evaluerOublis({ prochaines: p(apres(23 * 60)), etat: r1.etat, maintenant: apres(23 * 60) });
+  assert.deepEqual(r2.reveils, []);
+  assert.match(r2.raison, /aucune tâche oubliée à signaler/);
+  const r3 = evaluerOublis({ prochaines: p(apres(25 * 60)), etat: r2.etat, maintenant: apres(25 * 60) });
+  assert.equal(r3.reveils.length, 1, 'rappel du lendemain');
+});
+
+test('oublis : au plus quatre racines par message, les autres au tour suivant', () => {
+  const beaucoup = Array.from({ length: 6 }, (_, i) => oubliee(`r#${i}`, `r#${i}`));
+  const r1 = evaluerOublis({ prochaines: avecOublis(beaucoup), etat: {}, maintenant: T0 });
+  assert.equal(r1.reveils.length, 4);
+  assert.equal(r1.reste, 2);
+  assert.match(motifDesOublis(r1.reveils, r1.reste), /\+2 autre\(s\) au prochain tour/);
+  const r2 = evaluerOublis({ prochaines: avecOublis(beaucoup, apres(10)), etat: r1.etat, maintenant: apres(10) });
+  assert.deepEqual(r2.reveils.map((g) => g.racine), ['r#4', 'r#5']);
+});
+
+test('oublis : prochaines.json périmé, rien ; une racine résolue sort de l’état au bout de 24 h', () => {
+  const vieux = evaluerOublis({ prochaines: avecOublis(GESTE, T0), etat: {}, maintenant: apres(31) });
+  assert.deepEqual(vieux.reveils, []);
+  assert.match(vieux.raison, /périmé/);
+  const r1 = evaluerOublis({ prochaines: avecOublis(GESTE), etat: {}, maintenant: T0 });
+  const r2 = evaluerOublis({ prochaines: avecOublis([], apres(25 * 60)), etat: r1.etat, maintenant: apres(25 * 60) });
+  assert.deepEqual(r2.etat, { signale: {} });
+});
+
+test('oublis : le tour envoie le réveil, garde l’état ; un échec n’enregistre rien et le tour suivant réessaie', () => {
+  const dossier = mkdtempSync(join(tmpdir(), 'oublis-'));
+  const fichierProchaines = join(dossier, 'prochaines.json');
+  const fichierEtat = join(dossier, 'etat.json');
+  writeFileSync(fichierProchaines, JSON.stringify(avecOublis(GESTE)));
+  const appels = [];
+  const echec = tourOublis({ fichierProchaines, fichierEtat, executer: true, maintenant: T0, lancer: () => { throw new Error('gh KO'); } });
+  assert.match(echec, /ÉCHEC du réveil/);
+  const ok = tourOublis({ fichierProchaines, fichierEtat, executer: true, maintenant: apres(10), lancer: (cmd, args) => appels.push([cmd, args]) });
+  assert.match(ok, /réveil envoyé \(1 racine/);
+  assert.equal(appels.length, 1);
+  assert.ok(appels[0][1].some((a) => a.startsWith('texte=RÉACTEUR : oubli : geste de Marc en retard')));
+  writeFileSync(fichierProchaines, JSON.stringify(avecOublis(GESTE, apres(20))));
+  assert.match(tourOublis({ fichierProchaines, fichierEtat, executer: true, maintenant: apres(20), lancer: () => assert.fail('pas de second réveil') }), /rien/);
+  assert.equal(JSON.parse(readFileSync(fichierEtat, 'utf8')).signale['a#1'] !== undefined, true);
+});
+
+test('oublis : à blanc, rien n’est envoyé ni enregistré', () => {
+  const dossier = mkdtempSync(join(tmpdir(), 'oublis-'));
+  const fichierProchaines = join(dossier, 'prochaines.json');
+  writeFileSync(fichierProchaines, JSON.stringify(avecOublis(GESTE)));
+  const ligne = tourOublis({ fichierProchaines, fichierEtat: join(dossier, 'etat.json'), aBlanc: true, maintenant: T0, lancer: () => assert.fail('à blanc') });
+  assert.match(ligne, /à blanc, réveil prévu : RÉACTEUR : oubli/);
 });

@@ -273,6 +273,9 @@ def calculer(repo, rl, i, pr):
         n['jules_at'] = lab('jules')
         b = lab('bloqué')
         n['bloque_depuis'] = b[-1] if b and 'bloqué' in labels else None
+        # depuis quand un geste de Marc est demandé (la dernière pose de `qui:marc`) : prochaine-tache.mjs en tire les gestes qui dorment (tâches oubliées)
+        m = lab('qui:marc')
+        n['marc_depuis'] = m[-1] if m and 'qui:marc' in labels else None
         n['et'] = etapes(ev)
     geste_ou_ferme = lvl == 'tâche' and (('qui:marc' in labels and i['state'] == 'open') or (i['state'] == 'closed' and i.get('state_reason') == 'completed'))
     # une échéance de preuve peut n'être écrite que dans un commentaire : on lit les commentaires des tâches ouvertes qui l'attendent
