@@ -20,7 +20,13 @@ le PC, le relevé tourne sans Claude.
    Même script, passage quotidien du Réacteur (tâche #143) : dès 6 h 00 heure du Québec, une fois par jour, il lance `reacteur.yml` dans les dix dépôts
    (`gh workflow run`, le `gh` du PC doit pouvoir lancer des workflows sur les dix dépôts) parce que les `schedule` de GitHub ne sont pas garantis. État :
    `filet-pc-etat-quotidien.json`, ligne « filet quotidien : … » dans `etat.json`.
-5. Les sorties sont déposées dans le Drive, dossier `_Gantt` : `donnees.json.gz` (lu par la page avec le connecteur Google Drive),
+5. Réponses de Marc (`reponses.py`, 19/10) : dans l'onglet « À toi » de la page, un clic « Fait », une réponse préfaite ou « Fusionner »
+   dépose `reponse-<horodatage>.json` dans le même dossier `_Gantt`. Au tour suivant, AVANT le relevé, le PC l'applique avec son `gh` :
+   commentaire « **Fait** — Marc… » ou « **Réponse de Marc** : … » et retrait de `qui:marc`, ou fusion squash de la PR ; puis il réveille
+   le Coordinateur (`boite-reacteur.yml`). Une réponse préfaite n'est acceptée que si elle figure, mot pour mot, dans la section
+   `**Réponses**` de l'issue (une puce par option). Le fichier est supprimé une fois traité ; le résultat va dans
+   `reponses-journal.json`, que la page lit. Tests : `python -X utf8 -m unittest test_reponses.py`.
+6. Les sorties sont déposées dans le Drive, dossier `_Gantt` : `donnees.json.gz` (lu par la page avec le connecteur Google Drive),
    `prochaines.json`, `fiabilite.json`, `quota.json`, `etat.json` (résultat du dernier tour).
 
 ## Installer

@@ -8,6 +8,8 @@
 #   3. fiabilité (verif-fidelite.mjs de MoKarade/.github) : mesure complète si la précédente a plus de 55 min, sinon instantané de file seul
 #   4. filet (filet-pc.mjs de MoKarade/.github, tâche #196) : un dépôt libre avec une tâche prenable et sans lancement depuis plus de
 #      30 min réveille le Coordinateur (boite-reacteur.yml d'app-template, avec le jeton gh du PC) ; aucun appel Claude
+#   0. réponses de Marc (reponses.py) : ce qu'il a coché dans l'onglet « À toi », déposé par la page dans le même dossier Drive, appliqué sur
+#      GitHub avec le jeton gh du PC, puis réveil du Coordinateur ; avant le relevé, pour qu'il en voie déjà l'effet
 #   5. dépôt dans le dossier Google Drive synchronisé (--drive DOSSIER) : donnees.json.gz (lu par la page), prochaines.json,
 #      fiabilite.json, quota.json, etat.json. Les fichiers sont RÉÉCRITS SUR PLACE : Drive garde alors le même identifiant.
 # Freins : le jeton du PC est celui de Marc, partagé avec tout le reste de son compte (5 000 appels/h). Sous 1 500 appels restants, tour
@@ -69,7 +71,12 @@ def sur_place(src, dst, gz=False):
     with open(dst, 'r+b' if os.path.exists(dst) else 'wb') as fh: fh.seek(0); fh.write(b); fh.truncate()
 
 
-def releve(econome=False, quota_complet=True):
+def releve(econome=False, quota_complet=True, drive=None):
+    # 0. réponses de Marc déposées par la page (onglet « À toi ») : appliquées AVANT le relevé, pour qu'il voie déjà leur effet
+    rep = ''
+    if drive and os.path.isdir(drive):
+        lancer([PY, 'reponses.py', '--drive', drive], '.refresh-reponses.log', 300)
+        rep = ' · ' + (queue('.refresh-reponses.log', 240) or 'réponses : sans sortie')
     # 1. relevé GitHub
     mode = 'plein'
     try:
@@ -120,7 +127,7 @@ def releve(econome=False, quota_complet=True):
         filet = ' · ' + (queue('.refresh-filet.log', 240) or 'filet PC : sans sortie')
     p = lire('prochaines.json')
     file = ' '.join(d['depot'] + '=' + (d['suivante']['ref'] if d.get('suivante') else d['statut']) for d in p['depots'])
-    return 0, f'OK {maintenant()} relevé {mode} {asof} · prochaines.json {p["calcule_le"]} {file} · fiabilité : {fid}{quota}{filet}'
+    return 0, f'OK {maintenant()} relevé {mode} {asof} · prochaines.json {p["calcule_le"]} {file} · fiabilité : {fid}{quota}{filet}{rep}'
 
 
 def main():
@@ -147,7 +154,7 @@ def main():
         except (OSError, ValueError, subprocess.TimeoutExpired): reste = 99999
         if reste < 300: code, res = 0, f'tour sauté : {reste} appels GitHub restants dans l\'heure'
         else:
-            code, res = releve(econome=reste < 1500, quota_complet=reste >= 3500)
+            code, res = releve(econome=reste < 1500, quota_complet=reste >= 3500, drive=o.drive)
             if code == 0 and reste < 1500: res += f' · tour économe ({reste} appels restants)'
             res = res.replace(f'relevé ', f'relevé en {int(time.time() - t0)} s, ', 1) if code == 0 else res
         ecrire_etat(debut, res)
