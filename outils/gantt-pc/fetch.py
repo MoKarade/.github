@@ -96,9 +96,9 @@ def fichiers_permis(body):
 ETAPE_LB = {'en-cours', 'jules', 'qui:marc', 'bloqué', 'preuve-attendue', 'preuve-manquante'}
 def etape_de(lb, ferme, rouverte):
     if ferme: return 'faite'
+    if 'preuve-attendue' in lb: return 'preuve'   # une preuve n'attend jamais Marc, même si qui:marc traîne (.github#247)
     if 'qui:marc' in lb: return 'marc'
     if 'bloqué' in lb: return 'blk'
-    if 'preuve-attendue' in lb: return 'preuve'
     if rouverte or 'preuve-manquante' in lb: return 'corr'
     if 'en-cours' in lb or 'jules' in lb: return 'cours'
     return None
