@@ -147,22 +147,25 @@ Le même script lit le pourcentage hebdomadaire du quota Claude (`quota.json`, r
 - **Lecture** : `frein_detail` dit `mode` (`rythme` ou `seuils`), `rythme_pt_h`, `heures_restantes`, `projection_pct`, `bas_depuis` et la raison en clair. Réglage : `FREIN_RYTHME` en tête de `scripts/prochaine-tache.mjs`.
 - **Limite connue** : le quota est un entier, le rythme sur 3 h est donc grossier (un point en 3 h = 0,3 point/h, soit +30 points projetés sur 90 h), et la projection compte les nuits au rythme du moment. Rejeu sur les mesures du 16-17/10 : la projection dépassait 95 % à chaque mesure (186 à 335 %, y compris à 63 % de quota), car le rythme observé (1 à 2 points/h) épuiserait réellement le quota avant la remise à zéro ; c'est la raison de l'hybride (rythme seulement dès 80 %).
 
-## 5 ter. Tâches oubliées : détection et reprise mécaniques (décision de Marc, 19/10/2026)
+## 5 ter. Aucune tâche oubliée : états complets, liens posés, preuve chez Claude (décisions de Marc, 19/10/2026)
 
-Une tâche n'est pas « oubliée » parce qu'elle est vieille : elle l'est quand **personne n'est chargé de la faire avancer**. Le script `scripts/prochaine-tache.mjs` (fonction `analyserAttentes`) le calcule à chaque tour, sans IA et sans règle à lire par un humain : pour chaque tâche ouverte qui n'est pas prenable, il remonte la chaîne d'attente (`attend-ouverte`, première dépendance ouverte d'une tâche `bloqué`) jusqu'à la **racine** et regarde **qui la tient** et **depuis quand**.
+**Une tâche ouverte n'est jamais « oubliée » : elle est dans exactement un de ces états**, calculé à chaque relevé par `scripts/prochaine-tache.mjs` (`etats` dans `prochaines.json`) :
 
-| Propriétaire de la racine | Signal | Oubliée quand |
+| État | Ce que ça veut dire | Qui fait avancer |
 |---|---|---|
-| `marc` | `qui:marc` (ou PR qui n'attend que lui) | plus de 48 h s'il retient d'autres tâches, plus de 168 h s'il est isolé |
-| `fil` | `en-cours`, `jules`, PR ouverte | aucune trace (étiquette, commit, PR) depuis plus de 24 h |
-| `preuve`, `frein` | `preuve-attendue`, frein de quota | jamais : une horloge ou un événement les reprend (§10, §5 bis) |
-| personne | `bloqué` sans dépendance ouverte, dépendance illisible (texte libre), « Fini quand » absent, dépendance circulaire | tout de suite, avec sa cause : `bloquee-sans-reprise`, `dependance-illisible`, `fini-quand-absent`, `dependance-circulaire` |
+| **À faire** | dans la file, prenable | la file (§5) |
+| **En cours** | `en-cours`, `jules` ou PR ouverte | le fil ; silencieux plus de 24 h : relancé |
+| **En attente** | attend UNE chose nommée : une tâche (`**Attend** : #n`), un geste de Marc (`qui:marc`), une preuve (`preuve-attendue`), le frein de quota | le propriétaire de cette chose (le script remonte la chaîne jusqu'à elle) |
+| **Bloquée** | `bloqué` ET une raison nommée : `**Attend**` vers une tâche ouverte | idem |
+| **Invalide** | tout le reste | personne : c'est un défaut, traité comme tel |
 
-Seuils : `ATTENTE` en tête du script (réglage et tests au même endroit). L'âge d'un geste de Marc part de la pose de `qui:marc` (`marc_depuis`, lu par `outils/gantt-pc/fetch.py` dans les événements de l'issue ; à défaut la dernière mise à jour).
+Sont invalides, avec leur cause : `bloquee-sans-reprise` (`bloqué` sans rien de nommé), `dependance-illisible` (`**Attend**` vers un numéro inconnu), `fini-quand-absent`, `dependance-circulaire`, `sans-mission` (aucune mission au-dessus : la tâche n'est pas dans la hiérarchie), `preuve-chez-marc` (voir plus bas). Une tâche invalide sort dans `oubliees` et **réveille le Coordinateur** (une fois par 24 h et par racine, `RÉACTEUR : oubli : …`, quatre lignes au plus) jusqu'à ce que l'issue soit corrigée : nommer ce qu'elle attend (`**Attend** : #n`), la rattacher à sa mission, ou la fermer avec la raison. Un geste de Marc en retard (plus de 48 h s'il retient d'autres tâches, 168 h sinon) et un fil silencieux sont signalés de la même façon. Seuils : `ATTENTE` en tête du script.
 
-**Sortie** (`prochaines.json`) : `attentes` (une ligne par tâche en attente : racine, propriétaire, depuis), `oubliees` (le sous-ensemble en retard, avec la cause), `file_marc` (les gestes de Marc regroupés par racine : combien de tâches chacun retient, depuis quand ; le plus bloquant en premier) et `seuils_oubli`. Le format de `exclues` ne change pas. Le Gantt peut afficher `file_marc` tel quel.
+**Les liens sont posés, pas seulement écrits.** Une tâche qui en attend une autre l'écrit en `**Attend**` ; le script de la file la lit, mais GitHub n'affiche « Bloquée par » que pour une dépendance native. `liens_manquants` (dans `prochaines.json`) liste celles qui manquent ; `scripts/lier-taches.mjs` les crée (idempotent, jamais destructif), appelé à chaque tour du PC par `filet-pc.mjs` (20 au plus par tour ; sa ligne `liens : …` se lit dans `etat.json`, un échec n'arrête rien). Quand `fetch.py` voit une dépendance native, il la sépare dans `deps_natives`.
 
-**Reprise** (`scripts/filet-pc.mjs`, appelé par `tour.py` toutes les 10 min) : une tâche oubliée réveille le Coordinateur par la boîte (`RÉACTEUR : oubli : …`, une ligne par racine, quatre au plus par message, le reste au tour suivant). Un même oubli n'est resignalé qu'après 24 h, tant qu'il dure. `prochaines.json` périmé : rien. Un échec du réveil est réessayé au tour suivant. Ce que le Coordinateur en fait, selon le propriétaire : **Marc** → un seul rappel de la racine dans « Tes gestes à faire » (jamais un par tâche retenue) ; **fil** → il interroge le fil ; **personne** → il fait corriger l'issue (nommer ce qu'elle attend avec `**Attend** : #n`, retirer `bloqué` si rien ne la retient, ou la fermer avec la raison). `node scripts/filet-pc.mjs prochaines.json --etat <fichier> --a-blanc` décide sans envoyer.
+**Une preuve n'attend jamais Marc.** `preuve-attendue` veut dire : le travail est livré, **Claude** doit prouver, automatiquement, quitte à ouvrir un navigateur (Playwright, Chromium est dans les conteneurs) et à aller voir la production. Elle est exclue comme `preuve-attendue` (jamais « attend ton geste »), hors de la file de Marc, et son propriétaire est la preuve elle-même. `qui:marc` + `preuve-attendue` sur la même tâche est une contradiction (`preuve-chez-marc`) : le fil retire l'une des deux. Si la preuve exige VRAIMENT une action de Marc dans son compte (un secret à poser, un bouton à presser dans une application qui lui est réservée), le fil le lui dit UNE fois, avec la raison, dans une **tâche de geste séparée** (`qui:marc`, la raison dans son « Avant »), et la tâche à prouver l'attend par `**Attend** : #geste` : elle est alors « en attente » d'un geste nommé, et le geste de Marc n'est jamais « prouver ».
+
+**Sortie** (`prochaines.json`) : `etats` (une entrée par tâche ouverte : état, ce qu'elle attend, propriétaire, depuis, cause si invalide), `oubliees` (les invalides, les gestes de Marc en retard, les fils silencieux), `attentes`, `file_marc` (les gestes de Marc par racine, le plus bloquant en tête), `liens_manquants`, `seuils_oubli`. Le format de `exclues` ne change pas. `node scripts/filet-pc.mjs prochaines.json --etat <fichier> --a-blanc` décide sans rien envoyer ni poser.
 
 ## 6. Répartition du travail
 
@@ -211,7 +214,7 @@ Une issue `jules` sans PR depuis 24 h perd l'étiquette et redevient prenable.
 | Attend Marc | `qui:marc` | orange, filtre « Toi » |
 | Bloquée | `bloqué` ou une tâche attendue ouverte | rouge clair |
 | Fusionnée, non prouvée | PR fusionnée, issue ouverte, moins de 2 h | vert clair |
-| Preuve programmée | PR fusionnée, issue ouverte, `preuve-attendue`, ligne `**Preuve attendue**` dont l'heure n'est pas passée. **Pas finie** | orange rayé (jamais vert) |
+| Preuve programmée | PR fusionnée, issue ouverte, `preuve-attendue`, ligne `**Preuve attendue**` dont l'heure n'est pas passée. **Pas finie**. C'est Claude qui prouve (§5 ter), jamais `qui:marc` | orange rayé (jamais vert) |
 | Preuve manquante | tâche fermée sans preuve valide, rouverte par le garde-fou (`preuve-manquante`) | rouge |
 | Preuve en retard | PR fusionnée, issue ouverte depuis plus de 2 h (ou plus d'une heure après l'heure de la preuve programmée) | rouge clair |
 | **Acceptée** | issue fermée `completed` avec un commentaire de preuve | vert, fin à l'heure de fermeture |

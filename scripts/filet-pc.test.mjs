@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
-import { DEPOTS_FILET, annulerSignalements, dateQuebec, evaluerFilet, evaluerOublis, evaluerQuotidien, grouperOublis, lancerFilet, ligneOubli, motifDesOublis, motifDuFilet, reveiller, tour, tourOublis, tourQuotidien } from './filet-pc.mjs';
+import { DEPOTS_FILET, annulerSignalements, dateQuebec, evaluerFilet, evaluerOublis, evaluerQuotidien, grouperOublis, lancerFilet, ligneOubli, motifDesOublis, motifDuFilet, reveiller, tour, tourOublis, tourQuotidien, tourLiens, LIENS_PAR_TOUR } from './filet-pc.mjs';
 
 const T0 = new Date('2026-10-17T18:00:00Z');
 const apres = (min, base = T0) => new Date(base.getTime() + min * 60_000);
@@ -323,4 +323,44 @@ test('oublis : à blanc, rien n’est envoyé ni enregistré', () => {
   writeFileSync(fichierProchaines, JSON.stringify(avecOublis(GESTE)));
   const ligne = tourOublis({ fichierProchaines, fichierEtat: join(dossier, 'etat.json'), aBlanc: true, maintenant: T0, lancer: () => assert.fail('à blanc') });
   assert.match(ligne, /à blanc, réveil prévu : RÉACTEUR : oubli/);
+});
+
+
+// --- Liens : les dépendances écrites en `**Attend**` deviennent des liens natifs « Bloquée par » ---
+
+const prochainesAvecLiens = (liens, calcule = '2026-10-19T12:00:00Z') => {
+  const dir = mkdtempSync(join(tmpdir(), 'liens-'));
+  const f = join(dir, 'prochaines.json');
+  writeFileSync(f, JSON.stringify({ calcule_le: calcule, liens_manquants: liens }));
+  return f;
+};
+const A12 = new Date('2026-10-19T12:10:00Z');
+
+test('tourLiens pose les liens manquants et le dit en une ligne', () => {
+  const f = prochainesAvecLiens([{ ref: 'a#2', attend: 'a#1' }]);
+  const appels = [];
+  const ligne = tourLiens({ fichierProchaines: f, executer: true, maintenant: A12, gh: (m, c) => { appels.push(m); return { id: 1 }; } });
+  assert.match(ligne, /liens : 1 posé\(s\), 0 déjà là/);
+  assert.deepEqual(appels, ['GET', 'POST']);
+});
+
+test('tourLiens ne pose rien à blanc, ni sans --executer, ni si prochaines.json est périmé', () => {
+  const f = prochainesAvecLiens([{ ref: 'a#2', attend: 'a#1' }]);
+  const gh = () => { throw new Error('ne doit pas être appelé'); };
+  assert.match(tourLiens({ fichierProchaines: f, aBlanc: true, maintenant: A12, gh }), /1 à poser \(à blanc\)/);
+  assert.match(tourLiens({ fichierProchaines: f, maintenant: A12, gh }), /1 à poser, non posés/);
+  assert.match(tourLiens({ fichierProchaines: f, executer: true, maintenant: new Date('2026-10-19T13:00:00Z'), gh }), /périmé/);
+});
+
+test('tourLiens dit « tous posés » quand rien ne manque, et plafonne un tour', () => {
+  assert.equal(tourLiens({ fichierProchaines: prochainesAvecLiens([]), executer: true, maintenant: A12 }), 'liens : tous posés');
+  const beaucoup = Array.from({ length: LIENS_PAR_TOUR + 5 }, (_, i) => ({ ref: `a#${i + 100}`, attend: 'a#1' }));
+  const ligne = tourLiens({ fichierProchaines: prochainesAvecLiens(beaucoup), executer: true, maintenant: A12, gh: () => ({ id: 1 }) });
+  assert.match(ligne, new RegExp(`${LIENS_PAR_TOUR} posé\\(s\\).*5 au prochain tour`));
+});
+
+test('tourLiens rapporte un échec d\'API sans lever', () => {
+  const f = prochainesAvecLiens([{ ref: 'a#2', attend: 'a#1' }]);
+  const ligne = tourLiens({ fichierProchaines: f, executer: true, maintenant: A12, gh: () => { throw new Error('HTTP 403 Resource not accessible'); } });
+  assert.match(ligne, /ÉCHEC 1 \(HTTP 403/);
 });
