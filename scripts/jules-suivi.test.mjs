@@ -96,6 +96,7 @@ function github({ taches = [T], ouvertes = [], fermees = [], tachesFermees = [],
     appels.push({ methode, chemin, corps });
     if (methode === 'GET' && /\/issues\?labels=jules/.test(chemin)) return taches;
     if (methode === 'GET' && /\/issues\?state=closed/.test(chemin)) return tachesFermees;
+    if (methode === 'GET' && /\/issues\?state=open/.test(chemin)) return [];
     if (methode === 'GET' && /\/pulls\?state=open/.test(chemin)) return ouvertes;
     if (methode === 'GET' && /\/pulls\?state=closed/.test(chemin)) return fermees;
     const f = /\/pulls\/(\d+)\/files/.exec(chemin);
