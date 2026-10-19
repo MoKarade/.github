@@ -31,6 +31,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { DEPOT_BOITE, WORKFLOW_BOITE, construireMotif } from './reveil-reacteur.mjs';
+import { lierTout, ghCli } from './lier-taches.mjs';
 
 export const SEUIL_LIBRE_MIN = 30;
 export const FENETRE_SIGNALEMENT_H = 2;
@@ -259,6 +260,32 @@ export function tourOublis({ fichierProchaines, fichierEtat, executer = false, a
   }
 }
 
+/** Combien de liens un tour pose au plus : un dépôt qui sort d'un gros retard se rattrape en quelques tours, sans rafale sur l'API. */
+export const LIENS_PAR_TOUR = 20;
+
+/**
+ * Un tour des liens : pose sur GitHub les dépendances que les tâches écrivent en `**Attend**` sans lien natif (`liens_manquants`).
+ * Idempotent, jamais destructif. `prochaines.json` périmé (plus de 30 min) : rien. Rend la ligne à afficher ; ne lève jamais.
+ * @param gh (methode, chemin, corps) -> objet JSON ; par défaut `gh api` du PC
+ */
+export function tourLiens({ fichierProchaines, aBlanc = false, executer = false, maintenant = new Date(), gh = null }) {
+  try {
+    const prochaines = lireJson(fichierProchaines, null);
+    if (!prochaines) return 'liens : prochaines.json illisible';
+    const age = (maintenant.getTime() - Date.parse(prochaines.calcule_le)) / 60_000;
+    if (!(age <= 30)) return 'liens : prochaines.json périmé, rien';
+    const manquants = prochaines.liens_manquants ?? [];
+    if (manquants.length === 0) return 'liens : tous posés';
+    if (aBlanc || !executer) return `liens : ${manquants.length} à poser${aBlanc ? ' (à blanc)' : ', non posés'}`;
+    const r = lierTout(manquants.slice(0, LIENS_PAR_TOUR), gh ?? ghCli);
+    const reste = manquants.length - Math.min(manquants.length, LIENS_PAR_TOUR);
+    const echec = r.echecs.length ? `, ÉCHEC ${r.echecs.length} (${r.echecs[0].raison.replace(/\s+/g, ' ').slice(0, 100)})` : '';
+    return `liens : ${r.faits.length} posé(s), ${r.deja.length} déjà là${echec}${reste ? `, ${reste} au prochain tour` : ''}`;
+  } catch (e) {
+    return `liens : ÉCHEC (${String(e.message).slice(0, 160)})`;
+  }
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const arg = (nom) => { const i = process.argv.indexOf(nom); return i > 0 ? process.argv[i + 1] : null; };
   const fichierProchaines = process.argv[2];
@@ -271,6 +298,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const reveil = tour({ fichierProchaines, fichierEtat, ...options });
     const quotidien = tourQuotidien({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-quotidien.json'), ...options });
     const oublis = tourOublis({ fichierProchaines, fichierEtat: fichierEtat.replace(/(\.json)?$/, '-oublis.json'), ...options });
-    console.log(`${reveil} · ${quotidien} · ${oublis}`);
+    const liens = tourLiens({ fichierProchaines, ...options });
+    console.log(`${reveil} · ${quotidien} · ${oublis} · ${liens}`);
   }
 }

@@ -38,12 +38,13 @@ import { pathToFileURL } from 'node:url';
 export const VERSION = 1;
 
 // Étiquettes qui sortent une tâche de la file, avec la raison écrite dans `exclues`.
+// `preuve-attendue` passe en premier : une preuve est un travail de Claude, jamais un geste de Marc, même si `qui:marc` traîne encore sur la tâche.
 export const ECARTS_ETIQUETTE = {
+  'preuve-attendue': 'preuve-attendue',
   'qui:marc': 'geste-marc',
   'bloqué': 'bloquee',
   'en-cours': 'en-cours',
   jules: 'jules',
-  'preuve-attendue': 'preuve-attendue',
 };
 
 // Ce que ce calcul ne peut PAS savoir depuis le relevé : l'appelant doit le regarder lui-même.
@@ -257,7 +258,7 @@ export const ATTENTE = { marcHeures: 48, marcIsoleHeures: 168, filHeures: 24 };
 
 // Qui peut lever l'obstacle d'après son code. Un code absent de la table n'a PERSONNE pour le lever.
 const PROPRIETAIRE = { 'geste-marc': 'marc', 'preuve-attendue': 'preuve', 'en-cours': 'fil', jules: 'fil', 'pr-ouverte': 'fil', 'frein-quota': 'frein', prenable: 'file', mission: 'mission' };
-const CAUSE_SANS_PROPRIETAIRE = { bloquee: 'bloquee-sans-reprise', 'attend-inconnue': 'dependance-illisible', 'fini-quand-absent': 'fini-quand-absent', cycle: 'dependance-circulaire' };
+const CAUSE_SANS_PROPRIETAIRE = { 'preuve-chez-marc': 'preuve-chez-marc', bloquee: 'bloquee-sans-reprise', 'attend-inconnue': 'dependance-illisible', 'fini-quand-absent': 'fini-quand-absent', cycle: 'dependance-circulaire' };
 
 const heuresDepuis = (t, maintenant) => (t ? (maintenant.getTime() - Date.parse(t)) / 3_600_000 : null);
 const plusRecent = (...dates) => dates.filter(Boolean).sort().pop() ?? null;
@@ -271,9 +272,12 @@ export function analyserAttentes(resultats, idx, maintenant = new Date(), seuils
   for (const d of resultats) {
     const attendMarc = new Set((d.attend_marc ?? []).map((a) => a.ref));
     for (const [r, e] of Object.entries(d.exclues)) {
-      // `qui:marc` + `preuve-attendue` : la preuve a une date de contrôle (docs/cycle-de-vie-tache.md §7), c'est elle qui lève l'attente.
-      const dateeParLaPreuve = (idx.noeuds.get(r)?.noeud.labels ?? []).includes('preuve-attendue');
-      etat.set(r, { code: dateeParLaPreuve ? 'preuve-attendue' : attendMarc.has(r) ? 'geste-marc' : e.code, detail: e.detail });
+      // Une preuve n'attend jamais Marc (décision du 19/10/2026) : `preuve-attendue` = travail de Claude, avec une date de contrôle (docs/cycle-de-vie-tache.md §7).
+      // Les deux étiquettes ensemble sont une contradiction, pas un geste de Marc : la tâche sort en `preuve-chez-marc` et le fil la corrige.
+      const etiquettes = idx.noeuds.get(r)?.noeud.labels ?? [];
+      const chezMarc = etiquettes.includes('preuve-attendue') && etiquettes.includes('qui:marc');
+      const dateeParLaPreuve = etiquettes.includes('preuve-attendue');
+      etat.set(r, { code: chezMarc ? 'preuve-chez-marc' : dateeParLaPreuve ? 'preuve-attendue' : attendMarc.has(r) ? 'geste-marc' : e.code, detail: e.detail });
     }
     for (const f of d.file) etat.set(f.ref, { code: 'prenable' });
   }
@@ -325,7 +329,42 @@ export function analyserAttentes(resultats, idx, maintenant = new Date(), seuils
   }
   const fileMarc = [...parRacine.values()].map((g) => ({ ...g, retient: g.retient.sort(), retient_n: g.retient.length, en_retard: g.heures === null || g.heures >= (g.retient.length ? seuils.marcHeures : seuils.marcIsoleHeures) }))
     .sort((a, b) => b.retient_n - a.retient_n || (b.heures ?? Infinity) - (a.heures ?? Infinity) || a.racine.localeCompare(b.racine));
-  return { attentes, oubliees, file_marc: fileMarc };
+  // État de CHAQUE tâche ouverte : il n'y en a que quatre valides, tout le reste est `invalide` et sort dans `oubliees` avec sa cause.
+  // Une tâche sans mission n'est pas dans la hiérarchie du Gantt : c'est un défaut de lien, traité comme les autres.
+  const etats = {};
+  for (const [r, { noeud: n }] of idx.noeuds) {
+    if (n.lvl !== 'tâche' || n.state !== 'open') continue;
+    const e = etat.get(r);
+    const a = attentes[r];
+    if (!idx.parents.has(r) && !a?.oubliee) {
+      const sans = { ref: r, titre: n.title, url: n.url ?? null, cause: 'sans-mission', racine: r, proprietaire: 'personne', depuis: n.created ?? null, heures: heuresDepuis(n.created, maintenant) === null ? null : Math.round(heuresDepuis(n.created, maintenant)) };
+      oubliees.push(sans);
+    }
+    const sansMission = !idx.parents.has(r);
+    let valeur = 'invalide';
+    if (!a?.oubliee && !sansMission) valeur = e?.code === 'prenable' ? 'a-faire' : ['en-cours', 'jules', 'pr-ouverte'].includes(e?.code) ? 'en-cours' : e?.code === 'bloquee' ? 'bloquee' : 'en-attente';
+    etats[r] = { etat: valeur, attend: a ? a.racine : null, proprietaire: a ? a.proprietaire : (valeur === 'a-faire' ? 'file' : null), depuis: a ? a.depuis : null, cause: valeur === 'invalide' ? (a?.oubliee ?? 'sans-mission') : null };
+  }
+  oubliees.sort((x, y) => (y.heures ?? Infinity) - (x.heures ?? Infinity) || x.ref.localeCompare(y.ref));
+  return { attentes, oubliees, file_marc: fileMarc, etats };
+}
+
+/**
+ * Les liens qui manquent sur GitHub : une tâche qui en attend une autre l'écrit dans sa ligne `**Attend**` (le script le lit), mais GitHub
+ * n'affiche le lien « Bloquée par » que s'il existe en dépendance native. Rend { ref, attend } pour chaque dépendance ouverte sans lien natif.
+ * Pure : `deps_natives` vient de `fetch.py`.
+ */
+export function liensManquants(idx) {
+  const manquants = [];
+  for (const [r, { noeud: n }] of idx.noeuds) {
+    if (n.lvl !== 'tâche' || n.state !== 'open') continue;
+    const natives = new Set((n.deps_natives ?? []).map(minuscule));
+    for (const d of n.deps ?? []) {
+      const cible = idx.noeuds.get(minuscule(d))?.noeud;
+      if (cible?.state === 'open' && !natives.has(minuscule(d))) manquants.push({ ref: r, attend: minuscule(d) });
+    }
+  }
+  return manquants.sort((a, b) => a.ref.localeCompare(b.ref) || a.attend.localeCompare(b.attend));
 }
 
 /**
@@ -416,8 +455,8 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
       exclues,
     };
   });
-  const { attentes, oubliees, file_marc } = analyserAttentes(depots, idx, maintenant);
-  return { version: VERSION, source_asof: backlog.asof, non_calcule: NON_CALCULE, frein: palier, frein_detail: frein?.detail ?? null, alertes, depots, attentes, oubliees, file_marc, seuils_oubli: ATTENTE };
+  const { attentes, oubliees, file_marc, etats } = analyserAttentes(depots, idx, maintenant);
+  return { version: VERSION, source_asof: backlog.asof, non_calcule: NON_CALCULE, frein: palier, frein_detail: frein?.detail ?? null, alertes, depots, attentes, oubliees, file_marc, etats, liens_manquants: liensManquants(idx), seuils_oubli: ATTENTE };
 }
 
 function lireArguments(argv) {

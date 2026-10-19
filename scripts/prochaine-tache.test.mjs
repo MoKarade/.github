@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { calculer, analyserAttentes, ATTENTE, calculerFrein, permiseParFrein, freinDepuisFichiers, FREIN, ECARTS_ETIQUETTE } from './prochaine-tache.mjs';
+import { calculer, analyserAttentes, liensManquants, indexer, ATTENTE, calculerFrein, permiseParFrein, freinDepuisFichiers, FREIN, ECARTS_ETIQUETTE } from './prochaine-tache.mjs';
 
 // Un relevé en mémoire : données fictives, aucun réseau. Même forme que backlog.json (fetch.py).
 const tache = (n, o = {}) => ({
@@ -603,9 +603,11 @@ test('frein hybride : le palier 1 pris à 80 % ou plus se quitte comme avant, so
 
 // ---- Tâches oubliées : ce qui retient chaque tâche, qui peut le lever, et ce que personne ne lèvera ----
 const NOW = new Date('2026-10-19T12:00:00Z');
+// Ces tests ne parlent pas de hiérarchie : les tâches y vivent sans mission, ce que les tests « états » plus bas vérifient à part.
+const pasLien = (o) => o.cause !== 'sans-mission';
 const il_y_a = (heures) => new Date(NOW.getTime() - heures * 3_600_000).toISOString();
 const avec = (t, champs) => ({ ...t, ...champs });
-const oublis = (r) => Object.fromEntries(r.oubliees.map((o) => [o.ref, o]));
+const oublis = (r) => Object.fromEntries(r.oubliees.filter(pasLien).map((o) => [o.ref, o]));
 
 test('une chaîne d’attente se remonte jusqu’au geste de Marc qui la retient, et la file de Marc dit combien de tâches il débloque', () => {
   const r = calculer(releve(depot('a', [
@@ -624,27 +626,35 @@ test('une chaîne d’attente se remonte jusqu’au geste de Marc qui la retient
 
 test('un geste de Marc isolé dort à partir de 7 jours ; s’il retient d’autres tâches, dès 48 h', () => {
   const isole = (h) => calculer(releve(depot('a', [avec(tache(1, { labels: ['qui:marc'] }), { marc_depuis: il_y_a(h) })])), { maintenant: NOW });
-  assert.equal(isole(ATTENTE.marcIsoleHeures - 1).oubliees.length, 0);
+  assert.equal(isole(ATTENTE.marcIsoleHeures - 1).oubliees.filter(pasLien).length, 0);
   assert.equal(isole(ATTENTE.marcIsoleHeures - 1).file_marc[0].en_retard, false, 'il figure dans la file de Marc sans être oublié');
-  assert.equal(isole(ATTENTE.marcIsoleHeures).oubliees[0].cause, 'geste-marc-en-retard');
+  assert.equal(isole(ATTENTE.marcIsoleHeures).oubliees.filter(pasLien)[0].cause, 'geste-marc-en-retard');
   const retient = (h) => calculer(releve(depot('a', [avec(tache(1, { labels: ['qui:marc'] }), { marc_depuis: il_y_a(h) }), tache(2, { deps: ['a#1'] })])), { maintenant: NOW });
-  assert.equal(retient(ATTENTE.marcHeures - 1).oubliees.length, 0);
-  assert.deepEqual(retient(ATTENTE.marcHeures).oubliees.map((o) => o.ref).sort(), ['a#1', 'a#2']);
+  assert.equal(retient(ATTENTE.marcHeures - 1).oubliees.filter(pasLien).length, 0);
+  assert.deepEqual(retient(ATTENTE.marcHeures).oubliees.filter(pasLien).map((o) => o.ref).sort(), ['a#1', 'a#2']);
 });
 
 test('sans `marc_depuis` (relevé ancien) la date de dernière mise à jour sert ; sans aucune date, le geste compte comme en retard', () => {
   const sans = calculer(releve(depot('a', [avec(tache(1, { labels: ['qui:marc'] }), { upd: il_y_a(200) })])), { maintenant: NOW });
-  assert.equal(sans.oubliees[0].heures, 200);
+  assert.equal(sans.oubliees.filter(pasLien)[0].heures, 200);
   const aucune = calculer(releve(depot('a', [tache(1, { labels: ['qui:marc'] })])), { maintenant: NOW });
-  assert.equal(aucune.oubliees[0].cause, 'geste-marc-en-retard');
-  assert.equal(aucune.oubliees[0].heures, null);
+  assert.equal(aucune.oubliees.filter(pasLien)[0].cause, 'geste-marc-en-retard');
+  assert.equal(aucune.oubliees.filter(pasLien)[0].heures, null);
 });
 
-test('`qui:marc` + `preuve-attendue` : la date de la preuve lève l’attente, ce n’est pas un geste oublié', () => {
-  const r = calculer(releve(depot('a', [avec(tache(1, { labels: ['qui:marc', 'preuve-attendue'] }), { upd: il_y_a(900) })])), { maintenant: NOW });
+test('une preuve attendue n’attend jamais Marc : `preuve-attendue` seule est une preuve de Claude, jamais un geste ni un oubli', () => {
+  const r = calculer(releve(depot('a', [avec(tache(1, { labels: ['preuve-attendue'] }), { upd: il_y_a(900) })])), { maintenant: NOW });
   assert.equal(r.attentes['a#1'].proprietaire, 'preuve');
-  assert.equal(r.oubliees.length, 0);
+  assert.equal(etat(r).exclues['a#1'].code, 'preuve-attendue');
+  assert.equal(r.oubliees.filter(pasLien).length, 0);
   assert.equal(r.file_marc.length, 0);
+});
+
+test('`qui:marc` + `preuve-attendue` est une contradiction : exclue comme preuve, hors de la file de Marc, et signalée `preuve-chez-marc`', () => {
+  const r = calculer(releve(depot('a', [avec(tache(1, { labels: ['qui:marc', 'preuve-attendue'] }), { upd: il_y_a(5) })])), { maintenant: NOW });
+  assert.equal(etat(r).exclues['a#1'].code, 'preuve-attendue', 'jamais affichée comme « attend ton geste »');
+  assert.equal(r.file_marc.length, 0, 'Marc n’a pas à prouver');
+  assert.deepEqual(r.oubliees.filter(pasLien).map((o) => [o.ref, o.cause, o.proprietaire]), [['a#1', 'preuve-chez-marc', 'personne']]);
 });
 
 test('ce que personne ne peut lever est oublié tout de suite : bloquée sans dépendance, dépendance illisible, « Fini quand » absent, boucle', () => {
@@ -668,15 +678,15 @@ test('une tâche « bloqué » qui attend une tâche prenable n’est pas oubli�
   const r = calculer(releve(depot('a', [avec(tache(1, { labels: ['bloqué'] }), { deps: ['a#2'] }), tache(2)])), { maintenant: NOW });
   assert.equal(r.attentes['a#1'].racine, 'a#2');
   assert.equal(r.attentes['a#1'].proprietaire, 'file');
-  assert.equal(r.oubliees.length, 0);
+  assert.equal(r.oubliees.filter(pasLien).length, 0);
 });
 
 test('un fil qui tient une tâche `en-cours` est oublié quand il se tait depuis le seuil, pas avant', () => {
   const enCours = (h) => calculer(releve(depot('a', [avec(tache(1, { labels: ['en-cours'] }), { upd: il_y_a(h) })])), { maintenant: NOW });
-  assert.equal(enCours(ATTENTE.filHeures - 1).oubliees.length, 0);
-  assert.equal(enCours(ATTENTE.filHeures).oubliees[0].cause, 'fil-silencieux');
+  assert.equal(enCours(ATTENTE.filHeures - 1).oubliees.filter(pasLien).length, 0);
+  assert.equal(enCours(ATTENTE.filHeures).oubliees.filter(pasLien)[0].cause, 'fil-silencieux');
   const avecPr = calculer(releve(depot('a', [avec(tache(1, { labels: ['en-cours'], pr: { n: 9, state: 'open', merged: null, upd: il_y_a(1) } }), { upd: il_y_a(60) })])), { maintenant: NOW });
-  assert.equal(avecPr.oubliees.length, 0, 'la dernière trace est celle de la PR');
+  assert.equal(avecPr.oubliees.filter(pasLien).length, 0, 'la dernière trace est celle de la PR');
 });
 
 test('une preuve attendue et un frein de quota ne sont jamais des oublis : une date ou un palier les lève', () => {
@@ -685,14 +695,14 @@ test('une preuve attendue et un frein de quota ne sont jamais des oublis : une d
   });
   assert.equal(r.attentes['a#1'].proprietaire, 'preuve');
   assert.equal(r.attentes['a#2'].proprietaire, 'frein');
-  assert.equal(r.oubliees.length, 0);
+  assert.equal(r.oubliees.filter(pasLien).length, 0);
 });
 
 test('une PR dont seul un geste de Marc retient la fusion compte comme un geste de Marc', () => {
   const d = { ...depot('a', [avec(tache(1, { pr: { ...prOuverte(10), upd: il_y_a(200) } }), { upd: il_y_a(200) })]), pr_attend_marc: [10] };
   const r = calculer(releve(d), { maintenant: NOW });
   assert.equal(r.attentes['a#1'].proprietaire, 'marc');
-  assert.equal(r.oubliees[0].cause, 'geste-marc-en-retard');
+  assert.equal(r.oubliees.filter(pasLien)[0].cause, 'geste-marc-en-retard');
 });
 
 test('la file de Marc met en tête le geste qui retient le plus de tâches', () => {
@@ -711,7 +721,7 @@ test('une dépendance fermée ne retient plus ; une mission ouverte retient sans
   ])), { maintenant: NOW });
   assert.equal(r.attentes['a#1'], undefined, 'prenable : rien ne la retient');
   assert.equal(r.attentes['a#2'].proprietaire, 'mission');
-  assert.equal(r.oubliees.length, 0);
+  assert.equal(r.oubliees.filter(pasLien).length, 0);
 });
 
 test('analyserAttentes ne modifie ni l’index ni les résultats qu’on lui passe', () => {
@@ -720,4 +730,46 @@ test('analyserAttentes ne modifie ni l’index ni les résultats qu’on lui pas
   const avant = JSON.stringify(r.depots);
   analyserAttentes(r.depots, { noeuds: new Map(), parents: new Map(), fusionnees: new Set() }, NOW);
   assert.equal(JSON.stringify(r.depots), avant);
+});
+
+
+// --- États de toute tâche ouverte : quatre valides, tout le reste est invalide et sort dans `oubliees` (décision de Marc, 19/10/2026) ---
+
+const sousMission = (...taches) => [mission(90, taches.map((t) => t.n)), ...taches];
+
+test('chaque tâche ouverte a exactement un état, et les quatre valides ne sont jamais des oublis', () => {
+  const r = calculer(releve(depot('a', sousMission(
+    tache(1),
+    avec(tache(2, { labels: ['en-cours'] }), { upd: il_y_a(1) }),
+    tache(3, { deps: ['a#1'] }),
+    tache(4, { labels: ['bloqué'], deps: ['a#1'] }),
+  ))), { maintenant: NOW });
+  assert.deepEqual(Object.fromEntries(Object.entries(r.etats).map(([k, v]) => [k, v.etat])), { 'a#1': 'a-faire', 'a#2': 'en-cours', 'a#3': 'en-attente', 'a#4': 'bloquee' });
+  assert.equal(r.etats['a#3'].attend, 'a#1');
+  assert.equal(r.oubliees.length, 0);
+});
+
+test('une tâche bloquée sans rien de nommé, ou sans mission, est invalide : elle ne peut pas rester discrète', () => {
+  const r = calculer(releve(depot('a', [...sousMission(tache(1, { labels: ['bloqué'] })), tache(5)])), { maintenant: NOW });
+  assert.equal(r.etats['a#1'].etat, 'invalide');
+  assert.equal(r.etats['a#1'].cause, 'bloquee-sans-reprise');
+  assert.equal(r.etats['a#5'].etat, 'invalide');
+  assert.equal(r.etats['a#5'].cause, 'sans-mission');
+  assert.deepEqual(r.oubliees.map((o) => o.cause).sort(), ['bloquee-sans-reprise', 'sans-mission']);
+});
+
+test('une tâche fermée n’a pas d’état : seules les ouvertes comptent', () => {
+  const r = calculer(releve(depot('a', sousMission(tache(1, { state: 'closed' }), tache(2)))), { maintenant: NOW });
+  assert.deepEqual(Object.keys(r.etats), ['a#2']);
+});
+
+test('liensManquants liste les attentes ouvertes qui n’ont pas de lien natif, et seulement elles', () => {
+  const b = releve(depot('a', sousMission(
+    tache(1),
+    avec(tache(2, { deps: ['a#1'] }), { deps_natives: [] }),
+    avec(tache(3, { deps: ['a#1'] }), { deps_natives: ['a#1'] }),
+    tache(4, { deps: ['a#9'] }),
+    tache(9, { state: 'closed' }),
+  )));
+  assert.deepEqual(liensManquants(indexer(b)), [{ ref: 'a#2', attend: 'a#1' }]);
 });
