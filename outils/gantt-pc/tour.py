@@ -124,7 +124,7 @@ def releve(econome=False, quota_complet=True, drive=None):
     script_filet = D + 'scripts-github/filet-pc.mjs'
     if os.path.exists(script_filet):
         lancer([NODE, script_filet, 'prochaines.json', '--etat', 'filet-pc-etat.json', '--executer'], '.refresh-filet.log', 120)
-        filet = ' · ' + (queue('.refresh-filet.log', 400) or 'filet PC : sans sortie')
+        filet = ' · ' + (queue('.refresh-filet.log', 520) or 'filet PC : sans sortie')
     p = lire('prochaines.json')
     file = ' '.join(d['depot'] + '=' + (d['suivante']['ref'] if d.get('suivante') else d['statut']) for d in p['depots'])
     return 0, f'OK {maintenant()} relevé {mode} {asof} · prochaines.json {p["calcule_le"]} {file} · fiabilité : {fid}{quota}{filet}{rep}'
