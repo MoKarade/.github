@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { commentaireAcceptee, controlesVerts, corpsNettoye, evaluerFusion, horsPermis, prDeLaTache, suivreDepot, tachesCitees, testsSeuls } from './jules-suivi.mjs';
+import { menageFermees, ETIQUETTES_FERMEES, commentaireAcceptee, controlesVerts, corpsNettoye, evaluerFusion, horsPermis, prDeLaTache, suivreDepot, tachesCitees, testsSeuls } from './jules-suivi.mjs';
 import { tourJulesSuivi } from './filet-pc.mjs';
 import { lireCitation, evaluer } from './preuve.mjs';
 
@@ -90,11 +90,12 @@ test('le commentaire de preuve passe le garde-fou (scripts/preuve.mjs) : PR fusi
 });
 
 // ── I/O avec un GitHub simulé ───────────────────────────────────────────────────────────────────────────────────────
-function github({ taches = [T], ouvertes = [], fermees = [], fichiers = {}, runs = [{ name: 'Gate', status: 'completed', conclusion: 'success' }] }) {
+function github({ taches = [T], ouvertes = [], fermees = [], tachesFermees = [], fichiers = {}, runs = [{ name: 'Gate', status: 'completed', conclusion: 'success' }] }) {
   const appels = [];
   const gh = (methode, chemin, corps) => {
     appels.push({ methode, chemin, corps });
     if (methode === 'GET' && /\/issues\?labels=jules/.test(chemin)) return taches;
+    if (methode === 'GET' && /\/issues\?state=closed/.test(chemin)) return tachesFermees;
     if (methode === 'GET' && /\/pulls\?state=open/.test(chemin)) return ouvertes;
     if (methode === 'GET' && /\/pulls\?state=closed/.test(chemin)) return fermees;
     const f = /\/pulls\/(\d+)\/files/.exec(chemin);
@@ -194,4 +195,33 @@ test('tourJulesSuivi : sans --executer, rien n’est appliqué et la ligne le di
   const ligne = tourJulesSuivi({ fichierEtat: join(mkdtempSync(join(tmpdir(), 'js-')), 'e.json'), gh: g.gh, maintenant: MAINTENANT, depots: ['MoKarade/JobAI'] });
   assert.match(ligne, /1 acceptée\(s\) \(JobAI#196\).*\(non appliqué\)/);
   assert.ok(!g.appels.some((a) => ['POST', 'PATCH', 'DELETE'].includes(a.methode)));
+});
+
+test('menageFermees : retire en-cours, jules, faisable-jules, preuve-attendue des fermées ; jamais qui:marc, ni les PR, ni les ouvertes ; à blanc n’écrit rien', () => {
+  const fermees = [
+    { number: 10, labels: [{ name: 'niveau:tâche' }, { name: 'en-cours' }, { name: 'qui:marc' }, { name: 'jules' }] },
+    { number: 11, labels: [{ name: 'niveau:tâche' }] },
+    { number: 12, labels: [{ name: 'preuve-attendue' }], pull_request: {} },
+  ];
+  const g = github({ tachesFermees: fermees });
+  const r = menageFermees({ depot: 'MoKarade/JobAI', gh: g.gh });
+  assert.deepEqual(r, ['JobAI#10:en-cours', 'JobAI#10:jules']);
+  assert.deepEqual(g.appels.filter((a) => a.methode === 'DELETE').map((a) => a.chemin), ['repos/MoKarade/JobAI/issues/10/labels/en-cours', 'repos/MoKarade/JobAI/issues/10/labels/jules']);
+  assert.ok(!ETIQUETTES_FERMEES.includes('qui:marc'));
+  const b = github({ tachesFermees: fermees });
+  assert.equal(menageFermees({ depot: 'MoKarade/JobAI', gh: b.gh, aBlanc: true }).length, 2);
+  assert.ok(!b.appels.some((a) => a.methode === 'DELETE'));
+});
+
+test('tourJulesSuivi : le ménage des fermées est dit sur la ligne, et n’est pas appliqué sans --executer', () => {
+  const fermees = [{ number: 10, labels: [{ name: 'en-cours' }] }];
+  const g = github({ taches: [], tachesFermees: fermees });
+  const f = join(mkdtempSync(join(tmpdir(), 'js-')), 'e.json');
+  const ligne = tourJulesSuivi({ fichierEtat: f, executer: true, gh: g.gh, maintenant: MAINTENANT, depots: ['MoKarade/JobAI'] });
+  assert.match(ligne, /1 étiquette\(s\) retirée\(s\) sur tâches fermées/);
+  assert.equal(g.appels.filter((a) => a.methode === 'DELETE').length, 1);
+  const g2 = github({ taches: [], tachesFermees: fermees });
+  const l2 = tourJulesSuivi({ fichierEtat: f, gh: g2.gh, maintenant: MAINTENANT, depots: ['MoKarade/JobAI'] });
+  assert.match(l2, /étiquette\(s\) retirée\(s\).*\(non appliqué\)/);
+  assert.equal(g2.appels.filter((a) => a.methode === 'DELETE').length, 0);
 });
