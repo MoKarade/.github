@@ -63,7 +63,9 @@ def compacter_prochaines(p):
             'depots': [{'repo': d['repo'], 'cle': d['cle'], 'nom': d['depot'], 'statut': d['statut'], 'suivante': d['suivante']['ref'] if d.get('suivante') else None,
                         'incidents': d.get('incidents', []), 'occupe_par': d.get('occupe_par', []), 'derniere': d.get('derniere'),
                         'file': [{k: f.get(k) for k in ('ref', 'rang', 'tier', 'prio', 'raison', 'mission', 'chantier')} for f in d.get('file', [])],
-                        'exclues': d.get('exclues', {})} for d in p.get('depots', [])],
+                        'exclues': d.get('exclues', {}),
+                        # PR dont le seul obstacle est un geste de Marc (#197) : l'onglet « À toi » les range dans « à fusionner »
+                        'attend_marc': d.get('attend_marc', [])} for d in p.get('depots', [])],
             # tâches oubliées et attentes (.github#238) : la page les montre telles que le script les détecte, sans rien recalculer
             'oubliees': [{k: o.get(k) for k in ('ref', 'cause', 'racine', 'proprietaire', 'depuis', 'heures')} for o in p.get('oubliees') or []],
             'file_marc': [{k: m.get(k) for k in ('racine', 'depuis', 'heures', 'retient', 'retient_n', 'en_retard')} for m in p.get('file_marc') or []],
@@ -78,7 +80,7 @@ for r in gh['repos']:
     for n in r['nodes'].values():
         c = {'n': n['n'], 't': n['title'], 'l': n['lvl'], 'lb': [x for x in n['labels'] if not x.startswith('niveau:')], 'st': n['state'],
              'c': n['created'], 'x': n['closed'], 's': n['start'], 'k': n['kids'], 'pr': pr_c(n['pr']), 'd': n.get('deps', [])}
-        for src, dst in (('reason', 'r'), ('av', 'av'), ('ap', 'ap'), ('fq', 'fq'), ('res', 'res'), ('pa', 'pa'), ('pa_u', 'pu'), ('geste', 'g'), ('preuve', 'pv'), ('bloque_depuis', 'bs'), ('upd', 'u'), ('et', 'et'), ('fp', 'fp')):
+        for src, dst in (('reason', 'r'), ('av', 'av'), ('ap', 'ap'), ('fq', 'fq'), ('res', 'res'), ('pa', 'pa'), ('pa_u', 'pu'), ('geste', 'g'), ('preuve', 'pv'), ('bloque_depuis', 'bs'), ('upd', 'u'), ('et', 'et'), ('fp', 'fp'), ('rp', 'rp')):
             if n.get(src): c[dst] = n[src]
         if n.get('jules'): c['j'] = 1
         if n.get('jules_at'): c['ja'] = n['jules_at']
@@ -176,6 +178,9 @@ def sante(gh):
     pm = [1 for r in gh['repos'] for n in r['nodes'].values() if n['lvl'] == 'tâche' and n['state'] == 'open' and 'preuve-manquante' in n['labels'] and f"{r['repo'].lower()}#{n['n']}" not in vu]
     return {'ctrl': CTRL, 'pb': pb, 'hors': hors, 'n': len(pb) + len(pm)}
 comp['sante'] = sante(gh)
+# réponses de Marc depuis la page (reponses.py) : la page y lit si un clic a été appliqué ou refusé
+try: comp['reponses'] = json.load(open(D + 'reponses-journal.json', encoding='utf-8'))[-50:]
+except (OSError, ValueError): comp['reponses'] = []
 # quotas : mesure faite par quota.py ; absente = l'onglet le dit
 try: comp['quota'] = json.load(open(D + 'quota.json'))
 except Exception: comp['quota'] = None
