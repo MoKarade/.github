@@ -124,3 +124,12 @@ test('tourJulesSuivi : la ligne dit les tâches marquées ; sans --executer rien
   assert.match(l2, /1 marquée\(s\).*\(non appliqué\)/);
   assert.equal(ecritures(g2.appels).length, 0);
 });
+
+test('une tâche qui ajoute un outil MCP reste hors du full auto (corps ou titre), aucun marquage', () => {
+  const corpsMcp = corps(70, { sections: { 'À faire': '1. Ajouter `server.registerTool("reanalyser_profil")`.' } });
+  const g = github({ issues: [tache(70, [], corpsMcp), { ...tache(71), title: 'Ajouter un outil MCP de relance' }, tache(72, [], corps(72, { sections: { Avant: 'Le serveur MCP n\'a pas de test.' } }))] });
+  const r = marquerFaisables({ depot: 'MoKarade/JobAI', gh: g.gh });
+  assert.deepEqual(r.marquees, []);
+  assert.equal(r.refusees, 3);
+  assert.equal(ecritures(g.appels).length, 0);
+});
