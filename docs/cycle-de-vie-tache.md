@@ -147,6 +147,23 @@ Le même script lit le pourcentage hebdomadaire du quota Claude (`quota.json`, r
 - **Lecture** : `frein_detail` dit `mode` (`rythme` ou `seuils`), `rythme_pt_h`, `heures_restantes`, `projection_pct`, `bas_depuis` et la raison en clair. Réglage : `FREIN_RYTHME` en tête de `scripts/prochaine-tache.mjs`.
 - **Limite connue** : le quota est un entier, le rythme sur 3 h est donc grossier (un point en 3 h = 0,3 point/h, soit +30 points projetés sur 90 h), et la projection compte les nuits au rythme du moment. Rejeu sur les mesures du 16-17/10 : la projection dépassait 95 % à chaque mesure (186 à 335 %, y compris à 63 % de quota), car le rythme observé (1 à 2 points/h) épuiserait réellement le quota avant la remise à zéro ; c'est la raison de l'hybride (rythme seulement dès 80 %).
 
+## 5 ter. Tâches oubliées : détection et reprise mécaniques (décision de Marc, 19/10/2026)
+
+Une tâche n'est pas « oubliée » parce qu'elle est vieille : elle l'est quand **personne n'est chargé de la faire avancer**. Le script `scripts/prochaine-tache.mjs` (fonction `analyserAttentes`) le calcule à chaque tour, sans IA et sans règle à lire par un humain : pour chaque tâche ouverte qui n'est pas prenable, il remonte la chaîne d'attente (`attend-ouverte`, première dépendance ouverte d'une tâche `bloqué`) jusqu'à la **racine** et regarde **qui la tient** et **depuis quand**.
+
+| Propriétaire de la racine | Signal | Oubliée quand |
+|---|---|---|
+| `marc` | `qui:marc` (ou PR qui n'attend que lui) | plus de 48 h s'il retient d'autres tâches, plus de 168 h s'il est isolé |
+| `fil` | `en-cours`, `jules`, PR ouverte | aucune trace (étiquette, commit, PR) depuis plus de 24 h |
+| `preuve`, `frein` | `preuve-attendue`, frein de quota | jamais : une horloge ou un événement les reprend (§10, §5 bis) |
+| personne | `bloqué` sans dépendance ouverte, dépendance illisible (texte libre), « Fini quand » absent, dépendance circulaire | tout de suite, avec sa cause : `bloquee-sans-reprise`, `dependance-illisible`, `fini-quand-absent`, `dependance-circulaire` |
+
+Seuils : `ATTENTE` en tête du script (réglage et tests au même endroit). L'âge d'un geste de Marc part de la pose de `qui:marc` (`marc_depuis`, lu par `outils/gantt-pc/fetch.py` dans les événements de l'issue ; à défaut la dernière mise à jour).
+
+**Sortie** (`prochaines.json`) : `attentes` (une ligne par tâche en attente : racine, propriétaire, depuis), `oubliees` (le sous-ensemble en retard, avec la cause), `file_marc` (les gestes de Marc regroupés par racine : combien de tâches chacun retient, depuis quand ; le plus bloquant en premier) et `seuils_oubli`. Le format de `exclues` ne change pas. Le Gantt peut afficher `file_marc` tel quel.
+
+**Reprise** (`scripts/filet-pc.mjs`, appelé par `tour.py` toutes les 10 min) : une tâche oubliée réveille le Coordinateur par la boîte (`RÉACTEUR : oubli : …`, une ligne par racine, quatre au plus par message, le reste au tour suivant). Un même oubli n'est resignalé qu'après 24 h, tant qu'il dure. `prochaines.json` périmé : rien. Un échec du réveil est réessayé au tour suivant. Ce que le Coordinateur en fait, selon le propriétaire : **Marc** → un seul rappel de la racine dans « Tes gestes à faire » (jamais un par tâche retenue) ; **fil** → il interroge le fil ; **personne** → il fait corriger l'issue (nommer ce qu'elle attend avec `**Attend** : #n`, retirer `bloqué` si rien ne la retient, ou la fermer avec la raison). `node scripts/filet-pc.mjs prochaines.json --etat <fichier> --a-blanc` décide sans envoyer.
+
 ## 6. Répartition du travail
 
 **Qui lance** : un **événement** d'abord, un relevé à l'heure seulement en filet quotidien (décision de Marc, 15/10/2026 : « plus de vérifications toutes les X heures »). Une demande directe de Marc n'attend rien : le Coordinateur ouvre le fil tout de suite.

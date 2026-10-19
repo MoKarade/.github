@@ -217,7 +217,7 @@ def calculer(repo, rl, i, pr):
         n['kids'] = [s['number'] if s['repository_url'].rsplit('/', 1)[1].lower() == rl
                      else f"{s['repository_url'].rsplit('/', 1)[1].lower()}#{s['number']}"
                      for s in flat(gh(f'repos/MoKarade/{repo}/issues/{i["number"]}/sub_issues?per_page=100'))]
-    if lvl == 'tâche' and ({'en-cours', 'jules', 'bloqué'} & set(labels) or i['state'] == 'closed'):
+    if lvl == 'tâche' and ({'en-cours', 'jules', 'bloqué', 'qui:marc'} & set(labels) or i['state'] == 'closed'):
         ev = flat(gh(f'repos/MoKarade/{repo}/issues/{i["number"]}/events?per_page=100'))
         lab = lambda nom: [e['created_at'] for e in ev if e['event'] == 'labeled' and e.get('label', {}).get('name') == nom]
         t = sorted(lab('en-cours') + lab('jules'))
@@ -226,6 +226,9 @@ def calculer(repo, rl, i, pr):
         n['jules_at'] = lab('jules')
         b = lab('bloqué')
         n['bloque_depuis'] = b[-1] if b and 'bloqué' in labels else None
+        # depuis quand un geste de Marc est demandé (la dernière pose de `qui:marc`) : prochaine-tache.mjs en tire les gestes qui dorment (tâches oubliées)
+        m = lab('qui:marc')
+        n['marc_depuis'] = m[-1] if m and 'qui:marc' in labels else None
     geste_ou_ferme = lvl == 'tâche' and (('qui:marc' in labels and i['state'] == 'open') or (i['state'] == 'closed' and i.get('state_reason') == 'completed'))
     # une échéance de preuve peut n'être écrite que dans un commentaire : on lit les commentaires des tâches ouvertes qui l'attendent
     pa_possible = lvl == 'tâche' and i['state'] == 'open' and ('preuve-attendue' in labels or bool(pr and pr.get('merged')) or 'preuve attendue' in body.lower())

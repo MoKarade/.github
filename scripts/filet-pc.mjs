@@ -21,6 +21,10 @@
 // (best-effort chez GitHub) ne sont pas partis le 18/10 à 6 h 11 (Québec) dans les dix dépôts, comme le 17/10 où ils étaient arrivés
 // avec 3 h de retard. Le PC, qui voit l'heure du Québec, lance donc `reacteur.yml` (workflow_dispatch, mode filet, `forcer`) une
 // fois par jour et par dépôt dès 6 h 00 ; les crons de GitHub restent en renfort et ne reposteront pas un signal déjà posté.
+// Troisième rôle (demande de Marc du 19/10/2026, « tâches oubliées ») : réveiller le Coordinateur pour chaque tâche OUBLIÉE que
+// `prochaine-tache.mjs` liste dans `oubliees` (personne ne peut lever l'obstacle, geste de Marc qui dort, fil silencieux), une fois par racine
+// et par 24 h tant que ça dure. Sans cela une tâche retenue par un geste de Marc, un « bloqué » sans raison ou une dépendance illisible ne
+// revient jamais dans la file et rien ne le dit. Message à part (`RÉACTEUR : oubli : …`) : il nomme les tâches, puisque c'est son objet.
 // Un échec du réveil ne fait JAMAIS échouer le tour (il se dit sur la ligne imprimée) et n'enregistre pas le signalement :
 // le tour suivant réessaie.
 import { execFileSync } from 'node:child_process';
@@ -82,6 +86,54 @@ export function annulerSignalements(etat, reveils) {
   const copie = JSON.parse(JSON.stringify(etat));
   for (const r of reveils) delete copie[r.depot]?.signale?.[r.ref];
   return copie;
+}
+
+export const FENETRE_OUBLI_H = 24;
+export const OUBLIS_PAR_MESSAGE = 4;
+
+/** Regroupe les tâches oubliées par racine (ce qui les retient vraiment) : un signal par racine, pas un par tâche retenue derrière. */
+export function grouperOublis(oubliees) {
+  const groupes = new Map();
+  for (const o of oubliees ?? []) {
+    const g = groupes.get(o.racine) ?? { racine: o.racine, proprietaire: o.proprietaire, cause: o.cause, heures: null, refs: [] };
+    g.refs.push(o.ref);
+    if (o.ref === o.racine) g.cause = o.cause;
+    g.heures = Math.max(g.heures ?? 0, o.heures ?? 0);
+    groupes.set(o.racine, g);
+  }
+  const rang = { marc: 0, personne: 1, fil: 2 };
+  return [...groupes.values()].sort((a, b) => (rang[a.proprietaire] ?? 3) - (rang[b.proprietaire] ?? 3) || b.refs.length - a.refs.length || a.racine.localeCompare(b.racine));
+}
+
+const jours = (h) => Math.max(1, Math.round((h ?? 0) / 24));
+
+/** Une ligne par groupe : ce qui retient, depuis quand, et combien d'autres tâches attendent derrière. */
+export function ligneOubli(g) {
+  const derriere = g.refs.filter((r) => r !== g.racine).length;
+  const suite = derriere ? ` (retient ${derriere} autre${derriere > 1 ? 's' : ''})` : '';
+  if (g.proprietaire === 'marc') return `geste de Marc en retard depuis ${jours(g.heures)} j : ${g.racine}${suite}`;
+  if (g.proprietaire === 'fil') return `fil silencieux depuis ${Math.round(g.heures ?? 0)} h : ${g.racine}${suite}`;
+  return `sans responsable (${g.cause}) : ${g.racine}${suite}`;
+}
+
+/**
+ * Décide quels oublis signaler. Ne modifie pas son entrée.
+ * @param etat { signale: { [racine]: iso } } gardé d'un tour à l'autre (une racine déjà signalée depuis moins de 24 h ne se répète pas)
+ * @returns { etat, reveils: [groupe], raison }
+ */
+export function evaluerOublis({ prochaines, etat = {}, maintenant = new Date() }) {
+  const limite = FENETRE_OUBLI_H * 60;
+  const signale = Object.fromEntries(Object.entries(etat?.signale ?? {}).filter(([, t]) => minutesEntre(t, maintenant) < limite));
+  const age = minutesEntre(prochaines?.calcule_le ?? '', maintenant);
+  if (!Number.isFinite(age) || age > PROCHAINES_PERIME_MIN) return { etat: { signale }, reveils: [], raison: 'prochaines.json périmé' };
+  const reveils = grouperOublis(prochaines.oubliees).filter((g) => !signale[g.racine]);
+  for (const g of reveils.slice(0, OUBLIS_PAR_MESSAGE)) signale[g.racine] = maintenant.toISOString();
+  return { etat: { signale }, reveils: reveils.slice(0, OUBLIS_PAR_MESSAGE), reste: Math.max(0, reveils.length - OUBLIS_PAR_MESSAGE), raison: reveils.length ? '' : 'aucune tâche oubliée à signaler' };
+}
+
+/** Le texte du réveil d'oubli, au format `RÉACTEUR : oubli : …` ; `reste` : racines non signalées ce tour-ci (elles le seront aux tours suivants). */
+export function motifDesOublis(reveils, reste = 0) {
+  return construireMotif([`oubli : ${reveils.map(ligneOubli).join(' ; ')}${reste ? ` ; +${reste} autre(s) au prochain tour` : ''}`]);
 }
 
 export const DEPOTS_FILET = ['MoKarade/.github', 'MoKarade/app-template', 'MoKarade/batchchef-', 'MoKarade/CarAI', 'MoKarade/DriveAI', 'MoKarade/FinanceAI', 'MoKarade/hub-contract', 'MoKarade/Hubperso', 'MoKarade/JobAI', 'MoKarade/MemoryAI'];
@@ -178,6 +230,35 @@ export function tour({ fichierProchaines, fichierEtat, executer = false, aBlanc 
   }
 }
 
+/** Un tour des oublis : réveille le Coordinateur pour les tâches oubliées pas encore signalées. Rend la ligne à afficher ; ne lève jamais. */
+export function tourOublis({ fichierProchaines, fichierEtat, executer = false, aBlanc = false, maintenant = new Date(), lancer = execFileSync }) {
+  try {
+    const prochaines = lireJson(fichierProchaines, null);
+    if (!prochaines) return 'filet oublis : prochaines.json illisible';
+    const r = evaluerOublis({ prochaines, etat: lireJson(fichierEtat, {}), maintenant });
+    if (r.reveils.length === 0) {
+      if (!aBlanc) ecrireJson(fichierEtat, r.etat);
+      return `filet oublis : rien (${r.raison})`;
+    }
+    const motif = motifDesOublis(r.reveils, r.reste);
+    if (aBlanc) return `filet oublis : à blanc, réveil prévu : ${motif}`;
+    if (!executer) { ecrireJson(fichierEtat, r.etat); return `filet oublis : réveil décidé, non envoyé : ${motif}`; }
+    try {
+      reveiller(motif, lancer);
+      ecrireJson(fichierEtat, r.etat);
+      return `filet oublis : réveil envoyé (${r.reveils.length} racine(s))`;
+    } catch (e) {
+      // Un réveil raté n'enregistre rien : le tour suivant réessaie.
+      const signale = { ...r.etat.signale };
+      for (const g of r.reveils) delete signale[g.racine];
+      ecrireJson(fichierEtat, { signale });
+      return `filet oublis : ÉCHEC du réveil (${String(e.stderr || e.message).replace(/\s+/g, ' ').slice(0, 160)})`;
+    }
+  } catch (e) {
+    return `filet oublis : ÉCHEC (${String(e.message).slice(0, 160)})`;
+  }
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const arg = (nom) => { const i = process.argv.indexOf(nom); return i > 0 ? process.argv[i + 1] : null; };
   const fichierProchaines = process.argv[2];
@@ -189,6 +270,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     // Une seule ligne sur la sortie : la tâche du PC la reprend telle quelle dans etat.json. Le passage quotidien a son propre fichier d'état.
     const reveil = tour({ fichierProchaines, fichierEtat, ...options });
     const quotidien = tourQuotidien({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-quotidien.json'), ...options });
-    console.log(`${reveil} · ${quotidien}`);
+    const oublis = tourOublis({ fichierProchaines, fichierEtat: fichierEtat.replace(/(\.json)?$/, '-oublis.json'), ...options });
+    console.log(`${reveil} · ${quotidien} · ${oublis}`);
   }
 }
