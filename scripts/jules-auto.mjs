@@ -25,7 +25,7 @@ const BOITE = { depot: 'app-template', pr: 58 };
 // Ce que Jules ne touche jamais (AGENTS.md, gabarit « Tâches à garder pour Claude »). Marc a levé cinq exclusions le 19/10/2026 (taille,
 // petits écrans, workflows de `.github/`, longs .md, dépendances mineures) : elles passent par les conditions de `evaluerJules`, qui
 // exigent la preuve dans le corps. Restent exclus : secrets, jetons, Sentry, authentification, base de données, migrations.
-const CHEMINS_INTERDITS = [
+export const CHEMINS_INTERDITS = [
   [/^\.github\/(?!workflows\/[\w.-]+\.ya?ml$)/, 'chemin protégé .github/ (seuls les workflows listés sont permis)'],
   [/^\.github\/workflows\/.*(garde-?fou|relecture|codeowners|mergify|reacteur|reveil)/i, 'workflow protégé (garde-fou, relecture, Mergify, Réacteur)'],
   [/^scripts\//, 'chemin protégé scripts/'],
