@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { calculer, calculerFrein, permiseParFrein, freinDepuisFichiers, FREIN, ECARTS_ETIQUETTE } from './prochaine-tache.mjs';
+import { calculer, analyserAttentes, ATTENTE, calculerFrein, permiseParFrein, freinDepuisFichiers, FREIN, ECARTS_ETIQUETTE } from './prochaine-tache.mjs';
 
 // Un relevé en mémoire : données fictives, aucun réseau. Même forme que backlog.json (fetch.py).
 const tache = (n, o = {}) => ({
@@ -598,4 +598,126 @@ test('frein hybride : sous 80 % de quota le rythme ne joue pas, même à +2 poin
 test('frein hybride : le palier 1 pris à 80 % ou plus se quitte comme avant, sous 78 % (hystérésis de 2 points)', () => {
   assert.equal(rythme(79, 2, 90, { precedent: 1 }).palier, 1);
   assert.equal(rythme(77, 2, 90, { precedent: 1 }).palier, 'normal');
+});
+
+
+// ---- Tâches oubliées : ce qui retient chaque tâche, qui peut le lever, et ce que personne ne lèvera ----
+const NOW = new Date('2026-10-19T12:00:00Z');
+const il_y_a = (heures) => new Date(NOW.getTime() - heures * 3_600_000).toISOString();
+const avec = (t, champs) => ({ ...t, ...champs });
+const oublis = (r) => Object.fromEntries(r.oubliees.map((o) => [o.ref, o]));
+
+test('une chaîne d’attente se remonte jusqu’au geste de Marc qui la retient, et la file de Marc dit combien de tâches il débloque', () => {
+  const r = calculer(releve(depot('a', [
+    avec(tache(2, { labels: ['qui:marc'] }), { marc_depuis: il_y_a(96) }),
+    tache(1, { deps: ['a#2'] }),
+    tache(3, { deps: ['a#1'] }),
+  ])), { maintenant: NOW });
+  assert.deepEqual(r.attentes['a#3'].chaine, ['a#3', 'a#1', 'a#2']);
+  assert.equal(r.attentes['a#3'].racine, 'a#2');
+  assert.equal(r.attentes['a#3'].proprietaire, 'marc');
+  assert.deepEqual(Object.keys(oublis(r)).sort(), ['a#1', 'a#2', 'a#3']);
+  assert.equal(oublis(r)['a#3'].cause, 'geste-marc-en-retard');
+  assert.equal(r.file_marc.length, 1);
+  assert.deepEqual({ racine: r.file_marc[0].racine, retient: r.file_marc[0].retient, retient_n: r.file_marc[0].retient_n, heures: r.file_marc[0].heures, en_retard: r.file_marc[0].en_retard }, { racine: 'a#2', retient: ['a#1', 'a#3'], retient_n: 2, heures: 96, en_retard: true });
+});
+
+test('un geste de Marc isolé dort à partir de 7 jours ; s’il retient d’autres tâches, dès 48 h', () => {
+  const isole = (h) => calculer(releve(depot('a', [avec(tache(1, { labels: ['qui:marc'] }), { marc_depuis: il_y_a(h) })])), { maintenant: NOW });
+  assert.equal(isole(ATTENTE.marcIsoleHeures - 1).oubliees.length, 0);
+  assert.equal(isole(ATTENTE.marcIsoleHeures - 1).file_marc[0].en_retard, false, 'il figure dans la file de Marc sans être oublié');
+  assert.equal(isole(ATTENTE.marcIsoleHeures).oubliees[0].cause, 'geste-marc-en-retard');
+  const retient = (h) => calculer(releve(depot('a', [avec(tache(1, { labels: ['qui:marc'] }), { marc_depuis: il_y_a(h) }), tache(2, { deps: ['a#1'] })])), { maintenant: NOW });
+  assert.equal(retient(ATTENTE.marcHeures - 1).oubliees.length, 0);
+  assert.deepEqual(retient(ATTENTE.marcHeures).oubliees.map((o) => o.ref).sort(), ['a#1', 'a#2']);
+});
+
+test('sans `marc_depuis` (relevé ancien) la date de dernière mise à jour sert ; sans aucune date, le geste compte comme en retard', () => {
+  const sans = calculer(releve(depot('a', [avec(tache(1, { labels: ['qui:marc'] }), { upd: il_y_a(200) })])), { maintenant: NOW });
+  assert.equal(sans.oubliees[0].heures, 200);
+  const aucune = calculer(releve(depot('a', [tache(1, { labels: ['qui:marc'] })])), { maintenant: NOW });
+  assert.equal(aucune.oubliees[0].cause, 'geste-marc-en-retard');
+  assert.equal(aucune.oubliees[0].heures, null);
+});
+
+test('`qui:marc` + `preuve-attendue` : la date de la preuve lève l’attente, ce n’est pas un geste oublié', () => {
+  const r = calculer(releve(depot('a', [avec(tache(1, { labels: ['qui:marc', 'preuve-attendue'] }), { upd: il_y_a(900) })])), { maintenant: NOW });
+  assert.equal(r.attentes['a#1'].proprietaire, 'preuve');
+  assert.equal(r.oubliees.length, 0);
+  assert.equal(r.file_marc.length, 0);
+});
+
+test('ce que personne ne peut lever est oublié tout de suite : bloquée sans dépendance, dépendance illisible, « Fini quand » absent, boucle', () => {
+  const r = calculer(releve(depot('a', [
+    tache(1, { labels: ['bloqué'] }),
+    tache(2, { deps: ['a#99'] }),
+    tache(3, { fq: '' }),
+    tache(4, { deps: ['a#5'] }),
+    tache(5, { deps: ['a#4'] }),
+  ])), { maintenant: NOW });
+  const o = oublis(r);
+  assert.equal(o['a#1'].cause, 'bloquee-sans-reprise');
+  assert.equal(o['a#2'].cause, 'dependance-illisible');
+  assert.equal(o['a#3'].cause, 'fini-quand-absent');
+  assert.equal(o['a#4'].cause, 'dependance-circulaire');
+  assert.equal(o['a#5'].cause, 'dependance-circulaire');
+  for (const x of Object.values(o)) assert.equal(x.proprietaire, 'personne');
+});
+
+test('une tâche « bloqué » qui attend une tâche prenable n’est pas oubliée : sa racine est dans la file', () => {
+  const r = calculer(releve(depot('a', [avec(tache(1, { labels: ['bloqué'] }), { deps: ['a#2'] }), tache(2)])), { maintenant: NOW });
+  assert.equal(r.attentes['a#1'].racine, 'a#2');
+  assert.equal(r.attentes['a#1'].proprietaire, 'file');
+  assert.equal(r.oubliees.length, 0);
+});
+
+test('un fil qui tient une tâche `en-cours` est oublié quand il se tait depuis le seuil, pas avant', () => {
+  const enCours = (h) => calculer(releve(depot('a', [avec(tache(1, { labels: ['en-cours'] }), { upd: il_y_a(h) })])), { maintenant: NOW });
+  assert.equal(enCours(ATTENTE.filHeures - 1).oubliees.length, 0);
+  assert.equal(enCours(ATTENTE.filHeures).oubliees[0].cause, 'fil-silencieux');
+  const avecPr = calculer(releve(depot('a', [avec(tache(1, { labels: ['en-cours'], pr: { n: 9, state: 'open', merged: null, upd: il_y_a(1) } }), { upd: il_y_a(60) })])), { maintenant: NOW });
+  assert.equal(avecPr.oubliees.length, 0, 'la dernière trace est celle de la PR');
+});
+
+test('une preuve attendue et un frein de quota ne sont jamais des oublis : une date ou un palier les lève', () => {
+  const r = calculer(releve(depot('a', [avec(tache(1, { labels: ['preuve-attendue'] }), { upd: il_y_a(500) }), avec(tache(2, { labels: ['prio:3'] }), { upd: il_y_a(500) })])), {
+    maintenant: NOW, frein: { palier: 2, detail: { raison: 'essai' } },
+  });
+  assert.equal(r.attentes['a#1'].proprietaire, 'preuve');
+  assert.equal(r.attentes['a#2'].proprietaire, 'frein');
+  assert.equal(r.oubliees.length, 0);
+});
+
+test('une PR dont seul un geste de Marc retient la fusion compte comme un geste de Marc', () => {
+  const d = { ...depot('a', [avec(tache(1, { pr: { ...prOuverte(10), upd: il_y_a(200) } }), { upd: il_y_a(200) })]), pr_attend_marc: [10] };
+  const r = calculer(releve(d), { maintenant: NOW });
+  assert.equal(r.attentes['a#1'].proprietaire, 'marc');
+  assert.equal(r.oubliees[0].cause, 'geste-marc-en-retard');
+});
+
+test('la file de Marc met en tête le geste qui retient le plus de tâches', () => {
+  const r = calculer(releve(depot('a', [
+    avec(tache(1, { labels: ['qui:marc'] }), { marc_depuis: il_y_a(300) }),
+    avec(tache(2, { labels: ['qui:marc'] }), { marc_depuis: il_y_a(60) }),
+    tache(3, { deps: ['a#2'] }), tache(4, { deps: ['a#2'] }),
+  ])), { maintenant: NOW });
+  assert.deepEqual(r.file_marc.map((g) => [g.racine, g.retient_n]), [['a#2', 2], ['a#1', 0]]);
+});
+
+test('une dépendance fermée ne retient plus ; une mission ouverte retient sans être un oubli', () => {
+  const r = calculer(releve(depot('a', [
+    tache(1, { deps: ['a#10'] }), tache(10, { state: 'closed', closed: '2026-10-18T10:00:00Z' }),
+    tache(2, { deps: ['a#3'] }), mission(3, [2]),
+  ])), { maintenant: NOW });
+  assert.equal(r.attentes['a#1'], undefined, 'prenable : rien ne la retient');
+  assert.equal(r.attentes['a#2'].proprietaire, 'mission');
+  assert.equal(r.oubliees.length, 0);
+});
+
+test('analyserAttentes ne modifie ni l’index ni les résultats qu’on lui passe', () => {
+  const b = releve(depot('a', [avec(tache(1, { labels: ['qui:marc'] }), { marc_depuis: il_y_a(100) })]));
+  const r = calculer(b, { maintenant: NOW });
+  const avant = JSON.stringify(r.depots);
+  analyserAttentes(r.depots, { noeuds: new Map(), parents: new Map(), fusionnees: new Set() }, NOW);
+  assert.equal(JSON.stringify(r.depots), avant);
 });
