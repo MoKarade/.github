@@ -4,6 +4,8 @@ Pour qui : Claude, quand il rédige une issue à confier à Jules (étiquette `j
 
 Mise en place : MoKarade/.github#76. Proposition d'origine : `commun/plans/2026-10-16_jules-a-plein-regime.md`.
 
+**Automatique** : une issue qui porte l'étiquette `faisable-jules` et dont le corps respecte ce gabarit (sections non vides, deux fichiers au plus, aucun chemin de la liste « à garder pour Claude » ci-dessous) est confiée à Jules par le filet du PC, sans Claude, dès que son dépôt est libre ; règles exactes dans `docs/cycle-de-vie-tache.md` §5 quater et `scripts/jules-auto.mjs`. Une issue au gabarit est donc prête à partir seule : pose `faisable-jules` en la rédigeant.
+
 ## Gabarit à copier dans le corps de l'issue
 
 ```

@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
-import { DEPOTS_FILET, annulerSignalements, dateQuebec, evaluerFilet, evaluerOublis, evaluerQuotidien, grouperOublis, lancerFilet, ligneOubli, motifDesOublis, motifDuFilet, reveiller, tour, tourOublis, tourQuotidien, tourLiens, LIENS_PAR_TOUR } from './filet-pc.mjs';
+import { DEPOTS_FILET, annulerSignalements, dateQuebec, evaluerFilet, evaluerOublis, evaluerQuotidien, grouperOublis, lancerFilet, ligneOubli, motifDesOublis, motifDuFilet, reveiller, tour, tourOublis, tourQuotidien, tourLiens, LIENS_PAR_TOUR, tourJules } from './filet-pc.mjs';
 
 const T0 = new Date('2026-10-17T18:00:00Z');
 const apres = (min, base = T0) => new Date(base.getTime() + min * 60_000);
@@ -363,4 +363,61 @@ test('tourLiens rapporte un échec d\'API sans lever', () => {
   const f = prochainesAvecLiens([{ ref: 'a#2', attend: 'a#1' }]);
   const ligne = tourLiens({ fichierProchaines: f, executer: true, maintenant: A12, gh: () => { throw new Error('HTTP 403 Resource not accessible'); } });
   assert.match(ligne, /ÉCHEC 1 \(HTTP 403/);
+});
+
+// --- Jules sans quota (demande de Marc du 19/10/2026) ---
+const corpsJules = (n) => ['Avant : le fichier n\'a pas de test.', 'Après : un test le couvre.', 'Fini quand : `npm test` vert.', 'Fichiers permis (aucun autre) :\n- `lib/x.test.ts`', 'À faire : 1. écrire.', 'À ne pas faire : toucher `lib/x.ts`.', 'Vérifier : `npm test`', `À citer dans la PR : \`Tâche : #${n}\``]
+  .map((l) => l.replace(/^([^:]+?)( \([^)]*\))? :/, '**$1**$2 :')).join('\n\n');
+const prochainesJules = (depots, calcule = '2026-10-19T12:00:00Z') => {
+  const dir = mkdtempSync(join(tmpdir(), 'jules-'));
+  const f = join(dir, 'prochaines.json');
+  writeFileSync(f, JSON.stringify({ calcule_le: calcule, frein: 2, depots }));
+  return { f, etat: join(dir, 'etat-jules.json') };
+};
+const reservee = [{ repo: 'CarAI', statut: 'rien', reservees_jules: [{ ref: 'carai#7', n: 7 }], occupe_par: [], incidents: [] }];
+const ghJules = (corps = corpsJules(7), labels = ['faisable-jules']) => {
+  const appels = [];
+  const gh = (m, c, b) => { appels.push([m, c, b]); if (m === 'GET' && /labels=|pulls\?/.test(c)) return []; if (m === 'GET') return { state: 'open', labels, body: corps }; return {}; };
+  return { gh, appels };
+};
+
+test('tourJules confie la tâche réservée d’un dépôt libre quand son corps est une consigne complète, et le retient', () => {
+  const { f, etat } = prochainesJules(reservee);
+  const { gh, appels } = ghJules();
+  const ligne = tourJules({ fichierProchaines: f, fichierEtat: etat, executer: true, maintenant: A12, gh });
+  assert.match(ligne, /jules : 1 confiée\(s\) \(carai#7\), 1 dépôt\(s\) avec réservée\(s\), 0 en cours/);
+  assert.equal(appels.filter(([m]) => m === 'POST').length, 2);
+  assert.equal(JSON.parse(readFileSync(etat, 'utf8')).confies['carai#7'].fois, 1);
+});
+
+test('tourJules dit pourquoi une tâche réservée n’est pas prête, sans rien écrire', () => {
+  const { f, etat } = prochainesJules(reservee);
+  const { gh, appels } = ghJules('Faire le truc.');
+  const ligne = tourJules({ fichierProchaines: f, fichierEtat: etat, executer: true, maintenant: A12, gh });
+  assert.match(ligne, /0 confiée\(s\).*carai#7 sections absentes/);
+  assert.equal(appels.some(([m]) => m === 'POST'), false);
+});
+
+test('tourJules ne fait rien sans tâche réservée, à blanc, sans --executer, ni si prochaines.json est périmé', () => {
+  const gh = () => { throw new Error('ne doit pas être appelé'); };
+  const aucune = prochainesJules([{ repo: 'CarAI', statut: 'libre', reservees_jules: [], occupe_par: [], incidents: [] }]);
+  assert.match(tourJules({ fichierProchaines: aucune.f, fichierEtat: aucune.etat, executer: true, maintenant: A12, gh }), /aucune tâche réservée/);
+  const r = prochainesJules(reservee);
+  const lecture = ghJules();
+  assert.match(tourJules({ fichierProchaines: r.f, fichierEtat: r.etat, aBlanc: true, maintenant: A12, gh: lecture.gh }), /\(à blanc\)/);
+  assert.equal(lecture.appels.some(([m]) => m === 'POST'), false);
+  const sans = ghJules();
+  assert.match(tourJules({ fichierProchaines: r.f, fichierEtat: r.etat, maintenant: A12, gh: sans.gh }), /0 confiée\(s\), sautée\(s\) carai#7 \(non confiée\)/);
+  assert.equal(sans.appels.some(([m]) => m === 'POST'), false);
+  assert.match(tourJules({ fichierProchaines: r.f, fichierEtat: r.etat, executer: true, maintenant: new Date('2026-10-19T13:00:00Z'), gh }), /périmé/);
+});
+
+test('tourJules ne reconfie pas une tâche déjà confiée deux fois, et rapporte un échec d’API sans lever', () => {
+  const { f, etat } = prochainesJules(reservee);
+  writeFileSync(etat, JSON.stringify({ confies: { 'carai#7': { fois: 2 } } }));
+  const { gh, appels } = ghJules();
+  assert.match(tourJules({ fichierProchaines: f, fichierEtat: etat, executer: true, maintenant: A12, gh }), /0 confiée\(s\).*déjà confiée 2 fois/);
+  assert.equal(appels.length, 0);
+  const ligne = tourJules({ fichierProchaines: f, fichierEtat: join(tmpdir(), 'inexistant-jules.json'), executer: true, maintenant: A12, gh: () => { throw new Error('HTTP 403'); } });
+  assert.match(ligne, /^jules : (ÉCHEC|0 confiée)/);
 });
