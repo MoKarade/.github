@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
-import { DEPOTS_FILET, annulerSignalements, dateQuebec, evaluerFilet, evaluerOublis, evaluerQuotidien, grouperOublis, lancerFilet, ligneOubli, motifDesOublis, motifDuFilet, reveiller, tour, tourOublis, tourQuotidien, tourLiens, LIENS_PAR_TOUR, tourJules } from './filet-pc.mjs';
+import { DEPOTS_FILET, annulerSignalements, dateQuebec, evaluerFilet, evaluerOublis, evaluerQuotidien, grouperOublis, lancerFilet, ligneOubli, motifDesOublis, motifDuFilet, reveiller, tour, tourOublis, tourQuotidien, tourLiens, LIENS_PAR_TOUR, tourJules, evaluerFile, motifDeLaFile, tourFile } from './filet-pc.mjs';
 
 const T0 = new Date('2026-10-17T18:00:00Z');
 const apres = (min, base = T0) => new Date(base.getTime() + min * 60_000);
@@ -420,4 +420,103 @@ test('tourJules ne reconfie pas une tâche déjà confiée deux fois, et rapport
   assert.equal(appels.length, 0);
   const ligne = tourJules({ fichierProchaines: f, fichierEtat: join(tmpdir(), 'inexistant-jules.json'), executer: true, maintenant: A12, gh: () => { throw new Error('HTTP 403'); } });
   assert.match(ligne, /^jules : (ÉCHEC|0 confiée)/);
+});
+
+// ── File Mergify (tâche #285) : remettre en file les PR vertes sorties de la file ───────────────────────────────────────
+const MIN_F = 60_000;
+const t0F = new Date('2026-10-19T18:00:00Z');
+const apresF = (min) => new Date(t0F.getTime() + min * MIN_F);
+const PRF = (ref, extra = {}) => ({ ref, draft: false, labels: ['dequeued'], etat_fusion: 'clean', ...extra });
+
+test('file : une PR sortie de la file depuis moins de 10 min est seulement notée', () => {
+  const r = evaluerFile({ prs: [PRF('.github#270')], etat: {}, maintenant: t0F });
+  assert.deepEqual(r.actions, []);
+  assert.equal(r.etat.prs['.github#270'].vu, t0F.toISOString());
+});
+
+test('file : après 10 min hors file, la PR est mise à jour', () => {
+  const e1 = evaluerFile({ prs: [PRF('.github#270')], etat: {}, maintenant: t0F }).etat;
+  const r = evaluerFile({ prs: [PRF('.github#270')], etat: e1, maintenant: apresF(10) });
+  assert.deepEqual(r.actions, [{ ref: '.github#270', faire: 'mettre-a-jour', raison: '' }]);
+});
+
+test('file : brouillon, étiquette hold ou PR déjà revenue en file (plus de `dequeued`) : rien, et plus suivie', () => {
+  const vieux = { prs: { 'a#1': { vu: t0F.toISOString() }, 'a#2': { vu: t0F.toISOString() }, 'a#3': { vu: t0F.toISOString() } } };
+  const r = evaluerFile({ prs: [PRF('a#1', { draft: true }), PRF('a#2', { labels: ['dequeued', 'hold'] }), PRF('a#3', { labels: ['queued'] })], etat: vieux, maintenant: apresF(30) });
+  assert.deepEqual(r.actions, []);
+  assert.deepEqual(r.etat.prs, {});
+});
+
+test('file : conflit de fusion = signalement (pas de mise à jour), puis silence 2 h', () => {
+  const e1 = evaluerFile({ prs: [PRF('a#1', { etat_fusion: 'dirty' })], etat: {}, maintenant: t0F }).etat;
+  const r = evaluerFile({ prs: [PRF('a#1', { etat_fusion: 'dirty' })], etat: e1, maintenant: apresF(12) });
+  assert.deepEqual(r.actions, [{ ref: 'a#1', faire: 'signaler', raison: 'conflit de fusion' }]);
+  r.etat.prs['a#1'].signale = apresF(12).toISOString();
+  assert.deepEqual(evaluerFile({ prs: [PRF('a#1', { etat_fusion: 'dirty' })], etat: r.etat, maintenant: apresF(60) }).actions, []);
+  assert.equal(evaluerFile({ prs: [PRF('a#1', { etat_fusion: 'dirty' })], etat: r.etat, maintenant: apresF(12 + 121) }).actions.length, 1);
+});
+
+test('file : un seul essai de mise à jour par heure ; ensuite, toujours hors file = signalement', () => {
+  const etat = { prs: { 'a#1': { vu: t0F.toISOString(), essai: apresF(10).toISOString() } } };
+  assert.deepEqual(evaluerFile({ prs: [PRF('a#1')], etat, maintenant: apresF(40) }).actions.map((a) => a.faire), ['signaler']);
+  assert.deepEqual(evaluerFile({ prs: [PRF('a#1')], etat, maintenant: apresF(71) }).actions.map((a) => a.faire), ['mettre-a-jour']);
+});
+
+test('file : le message nomme la PR et la raison, sans commande Mergify', () => {
+  const m = motifDeLaFile([{ ref: 'a#1', raison: 'conflit de fusion' }]);
+  assert.match(m, /^RÉACTEUR : file Mergify : a#1 hors file \(conflit de fusion\)$/);
+  assert.doesNotMatch(m, /@mergifyio/);
+});
+
+function ghSimule({ prs, detail = {}, put = () => ({}) }) {
+  const appels = [];
+  const gh = (methode, chemin) => {
+    appels.push(`${methode} ${chemin}`);
+    if (methode === 'GET' && /\/pulls\?state=open/.test(chemin)) return prs[chemin.match(/repos\/MoKarade\/([^/]+)\//)[1]] ?? [];
+    if (methode === 'GET') return { mergeable_state: detail[chemin] ?? 'clean' };
+    if (methode === 'PUT') return put(chemin);
+    throw new Error('appel inattendu ' + chemin);
+  };
+  return { gh, appels };
+}
+const dossierFile = () => join(mkdtempSync(join(tmpdir(), 'file-')), 'etat.json');
+
+test('tourFile : sur 2 tours, la PR sortie de la file est mise à jour par update-branch, sans commande Mergify', () => {
+  const f = dossierFile();
+  const { gh, appels } = ghSimule({ prs: { '.github': [{ number: 270, draft: false, labels: [{ name: 'dequeued' }] }, { number: 9, draft: false, labels: [] }] } });
+  const opts = { fichierEtat: f, executer: true, gh, depots: ['MoKarade/.github'] };
+  assert.match(tourFile({ ...opts, maintenant: t0F }), /1 hors file, rien à faire encore/);
+  assert.match(tourFile({ ...opts, maintenant: apresF(10) }), /1 mise\(s\) à jour \(\.github#270\)/);
+  assert.ok(appels.includes('PUT repos/MoKarade/.github/pulls/270/update-branch'));
+  assert.ok(!appels.some((a) => /mergify/i.test(a)));
+  assert.equal(JSON.parse(readFileSync(f, 'utf8')).prs['.github#270'].essai, apresF(10).toISOString());
+});
+
+test('tourFile : branche déjà à jour (422) = un réveil du Coordinateur, enregistré, pas deux', () => {
+  const f = dossierFile();
+  const { gh } = ghSimule({
+    prs: { '.github': [{ number: 262, draft: false, labels: [{ name: 'dequeued' }] }] },
+    put: () => { throw Object.assign(new Error('gh: Update branch failed (HTTP 422)'), { stderr: 'HTTP 422 There are no new commits on the base branch.' }); },
+  });
+  const lances = [];
+  const lancer = (cmd, args) => lances.push([cmd, ...args].join(' '));
+  const opts = { fichierEtat: f, executer: true, gh, lancer, depots: ['MoKarade/.github'] };
+  tourFile({ ...opts, maintenant: t0F });
+  const ligne = tourFile({ ...opts, maintenant: apresF(10) });
+  assert.match(ligne, /réveil envoyé \(\.github#262\)/);
+  assert.equal(lances.length, 1);
+  assert.match(lances[0], /file Mergify : \.github#262 hors file \(branche déjà à jour/);
+  tourFile({ ...opts, maintenant: apresF(20) });
+  assert.equal(lances.length, 1);
+});
+
+test('tourFile : à blanc ne touche à rien ; une erreur GitHub se dit sans faire échouer le tour', () => {
+  const f = dossierFile();
+  const { gh, appels } = ghSimule({ prs: { '.github': [{ number: 5, draft: false, labels: [{ name: 'dequeued' }] }] } });
+  tourFile({ fichierEtat: f, executer: true, gh, depots: ['MoKarade/.github'], maintenant: t0F });
+  const blanc = tourFile({ fichierEtat: f, aBlanc: true, gh, depots: ['MoKarade/.github'], maintenant: apresF(11) });
+  assert.match(blanc, /\.github#5 mettre-a-jour \(à blanc\)/);
+  assert.ok(!appels.some((a) => a.startsWith('PUT')));
+  const ko = tourFile({ fichierEtat: f, executer: true, gh: () => { throw new Error('réseau coupé'); }, depots: ['MoKarade/.github'], maintenant: apresF(12) });
+  assert.match(ko, /^file : ÉCHEC \(réseau coupé\)/);
 });
