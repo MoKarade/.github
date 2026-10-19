@@ -240,12 +240,17 @@ function derniere(depot) {
 
 /** Pourquoi une tâche ouverte n'est pas prenable (code), ou null si elle l'est. */
 function ecart(n, depot, idx) {
-  for (const [etiquette, code] of Object.entries(ECARTS_ETIQUETTE)) if (n.labels.includes(etiquette)) return { code, detail: etiquette };
   const dependances = n.deps ?? [];
   const levee = (d) => !idx.noeuds.has(minuscule(d)) && idx.fusionnees.has(minuscule(d));
+  const ouverte = dependances.find((d) => idx.noeuds.has(minuscule(d)) && idx.noeuds.get(minuscule(d)).noeud.state === 'open');
+  for (const [etiquette, code] of Object.entries(ECARTS_ETIQUETTE)) {
+    if (!n.labels.includes(etiquette)) continue;
+    // Un geste de Marc qui dépend d'une tâche encore ouverte n'est pas encore possible : la tâche attend celle-là, pas Marc.
+    if (code === 'geste-marc' && ouverte) continue;
+    return { code, detail: etiquette };
+  }
   const inconnue = dependances.find((d) => !idx.noeuds.has(minuscule(d)) && !levee(d));
   if (inconnue) return { code: 'attend-inconnue', detail: inconnue };
-  const ouverte = dependances.find((d) => !levee(d) && idx.noeuds.get(minuscule(d)).noeud.state === 'open');
   if (ouverte) return { code: 'attend-ouverte', detail: ouverte };
   if (n.pr?.state === 'open') return { code: 'pr-ouverte', detail: `PR ${n.pr.repo ?? depot.repo}#${n.pr.n}` };
   if (!String(n.fq ?? '').trim()) return { code: 'fini-quand-absent', detail: '' };

@@ -157,6 +157,8 @@ Le même script lit le pourcentage hebdomadaire du quota Claude (`quota.json`, r
 | **En cours** | `en-cours`, `jules` ou PR ouverte | le fil ; silencieux plus de 24 h : relancé |
 | **En attente** | attend UNE chose nommée : une tâche (`**Attend** : #n`), un geste de Marc (`qui:marc`), une preuve (`preuve-attendue`), le frein de quota | le propriétaire de cette chose (le script remonte la chaîne jusqu'à elle) |
 | **Bloquée** | `bloqué` ET une raison nommée : `**Attend**` vers une tâche ouverte | idem |
+
+Un geste de Marc (`qui:marc`) qui a lui-même une dépendance ouverte (`**Attend** : #n`) n'est pas encore faisable : la tâche est « en attente » de celle-là, pas de Marc. Elle ne compte pas dans `file_marc` et ne devient pas « geste en retard » ; le geste revient à Marc quand la dépendance se ferme (ex. choisir une direction d'interface une fois les maquettes dessinées).
 | **Invalide** | tout le reste | personne : c'est un défaut, traité comme tel |
 
 Sont invalides, avec leur cause : `bloquee-sans-reprise` (`bloqué` sans rien de nommé), `dependance-illisible` (`**Attend**` vers un numéro inconnu), `fini-quand-absent`, `dependance-circulaire`, `sans-mission` (aucune mission au-dessus : la tâche n'est pas dans la hiérarchie), `preuve-chez-marc` (voir plus bas). Une tâche invalide sort dans `oubliees` et **réveille le Coordinateur** (une fois par 24 h et par racine, `RÉACTEUR : oubli : …`, quatre lignes au plus) jusqu'à ce que l'issue soit corrigée : nommer ce qu'elle attend (`**Attend** : #n`), la rattacher à sa mission, ou la fermer avec la raison. Un geste de Marc en retard (plus de 48 h s'il retient d'autres tâches, 168 h sinon) et un fil silencieux sont signalés de la même façon. Seuils : `ATTENTE` en tête du script.
