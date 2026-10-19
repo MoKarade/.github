@@ -852,3 +852,15 @@ test('attend-absent : la ligne écrite (même « aucune ») ou une dépendance n
   assert.equal(attendAbsent({ attend_ligne: false, deps: ['a#9'], created: '2026-10-19T17:00:00Z' }, APRES), false);
   assert.equal(attendAbsent({ attend_ligne: false, created: '2026-10-19T17:00:00Z' }, APRES), true);
 });
+
+test('attend-absent : attend_absent ne liste ni les tâches fermées ni les missions et chantiers', () => {
+  const sansLigne = { attend_ligne: false, created: '2026-10-19T17:00:00Z' };
+  const r = calculer(releve(depot('a', [
+    { ...mission(1, [2, 3, 4]), attend_ligne: false },
+    chantier(5, []),
+    tache(2, sansLigne),
+    tache(3, { ...sansLigne, state: 'closed' }),
+    tache(4, { attend_ligne: true, created: '2026-10-19T17:00:00Z' }),
+  ])), { maintenant: AVANT });
+  assert.deepEqual(r.attend_absent.map((x) => x.ref), ['a#2']);
+});
