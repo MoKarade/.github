@@ -30,6 +30,9 @@
 // Cinquième rôle (demande du Coordinateur du 19/10/2026, tâche MoKarade/.github#285, après la fusion à la main de #270) : remettre en file toute PR
 // verte sortie de la file Mergify (étiquette `dequeued`) en mettant sa branche à jour (`update-branch`, que Mergify requeue seul), sans jamais
 // taper de commande `@mergifyio` (seul Marc le peut). Branche déjà à jour ou en conflit : réveil du Coordinateur, une fois par 2 h, avec la raison.
+// Sixième rôle (demande de Marc du 19/10/2026 18:31Z, « go full auto », tâche MoKarade/.github#289) : suivre les PR de Jules sans fil (`tourJulesSuivi`,
+// `scripts/jules-suivi.mjs`) : nettoyer le corps des PR ouvertes, poser `hold` et réveiller si un fichier sort de « Fichiers permis », et accepter seul
+// (« **Acceptée** » au format du garde-fou, étiquettes retirées, tâche fermée) la PR de TESTS SEULS fusionnée.
 // Un échec du réveil ne fait JAMAIS échouer le tour (il se dit sur la ligne imprimée) et n'enregistre pas le signalement :
 // le tour suivant réessaie.
 import { execFileSync } from 'node:child_process';
@@ -38,6 +41,7 @@ import { pathToFileURL } from 'node:url';
 import { DEPOT_BOITE, WORKFLOW_BOITE, construireMotif } from './reveil-reacteur.mjs';
 import { lierTout, ghCli } from './lier-taches.mjs';
 import { choisirPourJules, confierAJules } from './jules-auto.mjs';
+import { suivreDepot } from './jules-suivi.mjs';
 
 export const SEUIL_LIBRE_MIN = 30;
 export const FENETRE_SIGNALEMENT_H = 2;
@@ -434,6 +438,43 @@ export function tourFile({ fichierEtat, executer = false, aBlanc = false, mainte
   }
 }
 
+/**
+ * Un tour du suivi des PR de Jules : voir `scripts/jules-suivi.mjs`. Rend la ligne à afficher ; ne lève jamais (un dépôt illisible est dit, les autres passent).
+ * @param gh (methode, chemin, corps) -> objet JSON ; par défaut `gh api` du PC
+ */
+export function tourJulesSuivi({ fichierEtat, executer = false, aBlanc = false, maintenant = new Date(), gh = null, lancer = execFileSync, depots = DEPOTS_FILET }) {
+  try {
+    const appel = gh ?? ghCli;
+    const etat = lireJson(fichierEtat, {});
+    const total = { acceptees: [], nettoyees: [], holds: [], signaux: [], vu: 0 };
+    const echecs = [];
+    for (const depot of depots) {
+      try {
+        const r = suivreDepot({ depot, gh: appel, etat, maintenant, aBlanc: aBlanc || !executer });
+        for (const k of ['acceptees', 'nettoyees', 'holds', 'signaux']) total[k].push(...r[k]);
+        total.vu += r.vu;
+      } catch (e) {
+        echecs.push(`${depot.replace('MoKarade/', '')} (${String(e.message).replace(/\s+/g, ' ').slice(0, 60)})`);
+      }
+    }
+    let envoi = '';
+    if (total.signaux.length && executer && !aBlanc) {
+      try {
+        reveiller(construireMotif(total.signaux.slice(0, 4).map((x) => `jules : ${x.ref} ${x.raison}`)), lancer);
+        for (const x of total.signaux) etat[x.ref] = { ...etat[x.ref], signale: maintenant.toISOString() };
+        envoi = `, réveil envoyé (${total.signaux.length})`;
+      } catch (e) {
+        envoi = `, ÉCHEC du réveil (${String(e.stderr || e.message).replace(/\s+/g, ' ').slice(0, 100)})`;
+      }
+    }
+    if (executer && !aBlanc) ecrireJson(fichierEtat, etat);
+    const seul = !executer || aBlanc ? ' (non appliqué)' : '';
+    return `jules-suivi : ${total.vu} tâche(s) jules, ${total.acceptees.length} acceptée(s)${total.acceptees.length ? ` (${total.acceptees.join(', ')})` : ''}, ${total.nettoyees.length} PR nettoyée(s), ${total.holds.length} hold${seul}${envoi}${echecs.length ? `, ÉCHEC ${echecs.join(' ; ')}` : ''}`;
+  } catch (e) {
+    return `jules-suivi : ÉCHEC (${String(e.message).slice(0, 160)})`;
+  }
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const arg = (nom) => { const i = process.argv.indexOf(nom); return i > 0 ? process.argv[i + 1] : null; };
   const fichierProchaines = process.argv[2];
@@ -449,6 +490,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const liens = tourLiens({ fichierProchaines, ...options });
     const jules = tourJules({ fichierProchaines, fichierEtat: fichierEtat.replace(/(\.json)?$/, '-jules.json'), ...options });
     const file = tourFile({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-file.json'), ...options });
-    console.log(`${reveil} · ${quotidien} · ${oublis} · ${liens} · ${jules} · ${file}`);
+    const suivi = tourJulesSuivi({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-jules-suivi.json'), ...options });
+    console.log(`${reveil} · ${quotidien} · ${oublis} · ${liens} · ${jules} · ${file} · ${suivi}`);
   }
 }
