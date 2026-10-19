@@ -74,7 +74,7 @@ def releve(econome=False, quota_complet=True):
     mode = 'plein'
     try:
         recent = age_min('.dernier-plein') is not None and age_min('.dernier-plein') < 60
-        if (recent or econome) and lire('backlog.json').get('v', 0) >= 8: mode = 'leger'
+        if (recent or econome) and lire('backlog.json').get('v', 0) >= 9: mode = 'leger'
     except (OSError, ValueError): pass
     args = [PY, 'fetch.py', '--sans-quota'] + (['--leger'] if mode == 'leger' else [])
     if lancer(args, '.refresh-fetch.log', 900) != 0:
