@@ -34,6 +34,7 @@
 // `scripts/jules-suivi.mjs`) : nettoyer le corps des PR ouvertes, poser `hold` et réveiller si un fichier sort de « Fichiers permis », et accepter seul
 // (« **Acceptée** » au format du garde-fou, étiquettes retirées, tâche fermée) la PR de TESTS SEULS fusionnée.
 // Septième ajout au même tour (tâche MoKarade/.github#296) : poser seul `faisable-jules` sur les tâches que `evaluerJules` accepte (`scripts/jules-marquage.mjs`, au plus deux réservées par dépôt).
+// Huitième ajout (tâche MoKarade/.github#303) : compléter seul le corps des tâches pour Jules (`scripts/jules-gabarit.mjs`), 20 par 24 h au plus.
 // Un échec du réveil ne fait JAMAIS échouer le tour (il se dit sur la ligne imprimée) et n'enregistre pas le signalement :
 // le tour suivant réessaie.
 import { execFileSync } from 'node:child_process';
@@ -44,6 +45,7 @@ import { lierTout, ghCli } from './lier-taches.mjs';
 import { choisirPourJules, confierAJules } from './jules-auto.mjs';
 import { suivreDepot, menageFermees } from './jules-suivi.mjs';
 import { marquerFaisables } from './jules-marquage.mjs';
+import { completerDepot } from './jules-gabarit.mjs';
 
 export const SEUIL_LIBRE_MIN = 30;
 export const FENETRE_SIGNALEMENT_H = 2;
@@ -448,7 +450,7 @@ export function tourJulesSuivi({ fichierEtat, executer = false, aBlanc = false, 
   try {
     const appel = gh ?? ghCli;
     const etat = lireJson(fichierEtat, {});
-    const total = { acceptees: [], nettoyees: [], holds: [], signaux: [], menage: [], marquees: [], vu: 0 };
+    const total = { acceptees: [], nettoyees: [], holds: [], signaux: [], menage: [], completees: [], refus: [], marquees: [], vu: 0 };
     const echecs = [];
     for (const depot of depots) {
       try {
@@ -456,6 +458,9 @@ export function tourJulesSuivi({ fichierEtat, executer = false, aBlanc = false, 
         for (const k of ['acceptees', 'nettoyees', 'holds', 'signaux']) total[k].push(...r[k]);
         total.vu += r.vu;
         total.menage.push(...menageFermees({ depot, gh: appel, aBlanc: aBlanc || !executer }));
+        const c = completerDepot({ depot, gh: appel, etat, maintenant, aBlanc: aBlanc || !executer }); // avant le marquage : une tâche complétée est réservée dans le même tour
+        total.completees.push(...c.completees);
+        total.refus.push(...c.refusees);
         total.marquees.push(...marquerFaisables({ depot, gh: appel, aBlanc: aBlanc || !executer }).marquees);
       } catch (e) {
         echecs.push(`${depot.replace('MoKarade/', '')} (${String(e.message).replace(/\s+/g, ' ').slice(0, 60)})`);
@@ -473,7 +478,7 @@ export function tourJulesSuivi({ fichierEtat, executer = false, aBlanc = false, 
     }
     if (executer && !aBlanc) ecrireJson(fichierEtat, etat);
     const seul = !executer || aBlanc ? ' (non appliqué)' : '';
-    return `jules-suivi : ${total.vu} tâche(s) jules, ${total.acceptees.length} acceptée(s)${total.acceptees.length ? ` (${total.acceptees.join(', ')})` : ''}, ${total.nettoyees.length} PR nettoyée(s), ${total.holds.length} hold${total.menage.length ? `, ${total.menage.length} étiquette(s) retirée(s) sur tâches fermées` : ''}${total.marquees.length ? `, ${total.marquees.length} marquée(s) faisable-jules (${total.marquees.join(', ')})` : ''}${seul}${envoi}${echecs.length ? `, ÉCHEC ${echecs.join(' ; ')}` : ''}`;
+    return `jules-suivi : ${total.vu} tâche(s) jules, ${total.acceptees.length} acceptée(s)${total.acceptees.length ? ` (${total.acceptees.join(', ')})` : ''}, ${total.nettoyees.length} PR nettoyée(s), ${total.holds.length} hold${total.menage.length ? `, ${total.menage.length} étiquette(s) retirée(s) sur tâches fermées` : ''}${total.completees.length ? `, ${total.completees.length} complétée(s) au gabarit (${total.completees.join(', ')})` : ''}${total.refus.length ? `, refus : ${total.refus.slice(0, 3).map((x) => `${x.ref} ${x.raison.slice(0, 70)}`).join(' ; ')}${total.refus.length > 3 ? ` (+${total.refus.length - 3})` : ''}` : ''}${total.marquees.length ? `, ${total.marquees.length} marquée(s) faisable-jules (${total.marquees.join(', ')})` : ''}${seul}${envoi}${echecs.length ? `, ÉCHEC ${echecs.join(' ; ')}` : ''}`;
   } catch (e) {
     return `jules-suivi : ÉCHEC (${String(e.message).slice(0, 160)})`;
   }
