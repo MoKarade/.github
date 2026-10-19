@@ -1,0 +1,197 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { commentaireAcceptee, controlesVerts, corpsNettoye, evaluerFusion, horsPermis, prDeLaTache, suivreDepot, tachesCitees, testsSeuls } from './jules-suivi.mjs';
+import { tourJulesSuivi } from './filet-pc.mjs';
+import { lireCitation, evaluer } from './preuve.mjs';
+
+const CORPS_TACHE = `**Avant** : x\n\n**Fichiers permis** (aucun autre) :\n- \`tests/navigation.test.ts\`\n\n**À faire** :\n1. y\n`;
+const T = { number: 196, labels: [{ name: 'niveau:tâche' }, { name: 'jules' }, { name: 'faisable-jules' }], body: CORPS_TACHE };
+const MAINTENANT = new Date('2026-10-19T19:00:00Z');
+
+test('tachesCitees : Fixes, Closes, Resolves et Tâche : #n, dédoublonnées, titre compris', () => {
+  assert.deepEqual(tachesCitees({ title: 'test: x', body: 'Fixes #196\n\nTâche : #196\nCloses #7' }), [196, 7]);
+  assert.deepEqual(tachesCitees({ title: '', body: 'rien' }), []);
+});
+
+test('testsSeuls : tests/, __tests__/, *.test.ts, *.spec.js ; un fichier servi ou aucun fichier : non', () => {
+  assert.equal(testsSeuls(['tests/a.test.ts', 'lib/__tests__/b.ts', 'x/c.spec.mjs']), true);
+  assert.equal(testsSeuls(['tests/a.test.ts', 'lib/navigation.ts']), false);
+  assert.equal(testsSeuls([]), false);
+  assert.equal(testsSeuls(['README.md']), false);
+});
+
+test('horsPermis : seuls les chemins exacts de « Fichiers permis » passent', () => {
+  assert.deepEqual(horsPermis(['tests/navigation.test.ts'], CORPS_TACHE), []);
+  assert.deepEqual(horsPermis(['tests/navigation.test.ts', 'lib/navigation.ts'], CORPS_TACHE), ['lib/navigation.ts']);
+  assert.deepEqual(horsPermis(['tests/a.test.ts'], 'pas de gabarit'), ['tests/a.test.ts']);
+});
+
+test('corpsNettoye : retire les lignes fermantes, pose Tâche : #n, ne change rien sinon', () => {
+  const sale = 'Avant / Après\n\nFixes #196\n\nresolves: #12 et plus';
+  const propre = corpsNettoye(sale, 196);
+  assert.doesNotMatch(propre, /fixes|resolves/i);
+  assert.match(propre, /Tâche : #196\n$/);
+  assert.equal(corpsNettoye(propre, 196), propre);
+  const deja = 'Avant\n\nTâche : #196\n';
+  assert.equal(corpsNettoye(deja, 196), deja);
+  assert.match(corpsNettoye('', 5), /^Tâche : #5\n$/);
+});
+
+test('controlesVerts : Mergify ignoré, un contrôle en cours ou rouge = non, aucun contrôle = non', () => {
+  const vert = (name) => ({ name, status: 'completed', conclusion: 'success' });
+  assert.equal(controlesVerts([vert('Gate'), { name: 'Mergify Merge Queue', status: 'in_progress', conclusion: null }]).ok, true);
+  assert.equal(controlesVerts([vert('Gate'), { name: 'Qualité', status: 'in_progress', conclusion: null }]).ok, false);
+  assert.equal(controlesVerts([vert('Gate'), { name: 'Sécurité', status: 'completed', conclusion: 'failure' }]).pasVerts[0], 'Sécurité');
+  assert.equal(controlesVerts([]).ok, false);
+  assert.equal(controlesVerts([{ name: 'Mergify Merge Protections', status: 'completed', conclusion: 'neutral' }]).ok, false);
+});
+
+test('evaluerFusion : tests seuls dans les fichiers permis et contrôles verts = acceptable ; sinon la raison', () => {
+  const runs = [{ name: 'Gate', status: 'completed', conclusion: 'success' }];
+  const pr = { merged: true, merge_commit_sha: 'abcdef1234' };
+  assert.equal(evaluerFusion({ tache: { body: CORPS_TACHE }, pr, fichiers: ['tests/navigation.test.ts'], runs }).ok, true);
+  const code = evaluerFusion({ tache: { body: CORPS_TACHE }, pr, fichiers: ['tests/navigation.test.ts', 'lib/navigation.ts'], runs });
+  assert.equal(code.ok, false);
+  assert.match(code.raisons.join(' '), /pas que des tests/);
+  assert.match(evaluerFusion({ tache: { body: CORPS_TACHE }, pr, fichiers: ['tests/autre.test.ts'], runs }).raisons.join(' '), /hors « Fichiers permis »/);
+  assert.match(evaluerFusion({ tache: { body: CORPS_TACHE }, pr: { merged: false }, fichiers: ['tests/navigation.test.ts'], runs }).raisons.join(' '), /non fusionnée/);
+});
+
+test('prDeLaTache : la PR fusionnée la plus récente et la PR ouverte la plus récente qui citent la tâche', () => {
+  const prs = [
+    { number: 1, body: 'Fixes #196', merged_at: '2026-10-19T10:00:00Z', state: 'closed' },
+    { number: 2, body: 'Tâche : #196', merged_at: '2026-10-19T12:00:00Z', state: 'closed' },
+    { number: 3, body: 'Tâche : #196', state: 'open', created_at: '2026-10-19T13:00:00Z' },
+    { number: 4, body: 'Fixes #5', merged_at: '2026-10-19T14:00:00Z', state: 'closed' },
+  ];
+  const r = prDeLaTache(196, prs);
+  assert.equal(r.fusionnee.number, 2);
+  assert.equal(r.ouverte.number, 3);
+});
+
+test('le commentaire de preuve passe le garde-fou (scripts/preuve.mjs) : PR fusionnée, empreinte, sans déploiement, preuve ≥ 40 car.', () => {
+  const pr = { number: 197, merge_commit_sha: 'a1b2c3d4e5f6a7b8', merged_at: '2026-10-19T18:50:00Z', head: { sha: '1234567890abcdef' } };
+  const corps = commentaireAcceptee({ pr, fichiers: ['tests/navigation.test.ts'], controles: 6, date: '2026-10-19 19:00 UTC' });
+  assert.match(corps, /^\*\*Acceptée\*\* — PR #197 fusionnée \(a1b2c3d\), sans déploiement : tests seuls/);
+  const cite = lireCitation(corps);
+  assert.equal(cite.pr.numero, 197);
+  assert.ok(cite.preuve.length >= 40);
+  assert.ok(cite.shas.some((s) => 'a1b2c3d4e5f6a7b8'.startsWith(s)));
+  const verdict = evaluer({
+    raison: 'completed',
+    commentaires: [{ user: { type: 'User', login: 'MoKarade' }, body: corps, created_at: '2026-10-19T19:00:00Z' }],
+    pr: { merged: true, merged_at: '2026-10-19T18:50:00Z', merge_commit_sha: 'a1b2c3d4e5f6a7b8', head_sha: '1234567890abcdef' },
+    fichiers: ['tests/navigation.test.ts'],
+  });
+  assert.equal(verdict.ok, true, verdict.motifs?.join(' | '));
+});
+
+// ── I/O avec un GitHub simulé ───────────────────────────────────────────────────────────────────────────────────────
+function github({ taches = [T], ouvertes = [], fermees = [], fichiers = {}, runs = [{ name: 'Gate', status: 'completed', conclusion: 'success' }] }) {
+  const appels = [];
+  const gh = (methode, chemin, corps) => {
+    appels.push({ methode, chemin, corps });
+    if (methode === 'GET' && /\/issues\?labels=jules/.test(chemin)) return taches;
+    if (methode === 'GET' && /\/pulls\?state=open/.test(chemin)) return ouvertes;
+    if (methode === 'GET' && /\/pulls\?state=closed/.test(chemin)) return fermees;
+    const f = /\/pulls\/(\d+)\/files/.exec(chemin);
+    if (methode === 'GET' && f) return (fichiers[f[1]] ?? []).map((filename) => ({ filename }));
+    if (methode === 'GET' && /\/check-runs/.test(chemin)) return { check_runs: runs };
+    return {};
+  };
+  return { gh, appels };
+}
+const PR_FUSIONNEE = { number: 197, title: 'test: navigation', body: 'Fixes #196', state: 'closed', merged_at: '2026-10-19T18:50:00Z', merge_commit_sha: 'a1b2c3d4e5f6', head: { sha: '1234567890ab' }, labels: [] };
+
+test('suivreDepot : PR de tests fusionnée = Acceptée posée, étiquettes retirées, tâche fermée', () => {
+  const { gh, appels } = github({ fermees: [PR_FUSIONNEE], fichiers: { 197: ['tests/navigation.test.ts'] } });
+  const r = suivreDepot({ depot: 'MoKarade/JobAI', gh, maintenant: MAINTENANT });
+  assert.deepEqual(r.acceptees, ['JobAI#196']);
+  const post = appels.find((a) => a.methode === 'POST');
+  assert.match(post.corps.body, /^\*\*Acceptée\*\* — PR #197 fusionnée \(a1b2c3d\)/);
+  assert.deepEqual(appels.filter((a) => a.methode === 'DELETE').map((a) => a.chemin.split('/').pop()).sort(), ['faisable-jules', 'jules']);
+  const patch = appels.find((a) => a.methode === 'PATCH');
+  assert.deepEqual(patch.corps, { state: 'closed', state_reason: 'completed' });
+  assert.ok(appels.findIndex((a) => a.methode === 'POST') < appels.findIndex((a) => a.methode === 'PATCH'), 'la preuve est posée avant la fermeture');
+});
+
+test('suivreDepot : PR fusionnée qui touche du code servi = rien posé, un signalement', () => {
+  const { gh, appels } = github({ fermees: [PR_FUSIONNEE], fichiers: { 197: ['tests/navigation.test.ts', 'lib/navigation.ts'] } });
+  const r = suivreDepot({ depot: 'MoKarade/JobAI', gh, maintenant: MAINTENANT });
+  assert.deepEqual(r.acceptees, []);
+  assert.equal(r.signaux.length, 1);
+  assert.match(r.signaux[0].raison, /non acceptée seule/);
+  assert.ok(!appels.some((a) => ['POST', 'PATCH', 'DELETE'].includes(a.methode)));
+});
+
+test('suivreDepot : contrôles pas verts = pas d’Acceptée', () => {
+  const { gh } = github({ fermees: [PR_FUSIONNEE], fichiers: { 197: ['tests/navigation.test.ts'] }, runs: [{ name: 'Gate', status: 'completed', conclusion: 'failure' }] });
+  const r = suivreDepot({ depot: 'MoKarade/JobAI', gh, maintenant: MAINTENANT });
+  assert.deepEqual(r.acceptees, []);
+  assert.match(r.signaux[0].raison, /pas verts/);
+});
+
+test('suivreDepot : PR ouverte avec Fixes = corps nettoyé ; fichier hors permis = hold + signalement ; un hold déjà là n’est pas reposé', () => {
+  const ouverte = { number: 200, title: 'test', body: 'Fixes #196', state: 'open', created_at: '2026-10-19T18:00:00Z', labels: [] };
+  const { gh, appels } = github({ ouvertes: [ouverte], fichiers: { 200: ['tests/navigation.test.ts', 'lib/x.ts'] } });
+  const r = suivreDepot({ depot: 'MoKarade/JobAI', gh, maintenant: MAINTENANT });
+  assert.deepEqual(r.nettoyees, ['JobAI#200']);
+  assert.deepEqual(r.holds, ['JobAI#200']);
+  assert.equal(r.signaux.length, 1);
+  const patch = appels.find((a) => a.methode === 'PATCH');
+  assert.match(patch.corps.body, /Tâche : #196/);
+  assert.doesNotMatch(patch.corps.body, /Fixes/);
+  const deja = github({ ouvertes: [{ ...ouverte, body: 'Tâche : #196\n', labels: [{ name: 'hold' }] }], fichiers: { 200: ['lib/x.ts'] } });
+  const r2 = suivreDepot({ depot: 'MoKarade/JobAI', gh: deja.gh, maintenant: MAINTENANT });
+  assert.deepEqual(r2.holds, []);
+  assert.deepEqual(r2.nettoyees, []);
+});
+
+test('suivreDepot : un signalement par PR et par 24 h ; à blanc : rien n’est écrit', () => {
+  const ouverte = { number: 200, title: 'test', body: 'Tâche : #196\n', state: 'open', created_at: '2026-10-19T18:00:00Z', labels: [] };
+  const { gh } = github({ ouvertes: [ouverte], fichiers: { 200: ['lib/x.ts'] } });
+  const recent = { 'JobAI#196': { signale: '2026-10-19T10:00:00Z' } };
+  assert.equal(suivreDepot({ depot: 'MoKarade/JobAI', gh, etat: recent, maintenant: MAINTENANT }).signaux.length, 0);
+  const vieux = { 'JobAI#196': { signale: '2026-10-18T10:00:00Z' } };
+  assert.equal(suivreDepot({ depot: 'MoKarade/JobAI', gh, etat: vieux, maintenant: MAINTENANT }).signaux.length, 1);
+  const g = github({ fermees: [PR_FUSIONNEE], fichiers: { 197: ['tests/navigation.test.ts'] } });
+  const blanc = suivreDepot({ depot: 'MoKarade/JobAI', gh: g.gh, maintenant: MAINTENANT, aBlanc: true });
+  assert.deepEqual(blanc.acceptees, ['JobAI#196']);
+  assert.ok(!g.appels.some((a) => ['POST', 'PATCH', 'DELETE'].includes(a.methode)));
+});
+
+test('suivreDepot : une tâche sans étiquette niveau:tâche, ou sans PR, est laissée', () => {
+  const { gh, appels } = github({ taches: [{ number: 5, labels: [{ name: 'jules' }], body: '' }, T] });
+  const r = suivreDepot({ depot: 'MoKarade/JobAI', gh, maintenant: MAINTENANT });
+  assert.equal(r.vu, 1);
+  assert.deepEqual(r.acceptees, []);
+  assert.ok(!appels.some((a) => ['POST', 'PATCH', 'DELETE'].includes(a.methode)));
+});
+
+test('tourJulesSuivi : une ligne, l’état des signalements écrit, un réveil unique ; un dépôt illisible n’arrête pas les autres', () => {
+  const dossier = mkdtempSync(join(tmpdir(), 'js-'));
+  const f = join(dossier, 'etat.json');
+  const ouverte = { number: 200, title: 'test', body: 'Tâche : #196\n', state: 'open', created_at: '2026-10-19T18:00:00Z', labels: [] };
+  const { gh } = github({ ouvertes: [ouverte], fichiers: { 200: ['lib/x.ts'] } });
+  const lances = [];
+  const lancer = (cmd, args) => lances.push([cmd, ...args].join(' '));
+  const gh2 = (m, c, b) => { if (/MemoryAI/.test(c)) throw new Error('404 introuvable'); return gh(m, c, b); };
+  const ligne = tourJulesSuivi({ fichierEtat: f, executer: true, gh: gh2, lancer, maintenant: MAINTENANT, depots: ['MoKarade/JobAI', 'MoKarade/MemoryAI'] });
+  assert.match(ligne, /^jules-suivi : 1 tâche\(s\) jules, 0 acceptée\(s\), 0 PR nettoyée\(s\), 1 hold, réveil envoyé \(1\), ÉCHEC MemoryAI/);
+  assert.equal(lances.length, 1);
+  assert.match(lances[0], /jules : JobAI#196 PR #200 ouverte avec fichier/);
+  assert.ok(JSON.parse(readFileSync(f, 'utf8'))['JobAI#196'].signale);
+  const ligne2 = tourJulesSuivi({ fichierEtat: f, executer: true, gh: gh2, lancer, maintenant: new Date(MAINTENANT.getTime() + 600_000), depots: ['MoKarade/JobAI'] });
+  assert.equal(lances.length, 1);
+  assert.match(ligne2, /0 hold|1 hold/);
+});
+
+test('tourJulesSuivi : sans --executer, rien n’est appliqué et la ligne le dit', () => {
+  const g = github({ fermees: [PR_FUSIONNEE], fichiers: { 197: ['tests/navigation.test.ts'] } });
+  const ligne = tourJulesSuivi({ fichierEtat: join(mkdtempSync(join(tmpdir(), 'js-')), 'e.json'), gh: g.gh, maintenant: MAINTENANT, depots: ['MoKarade/JobAI'] });
+  assert.match(ligne, /1 acceptée\(s\) \(JobAI#196\).*\(non appliqué\)/);
+  assert.ok(!g.appels.some((a) => ['POST', 'PATCH', 'DELETE'].includes(a.methode)));
+});
