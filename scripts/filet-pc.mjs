@@ -27,6 +27,9 @@
 // revient jamais dans la file et rien ne le dit. Message à part (`RÉACTEUR : oubli : …`) : il nomme les tâches, puisque c'est son objet.
 // Quatrième rôle (demande de Marc du 19/10/2026, « Jules full auto ») : confier à Jules, sans quota Claude, la première tâche réservée
 // (`faisable-jules`) d'un dépôt libre dont le corps est une consigne complète au gabarit (`tourJules`, `scripts/jules-auto.mjs`, docs §5 quater).
+// Cinquième rôle (demande du Coordinateur du 19/10/2026, tâche MoKarade/.github#285, après la fusion à la main de #270) : remettre en file toute PR
+// verte sortie de la file Mergify (étiquette `dequeued`) en mettant sa branche à jour (`update-branch`, que Mergify requeue seul), sans jamais
+// taper de commande `@mergifyio` (seul Marc le peut). Branche déjà à jour ou en conflit : réveil du Coordinateur, une fois par 2 h, avec la raison.
 // Un échec du réveil ne fait JAMAIS échouer le tour (il se dit sur la ligne imprimée) et n'enregistre pas le signalement :
 // le tour suivant réessaie.
 import { execFileSync } from 'node:child_process';
@@ -332,6 +335,105 @@ export function tourJules({ fichierProchaines, fichierEtat, aBlanc = false, exec
   }
 }
 
+export const FILE_ATTENTE_MIN = 10;
+export const FILE_ESSAI_H = 1;
+export const FILE_SIGNAL_H = 2;
+
+/**
+ * Décide quoi faire de chaque PR sortie de la file Mergify. Fonction pure : ne modifie pas son entrée.
+ * @param prs   [{ ref, draft, labels, etat_fusion }] PR ouvertes ; `etat_fusion` = `mergeable_state` de GitHub
+ * @param etat  { prs: { [ref]: { vu, essai, signale } } } gardé d'un tour à l'autre
+ * @returns { etat, actions: [{ ref, faire: 'mettre-a-jour' | 'signaler', raison }] }
+ */
+export function evaluerFile({ prs, etat = {}, maintenant = new Date() }) {
+  const suivi = {};
+  const actions = [];
+  const horodatage = maintenant.toISOString();
+  for (const p of prs) {
+    const labels = p.labels ?? [];
+    if (p.draft || !labels.includes('dequeued') || labels.includes('hold')) continue;
+    const ancien = etat.prs?.[p.ref] ?? {};
+    const note = { ...ancien, vu: ancien.vu ?? horodatage };
+    suivi[p.ref] = note;
+    if (minutesEntre(note.vu, maintenant) < FILE_ATTENTE_MIN) continue;
+    const signalable = !note.signale || minutesEntre(note.signale, maintenant) >= FILE_SIGNAL_H * 60;
+    if (p.etat_fusion === 'dirty') {
+      if (signalable) actions.push({ ref: p.ref, faire: 'signaler', raison: 'conflit de fusion' });
+      continue;
+    }
+    const essaiPossible = !note.essai || minutesEntre(note.essai, maintenant) >= FILE_ESSAI_H * 60;
+    if (essaiPossible) actions.push({ ref: p.ref, faire: 'mettre-a-jour', raison: '' });
+    else if (signalable) actions.push({ ref: p.ref, faire: 'signaler', raison: 'mise à jour déjà tentée, toujours hors file' });
+  }
+  return { etat: { prs: suivi }, actions };
+}
+
+/** Le message d'une PR hors file qu'aucune mise à jour ne remet : le nom de la PR, jamais d'ordre à un fil. */
+export function motifDeLaFile(signaux) {
+  return construireMotif(signaux.map((x) => `file Mergify : ${x.ref} hors file (${x.raison})`));
+}
+
+const branche_a_jour = (e) => /422|already up to date|no new commits|mergeable/i.test(String(e?.stderr ?? e?.message ?? ''));
+
+/**
+ * Un tour de la file : remet en file les PR vertes sorties de la file Mergify. Rend la ligne à afficher ; ne lève jamais.
+ * @param gh (methode, chemin, corps) -> objet JSON ; par défaut `gh api` du PC
+ */
+export function tourFile({ fichierEtat, executer = false, aBlanc = false, maintenant = new Date(), gh = null, lancer = execFileSync, depots = DEPOTS_FILET }) {
+  try {
+    const appel = gh ?? ghCli;
+    const etat = lireJson(fichierEtat, { prs: {} });
+    const prs = [];
+    for (const depot of depots) {
+      for (const p of appel('GET', `repos/${depot}/pulls?state=open&per_page=50`)) {
+        const labels = (p.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
+        if (p.draft || !labels.includes('dequeued')) continue;
+        const detail = appel('GET', `repos/${depot}/pulls/${p.number}`);
+        prs.push({ ref: `${depot.replace('MoKarade/', '')}#${p.number}`, depot, n: p.number, draft: p.draft, labels, etat_fusion: detail.mergeable_state });
+      }
+    }
+    const r = evaluerFile({ prs, etat, maintenant });
+    if (r.actions.length === 0) {
+      if (!aBlanc) ecrireJson(fichierEtat, r.etat);
+      return `file : ${prs.length ? `${prs.length} hors file, rien à faire encore` : 'aucune PR hors file'}`;
+    }
+    if (aBlanc || !executer) {
+      if (!aBlanc) ecrireJson(fichierEtat, r.etat);
+      return `file : ${r.actions.map((a) => `${a.ref} ${a.faire}`).join(', ')}${aBlanc ? ' (à blanc)' : ', non faits'}`;
+    }
+    const signaux = [];
+    const faits = [];
+    for (const a of r.actions) {
+      const p = prs.find((x) => x.ref === a.ref);
+      if (a.faire === 'signaler') { signaux.push(a); continue; }
+      try {
+        appel('PUT', `repos/${p.depot}/pulls/${p.n}/update-branch`);
+        faits.push(a.ref);
+        r.etat.prs[a.ref].essai = maintenant.toISOString();
+      } catch (e) {
+        if (!branche_a_jour(e)) throw e;
+        // Rien de neuf sur la base : aucune mise à jour possible, seul un geste de Marc remet la PR en file.
+        r.etat.prs[a.ref].essai = maintenant.toISOString();
+        signaux.push({ ref: a.ref, faire: 'signaler', raison: 'branche déjà à jour, Mergify ne la remet pas en file' });
+      }
+    }
+    let envoi = '';
+    if (signaux.length) {
+      try {
+        reveiller(motifDeLaFile(signaux), lancer);
+        for (const x of signaux) r.etat.prs[x.ref].signale = maintenant.toISOString();
+        envoi = `, réveil envoyé (${signaux.map((x) => x.ref).join(', ')})`;
+      } catch (e) {
+        envoi = `, ÉCHEC du réveil (${String(e.stderr || e.message).replace(/\s+/g, ' ').slice(0, 120)})`;
+      }
+    }
+    ecrireJson(fichierEtat, r.etat);
+    return `file : ${faits.length} mise(s) à jour${faits.length ? ` (${faits.join(', ')})` : ''}${envoi}`;
+  } catch (e) {
+    return `file : ÉCHEC (${String(e.message).slice(0, 160)})`;
+  }
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const arg = (nom) => { const i = process.argv.indexOf(nom); return i > 0 ? process.argv[i + 1] : null; };
   const fichierProchaines = process.argv[2];
@@ -346,6 +448,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const oublis = tourOublis({ fichierProchaines, fichierEtat: fichierEtat.replace(/(\.json)?$/, '-oublis.json'), ...options });
     const liens = tourLiens({ fichierProchaines, ...options });
     const jules = tourJules({ fichierProchaines, fichierEtat: fichierEtat.replace(/(\.json)?$/, '-jules.json'), ...options });
-    console.log(`${reveil} · ${quotidien} · ${oublis} · ${liens} · ${jules}`);
+    const file = tourFile({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-file.json'), ...options });
+    console.log(`${reveil} · ${quotidien} · ${oublis} · ${liens} · ${jules} · ${file}`);
   }
 }
