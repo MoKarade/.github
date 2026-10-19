@@ -34,6 +34,20 @@ export function dependancesEcrites(corps, depot) {
 }
 
 /**
+ * Une dépendance de la tâche est-elle ouverte ? `true` : oui ; `false` : aucune ; `'illisible'` : une lecture a échoué (à traiter comme « oui »).
+ * Lit la ligne `**Attend**` ET les liens natifs « Bloquée par ».
+ */
+export function dependanceOuverte({ depot, court, tache, gh }) {
+  try {
+    const ecrite = dependancesEcrites(tache.body, court).some((d) => gh('GET', `repos/${ORG}/${d.depot}/issues/${d.n}`).state === 'open');
+    const native = gh('GET', `repos/${depot}/issues/${tache.number}/dependencies/blocked_by`).some((b) => b.state === 'open');
+    return ecrite || native;
+  } catch {
+    return 'illisible';
+  }
+}
+
+/**
  * @param depot  « MoKarade/JobAI »
  * @param gh     (methode, chemin, corps) -> JSON ou lève
  * @returns {{ marquees: string[], refusees: number, reserve: number }}
@@ -56,14 +70,7 @@ export function marquerFaisables({ depot, gh, aBlanc = false }) {
     if (place <= 0) break;
     const verdict = evaluerJules({ repo: court, n: t.number, labels: [...noms(t.labels), ETIQUETTE], body: t.body ?? '' });
     if (!verdict.ok || citees.has(t.number) || MENTION_MCP.test(t.body ?? '') || /\bmcp\b/i.test(t.title ?? '')) { sortie.refusees += 1; continue; }
-    try {
-      const ouverte = dependancesEcrites(t.body, court).some((d) => gh('GET', `repos/${ORG}/${d.depot}/issues/${d.n}`).state === 'open')
-        || gh('GET', `repos/${depot}/issues/${t.number}/dependencies/blocked_by`).some((b) => b.state === 'open');
-      if (ouverte) { sortie.refusees += 1; continue; }
-    } catch {
-      sortie.refusees += 1; // dépendance illisible : rien n'est deviné
-      continue;
-    }
+    if (dependanceOuverte({ depot, court, tache: t, gh }) !== false) { sortie.refusees += 1; continue; } // ouverte ou illisible : rien n'est deviné
     if (!aBlanc) {
       gh('POST', `repos/${depot}/issues/${t.number}/labels`, { 'labels[]': ETIQUETTE });
       gh('POST', `repos/${depot}/issues/${t.number}/comments`, {
