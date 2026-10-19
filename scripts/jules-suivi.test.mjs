@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { menageFermees, ETIQUETTES_FERMEES, commentaireAcceptee, controlesVerts, corpsNettoye, evaluerFusion, horsPermis, prDeLaTache, suivreDepot, tachesCitees, testsSeuls } from './jules-suivi.mjs';
+import { menageFermees, ETIQUETTES_FERMEES, toucheMcp, toucheEcran, deploiementProduction, commentaireAcceptee, controlesVerts, corpsNettoye, evaluerFusion, horsPermis, prDeLaTache, suivreDepot, tachesCitees, testsSeuls } from './jules-suivi.mjs';
 import { tourJulesSuivi } from './filet-pc.mjs';
 import { lireCitation, evaluer } from './preuve.mjs';
 
@@ -55,7 +55,7 @@ test('evaluerFusion : tests seuls dans les fichiers permis et contrôles verts =
   assert.equal(evaluerFusion({ tache: { body: CORPS_TACHE }, pr, fichiers: ['tests/navigation.test.ts'], runs }).ok, true);
   const code = evaluerFusion({ tache: { body: CORPS_TACHE }, pr, fichiers: ['tests/navigation.test.ts', 'lib/navigation.ts'], runs });
   assert.equal(code.ok, false);
-  assert.match(code.raisons.join(' '), /pas que des tests/);
+  assert.match(code.raisons.join(' '), /hors « Fichiers permis »/);
   assert.match(evaluerFusion({ tache: { body: CORPS_TACHE }, pr, fichiers: ['tests/autre.test.ts'], runs }).raisons.join(' '), /hors « Fichiers permis »/);
   assert.match(evaluerFusion({ tache: { body: CORPS_TACHE }, pr: { merged: false }, fichiers: ['tests/navigation.test.ts'], runs }).raisons.join(' '), /non fusionnée/);
 });
@@ -90,7 +90,7 @@ test('le commentaire de preuve passe le garde-fou (scripts/preuve.mjs) : PR fusi
 });
 
 // ── I/O avec un GitHub simulé ───────────────────────────────────────────────────────────────────────────────────────
-function github({ taches = [T], ouvertes = [], fermees = [], tachesFermees = [], fichiers = {}, runs = [{ name: 'Gate', status: 'completed', conclusion: 'success' }] }) {
+function github({ taches = [T], ouvertes = [], fermees = [], tachesFermees = [], deploiements = [], statuts = 'success', commentaires = [], patches = {}, fichiers = {}, runs = [{ name: 'Gate', status: 'completed', conclusion: 'success' }] }) {
   const appels = [];
   const gh = (methode, chemin, corps) => {
     appels.push({ methode, chemin, corps });
@@ -100,7 +100,11 @@ function github({ taches = [T], ouvertes = [], fermees = [], tachesFermees = [],
     if (methode === 'GET' && /\/pulls\?state=open/.test(chemin)) return ouvertes;
     if (methode === 'GET' && /\/pulls\?state=closed/.test(chemin)) return fermees;
     const f = /\/pulls\/(\d+)\/files/.exec(chemin);
-    if (methode === 'GET' && f) return (fichiers[f[1]] ?? []).map((filename) => ({ filename }));
+    if (methode === 'GET' && f) return (fichiers[f[1]] ?? []).map((filename) => ({ filename, patch: patches[filename] }));
+    if (methode === 'GET' && /\/deployments\?environment/.test(chemin)) return deploiements;
+    if (methode === 'GET' && /\/deployments\/\d+\/statuses/.test(chemin)) return [{ state: statuts }];
+    if (methode === 'GET' && /\/compare\//.test(chemin)) return { status: 'ahead' };
+    if (methode === 'GET' && /\/issues\/\d+\/comments/.test(chemin)) return commentaires;
     if (methode === 'GET' && /\/check-runs/.test(chemin)) return { check_runs: runs };
     return {};
   };
@@ -225,4 +229,80 @@ test('tourJulesSuivi : le ménage des fermées est dit sur la ligne, et n’est 
   const l2 = tourJulesSuivi({ fichierEtat: f, gh: g2.gh, maintenant: MAINTENANT, depots: ['MoKarade/JobAI'] });
   assert.match(l2, /étiquette\(s\) retirée\(s\).*\(non appliqué\)/);
   assert.equal(g2.appels.filter((a) => a.methode === 'DELETE').length, 0);
+});
+
+const CORPS_ECRAN = `${CORPS_TACHE.replace('`tests/navigation.test.ts`', '`app/page.tsx`\n- `lib/navigation.ts`')}`;
+const TACHE_SERVIE = { ...T, body: CORPS_ECRAN };
+const DEP = { id: 4242, sha: 'ffffffffffffffff', created_at: '2026-10-19T18:51:00Z' };
+
+test('toucheMcp : chemins du serveur MCP et registerTool ajouté ; toucheEcran : css, tsx, components/', () => {
+  assert.equal(toucheMcp(['app/api/mcp/route.ts']), true);
+  assert.equal(toucheMcp(['lib/mcp/outils.ts']), true);
+  assert.equal(toucheMcp(['lib/a.ts'], ['+  server.registerTool("reanalyser_profil", {})']), true);
+  assert.equal(toucheMcp(['lib/a.ts'], ['-  server.registerTool("x")', ' contexte']), false);
+  assert.equal(toucheMcp(['lib/a.ts'], [undefined]), false);
+  assert.equal(toucheEcran(['app/page.tsx']), true);
+  assert.equal(toucheEcran(['lib/a.ts']), false);
+});
+
+test('deploiementProduction : réussi après la fusion et contenant le commit = ok ; échec, trop ancien ou illisible = non', () => {
+  const lire = (g) => deploiementProduction({ depot: 'MoKarade/JobAI', sha: 'a1b2c3d4e5f6', fusionLe: '2026-10-19T18:50:00Z', gh: g.gh });
+  assert.deepEqual({ ok: lire(github({ deploiements: [DEP] })).ok, id: lire(github({ deploiements: [DEP] })).id }, { ok: true, id: 4242 });
+  assert.equal(lire(github({ deploiements: [DEP], statuts: 'failure' })).ok, false);
+  assert.equal(lire(github({ deploiements: [{ ...DEP, created_at: '2026-10-19T10:00:00Z' }] })).ok, false);
+  assert.equal(lire(github({ deploiements: [] })).ok, false);
+  assert.equal(deploiementProduction({ depot: 'MoKarade/JobAI', sha: 'a1', fusionLe: '2026-10-19T18:50:00Z', gh: () => { throw new Error('404'); } }).ok, false);
+});
+
+test('suivreDepot : code servi + déploiement réussi = Acceptée « déploiement READY (id) » ; le garde-fou la valide', () => {
+  const g = github({ taches: [{ ...TACHE_SERVIE, body: CORPS_TACHE.replace('`tests/navigation.test.ts`', '`lib/navigation.ts`') }], fermees: [PR_FUSIONNEE], fichiers: { 197: ['lib/navigation.ts'] }, deploiements: [DEP] });
+  const r = suivreDepot({ depot: 'MoKarade/JobAI', gh: g.gh, maintenant: MAINTENANT });
+  assert.deepEqual(r.acceptees, ['JobAI#196']);
+  const corps = g.appels.find((a) => a.methode === 'POST').corps.body;
+  assert.match(corps, /^\*\*Acceptée\*\* — PR #197 fusionnée \(a1b2c3d\), déploiement READY \(4242\), preuve :/);
+  const cite = lireCitation(corps);
+  assert.ok(cite.preuve.length >= 40);
+  assert.equal(evaluer({
+    raison: 'completed', commentaires: [{ user: { type: 'User', login: 'MoKarade' }, body: corps, created_at: '2026-10-19T19:00:00Z' }],
+    pr: { merged: true, merged_at: '2026-10-19T18:50:00Z', merge_commit_sha: 'a1b2c3d4e5f6', head_sha: '1234567890ab' }, fichiers: ['lib/navigation.ts'],
+    deploiement: { requis: true, ok: true, detail: 'déploiement 4242' },
+  }).ok, true);
+});
+
+test('suivreDepot : code servi sans déploiement = on attend sans bruit ; plus d’une heure après la fusion = un signalement', () => {
+  const corps = CORPS_TACHE.replace('`tests/navigation.test.ts`', '`lib/navigation.ts`');
+  const base = { taches: [{ ...T, body: corps }], fermees: [PR_FUSIONNEE], fichiers: { 197: ['lib/navigation.ts'] } };
+  const tot = suivreDepot({ depot: 'MoKarade/JobAI', gh: github(base).gh, maintenant: MAINTENANT });
+  assert.deepEqual([tot.acceptees, tot.signaux], [[], []]);
+  const tard = suivreDepot({ depot: 'MoKarade/JobAI', gh: github(base).gh, maintenant: new Date('2026-10-19T20:00:00Z') });
+  assert.equal(tard.signaux.length, 1);
+  assert.match(tard.signaux[0].raison, /plus d'une heure.*déploiement de production/);
+});
+
+test('suivreDepot : un écran exige le commentaire de captures ; avec lui, le lien est dans l’Acceptée', () => {
+  const corps = CORPS_ECRAN.replace('Ne pas modifier `lib/format.ts`.', 'Ne pas modifier `lib/format.ts`. Joindre captures avant/après et lancer tests/theme.test.ts.');
+  const base = { taches: [{ ...T, body: corps }], fermees: [PR_FUSIONNEE], fichiers: { 197: ['app/page.tsx'] }, deploiements: [DEP] };
+  const sans = suivreDepot({ depot: 'MoKarade/JobAI', gh: github(base).gh, maintenant: new Date('2026-10-19T19:00:00Z') });
+  assert.deepEqual(sans.acceptees, []);
+  const g = github({ ...base, commentaires: [{ body: '<!-- captures-avant-apres -->\nAvant / après', html_url: 'https://github.com/MoKarade/JobAI/pull/197#issuecomment-1' }] });
+  const avec = suivreDepot({ depot: 'MoKarade/JobAI', gh: g.gh, maintenant: MAINTENANT });
+  assert.deepEqual(avec.acceptees, ['JobAI#196']);
+  assert.match(g.appels.find((a) => a.methode === 'POST').corps.body, /captures avant\/après : https:\/\/github\.com\/MoKarade\/JobAI\/pull\/197#issuecomment-1/);
+});
+
+test('suivreDepot : un outil MCP (registerTool ajouté ou app/api/mcp/) n’est jamais accepté seul', () => {
+  const corps = CORPS_TACHE.replace('`tests/navigation.test.ts`', '`lib/outils.ts`');
+  const g = github({ taches: [{ ...T, body: corps }], fermees: [PR_FUSIONNEE], fichiers: { 197: ['lib/outils.ts'] }, patches: { 'lib/outils.ts': '+server.registerTool("x", {})' }, deploiements: [DEP] });
+  const r = suivreDepot({ depot: 'MoKarade/JobAI', gh: g.gh, maintenant: MAINTENANT });
+  assert.deepEqual(r.acceptees, []);
+  assert.match(r.signaux[0].raison, /outil MCP/);
+  assert.ok(!g.appels.some((a) => ['POST', 'PATCH', 'DELETE'].includes(a.methode)));
+});
+
+test('docs seules (aucun fichier servi) : Acceptée « sans déploiement : docs, tests ou CI »', () => {
+  const corps = CORPS_TACHE.replace('`tests/navigation.test.ts`', '`docs/guide.md`');
+  const g = github({ taches: [{ ...T, body: corps }], fermees: [PR_FUSIONNEE], fichiers: { 197: ['docs/guide.md'] } });
+  const r = suivreDepot({ depot: 'MoKarade/JobAI', gh: g.gh, maintenant: MAINTENANT });
+  assert.deepEqual(r.acceptees, ['JobAI#196']);
+  assert.match(g.appels.find((a) => a.methode === 'POST').corps.body, /sans déploiement : docs, tests ou CI, aucun fichier servi/);
 });

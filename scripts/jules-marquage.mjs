@@ -13,6 +13,11 @@ export const RESERVE_MAX = 2;
 export const ETIQUETTE = 'faisable-jules';
 /** `prio:3` = « après le backlog » (décision de Marc) : jamais marquée seule. */
 export const PRIO_ECARTEE = 'prio:3';
+/**
+ * Une tâche qui ajoute un outil MCP reste hors du full auto (décision de Marc, 19/10/2026 19:56Z : « 4 oui ») : sa preuve en production
+ * demande une session avec son connecteur. Lu dans le corps de la tâche ; le diff est relu à la fusion (`toucheMcp`, jules-suivi.mjs).
+ */
+export const MENTION_MCP = /registerTool|lib\/mcp\/|app\/api\/mcp|(?:outil|serveur|tool)s?\s+MCP/i;
 
 const noms = (labels) => (labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
 
@@ -50,7 +55,7 @@ export function marquerFaisables({ depot, gh, aBlanc = false }) {
   for (const t of candidates) {
     if (place <= 0) break;
     const verdict = evaluerJules({ repo: court, n: t.number, labels: [...noms(t.labels), ETIQUETTE], body: t.body ?? '' });
-    if (!verdict.ok || citees.has(t.number)) { sortie.refusees += 1; continue; }
+    if (!verdict.ok || citees.has(t.number) || MENTION_MCP.test(t.body ?? '') || /\bmcp\b/i.test(t.title ?? '')) { sortie.refusees += 1; continue; }
     try {
       const ouverte = dependancesEcrites(t.body, court).some((d) => gh('GET', `repos/${ORG}/${d.depot}/issues/${d.n}`).state === 'open')
         || gh('GET', `repos/${depot}/issues/${t.number}/dependencies/blocked_by`).some((b) => b.state === 'open');

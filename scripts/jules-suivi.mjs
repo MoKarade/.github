@@ -5,12 +5,15 @@
 //   1. PR OUVERTE d'une tâche `jules` : on retire du corps `Fixes|Closes|Resolves #n` (la fusion ne doit pas fermer la tâche sans
 //      preuve) et on pose `Tâche : #n` si elle manque ; si un fichier de la PR sort de « Fichiers permis », on pose `hold` et on
 //      réveille le Coordinateur (une fois par 24 h et par PR). On ne lève jamais un `hold`.
-//   2. PR FUSIONNÉE d'une tâche `jules` encore ouverte (ou rouverte par le garde-fou après un `Fixes`) : si TOUS ses fichiers sont des tests,
-//      tous dans « Fichiers permis », et les contrôles de sa tête verts, on pose « **Acceptée** — … » au format du garde-fou
-//      (`scripts/preuve.mjs`), on retire les étiquettes de travail et on ferme. Une PR qui touche autre chose que des tests n'est pas
-//      acceptée ici : le fil du dépôt la reprend (le déploiement READY du code servi est une suite).
+//   2. PR FUSIONNÉE d'une tâche `jules` encore ouverte (ou rouverte par le garde-fou après un `Fixes`) : si tous ses fichiers sont dans
+//      « Fichiers permis », les contrôles de sa tête verts, aucun outil MCP touché, et, SI elle change du code servi, un déploiement de
+//      production réussi sur le commit fusionné (et, pour un écran, le commentaire de captures avant/après), on pose « **Acceptée** — … »
+//      au format du garde-fou (`scripts/preuve.mjs`), on retire les étiquettes de travail et on ferme (suite de #289 : tâche #300, décisions de
+//      Marc du 19/10/2026 19:56Z, « 3 ok 4 oui »). Déploiement ou captures pas encore là : on attend ; au-delà d'une heure, réveil.
 // Fonctions pures d'un côté, I/O de l'autre (`gh` injecté).
-import { fichiersPermis } from './jules-auto.mjs';
+import { fichiersPermis, FICHIER_ECRAN } from './jules-auto.mjs';
+import { servi } from './preuve.mjs';
+import { MARQUEUR as MARQUEUR_CAPTURES } from './captures.mjs';
 
 export const ETIQUETTES_A_RETIRER = ['jules', 'faisable-jules', 'en-cours', 'preuve-manquante', 'preuve-attendue'];
 export const TESTS = /(?:^|\/)(?:tests?|__tests__)\/|\.(?:test|spec)\.[cm]?[jt]sx?$/;
@@ -47,27 +50,85 @@ export function controlesVerts(runs) {
   return { ok: utiles.length > 0 && pasVerts.length === 0, total: utiles.length, pasVerts: pasVerts.map((r) => r.name) };
 }
 
+/** Un outil MCP ajouté ou un fichier du serveur MCP touché : hors du full auto (décision de Marc, 19/10/2026 : « 4 oui »). */
+export const MCP_CHEMIN = /(?:^|\/)(?:app\/api\/mcp\/|lib\/mcp\/)/;
+export const MCP_AJOUT = /^\+.*registerTool/m;
+export const toucheMcp = (fichiers, patches = []) => fichiers.some((f) => MCP_CHEMIN.test(f)) || patches.some((p) => MCP_AJOUT.test(String(p ?? '')));
+
+/** La PR touche-t-elle un écran ? (mêmes fichiers que `evaluerJules` : css, tsx, jsx, components/). */
+export const toucheEcran = (fichiers) => fichiers.some((f) => FICHIER_ECRAN.test(f));
+
+const descend = (gh, depot, base, tete) => {
+  if (base === tete) return true;
+  const r = gh('GET', `repos/${depot}/compare/${base}...${tete}`);
+  return r.status === 'ahead' || r.status === 'identical';
+};
+
 /**
- * La PR fusionnée prouve-t-elle sa tâche seule ? Rend { ok, raisons } ; `raisons` dit ce qui empêche l'acceptation automatique.
- * @param tache { n, body } ; @param pr { merged, merge_commit_sha } ; @param fichiers noms ; @param runs check-runs de la tête
+ * Le commit fusionné est-il en production ? Cherche un déploiement « Production » réussi, créé après la fusion, sur ce commit ou sur un commit qui le contient
+ * (même lecture que `verifierDeploiement` de preuve.mjs, en synchrone). Ne lève jamais : une lecture qui échoue rend { ok: false }.
  */
-export function evaluerFusion({ tache, pr, fichiers, runs }) {
-  const raisons = [];
-  if (!pr?.merged || !pr.merge_commit_sha) raisons.push('PR non fusionnée');
-  if (!testsSeuls(fichiers)) raisons.push(`la PR ne touche pas que des tests (${fichiers.filter((f) => !TESTS.test(f)).slice(0, 3).join(', ') || 'aucun fichier'})`);
+export function deploiementProduction({ depot, sha, fusionLe, gh }) {
+  const plancher = new Date(Date.parse(fusionLe) - 60_000).toISOString();
+  let deps;
+  try { deps = gh('GET', `repos/${depot}/deployments?environment=Production&per_page=15`); } catch { return { ok: false, detail: 'déploiements illisibles' }; }
+  if (!Array.isArray(deps)) return { ok: false, detail: 'aucun déploiement « Production »' };
+  let essais = 0;
+  for (const d of deps) {
+    if (d.created_at < plancher || essais >= 8) continue;
+    essais += 1;
+    try {
+      const etats = gh('GET', `repos/${depot}/deployments/${d.id}/statuses?per_page=5`);
+      if (!Array.isArray(etats) || etats[0]?.state !== 'success') continue;
+      if (descend(gh, depot, sha, d.sha)) return { ok: true, id: d.id, sha: d.sha, detail: `déploiement ${d.id} sur ${sha7(d.sha)}` };
+    } catch { /* un déploiement illisible n'en prouve pas un autre */ }
+  }
+  return { ok: false, detail: 'aucun déploiement « Production » réussi depuis la fusion' };
+}
+
+/** Le commentaire de captures avant/après posé par captures.yml sur la PR, ou null. */
+export function commentaireCaptures({ depot, numero, gh }) {
+  try {
+    const coms = gh('GET', `repos/${depot}/issues/${numero}/comments?per_page=100`);
+    const c = (Array.isArray(coms) ? coms : []).find((x) => String(x.body ?? '').includes(MARQUEUR_CAPTURES));
+    return c ? { url: c.html_url ?? '' } : null;
+  } catch { return null; }
+}
+
+/**
+ * La PR fusionnée prouve-t-elle sa tâche seule ? Rend { ok, attente, raisons, controles }.
+ * `raisons` dit ce qui empêche l'acceptation automatique ; `attente` est vrai quand il ne manque QUE le déploiement ou les captures (ça viendra).
+ * @param tache { n, body } ; @param pr { merged, merge_commit_sha } ; @param fichiers noms ; @param patches diffs ; @param runs check-runs de la tête
+ * @param deploiement { ok } ou null (lu seulement si la PR change du code servi) ; @param captures { url } ou null (écrans)
+ */
+export function evaluerFusion({ tache, pr, fichiers, patches = [], runs, deploiement = null, captures = null }) {
+  const bloquants = [];
+  const attendre = [];
+  if (!pr?.merged || !pr.merge_commit_sha) bloquants.push('PR non fusionnée');
+  if (fichiers.length === 0) bloquants.push('aucun fichier');
   const hors = horsPermis(fichiers, tache.body ?? '');
-  if (hors.length) raisons.push(`fichier(s) hors « Fichiers permis » : ${hors.slice(0, 3).join(', ')}`);
+  if (hors.length) bloquants.push(`fichier(s) hors « Fichiers permis » : ${hors.slice(0, 3).join(', ')}`);
+  if (toucheMcp(fichiers, patches)) bloquants.push('la PR ajoute ou touche un outil MCP : hors du full auto');
   const c = controlesVerts(runs);
-  if (!c.ok) raisons.push(c.total === 0 ? 'aucun contrôle lu sur la tête de la PR' : `contrôle(s) pas verts : ${c.pasVerts.slice(0, 3).join(', ')}`);
-  return { ok: raisons.length === 0, raisons, controles: c.total };
+  if (!c.ok) bloquants.push(c.total === 0 ? 'aucun contrôle lu sur la tête de la PR' : `contrôle(s) pas verts : ${c.pasVerts.slice(0, 3).join(', ')}`);
+  const sert = servi(fichiers);
+  if (sert && !deploiement?.ok) attendre.push('déploiement de production pas encore réussi sur le commit fusionné');
+  if (sert && toucheEcran(fichiers) && !captures) attendre.push('captures avant/après absentes de la PR');
+  const raisons = [...bloquants, ...attendre];
+  return { ok: raisons.length === 0, attente: bloquants.length === 0 && attendre.length > 0, raisons, controles: c.total, servi: sert };
 }
 
 const sha7 = (s) => String(s ?? '').slice(0, 7);
 
-/** Le commentaire de preuve, au format que le garde-fou accepte (PR fusionnée + empreinte, « sans déploiement : », « preuve : » ≥ 40 car.). */
-export function commentaireAcceptee({ pr, fichiers, controles, date }) {
+/** Le commentaire de preuve, au format que le garde-fou accepte (PR fusionnée + empreinte, « sans déploiement : » ou « déploiement READY (id) », « preuve : » ≥ 40 car.). */
+export function commentaireAcceptee({ pr, fichiers, controles, date, deploiement = null, captures = null }) {
   const liste = fichiers.slice(0, 5).join(', ') + (fichiers.length > 5 ? ` et ${fichiers.length - 5} autre(s)` : '');
-  return `**Acceptée** — PR #${pr.number} fusionnée (${sha7(pr.merge_commit_sha)}), sans déploiement : tests seuls, aucun fichier servi, preuve : lu le ${date} sur la PR #${pr.number} : ${fichiers.length} fichier(s) (${liste}), tous des tests et tous dans « Fichiers permis » de la tâche ; ${controles} contrôles de la tête ${sha7(pr.head?.sha)} tous verts ; fusion le ${pr.merged_at}.\n\n_Posé par le tour du PC (scripts/jules-suivi.mjs, tâche .github#289), sans relecture humaine : la preuve est mécanique._\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_`;
+  const tests = fichiers.every((f) => TESTS.test(f));
+  const lu = `lu le ${date} sur la PR #${pr.number} : ${fichiers.length} fichier(s) (${liste}), tous dans « Fichiers permis » de la tâche ; ${controles} contrôles de la tête ${sha7(pr.head?.sha)} tous verts ; fusion le ${pr.merged_at}`;
+  const entete = deploiement?.ok
+    ? `déploiement READY (${deploiement.id}), preuve : ${lu} ; déploiement de production ${deploiement.id} réussi sur ${sha7(deploiement.sha)}, qui contient le commit fusionné${captures ? `${captures.url ? ` ; captures avant/après : ${captures.url}` : ' ; captures avant/après présentes sur la PR'} (jointes à la PR, sans examen par une personne : accepté par Marc le 19/10/2026)` : ''}`
+    : `sans déploiement : ${tests ? 'tests seuls' : 'docs, tests ou CI'}, aucun fichier servi, preuve : ${lu}`;
+  return `**Acceptée** — PR #${pr.number} fusionnée (${sha7(pr.merge_commit_sha)}), ${entete}.\n\n_Posé par le tour du PC (scripts/jules-suivi.mjs, tâches .github#289 et #300), sans relecture humaine : la preuve est mécanique._\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_`;
 }
 
 const noms = (labels) => (labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
@@ -102,6 +163,8 @@ export function menageFermees({ depot, gh, aBlanc = false }) {
 }
 
 const FENETRE_SIGNAL_H = 24;
+/** Déploiement ou captures attendus : au-delà, réveil. */
+export const ATTENTE_MAX_H = 1;
 const heuresEntre = (depuis, maintenant) => (maintenant.getTime() - Date.parse(depuis)) / 3_600_000;
 
 /**
@@ -128,16 +191,24 @@ export function suivreDepot({ depot, gh, etat = {}, maintenant = new Date(), aBl
       sortie.signaux.push({ ref, raison });
     };
     if (fusionnee) {
-      const fichiers = gh('GET', `repos/${depot}/pulls/${fusionnee.number}/files?per_page=100`).map((f) => f.filename);
+      const detail = gh('GET', `repos/${depot}/pulls/${fusionnee.number}/files?per_page=100`);
+      const fichiers = detail.map((f) => f.filename);
       const runs = gh('GET', `repos/${depot}/commits/${fusionnee.head.sha}/check-runs?per_page=100`).check_runs ?? [];
-      const e = evaluerFusion({ tache: { n: t.number, body: t.body }, pr: { merged: Boolean(fusionnee.merged_at), merge_commit_sha: fusionnee.merge_commit_sha }, fichiers, runs });
+      const sert = servi(fichiers);
+      // Le déploiement et les captures ne se lisent que si la PR change du code servi (économie d'appels : un tour tous les 10 min).
+      const deploiement = sert ? deploiementProduction({ depot, sha: fusionnee.merge_commit_sha, fusionLe: fusionnee.merged_at, gh }) : null;
+      const captures = sert && toucheEcran(fichiers) ? commentaireCaptures({ depot, numero: fusionnee.number, gh }) : null;
+      const e = evaluerFusion({ tache: { n: t.number, body: t.body }, pr: { merged: Boolean(fusionnee.merged_at), merge_commit_sha: fusionnee.merge_commit_sha }, fichiers, patches: detail.map((f) => f.patch), runs, deploiement, captures });
       if (e.ok) {
         if (!aBlanc) {
-          gh('POST', `repos/${depot}/issues/${t.number}/comments`, { body: commentaireAcceptee({ pr: fusionnee, fichiers, controles: e.controles, date }) });
+          gh('POST', `repos/${depot}/issues/${t.number}/comments`, { body: commentaireAcceptee({ pr: fusionnee, fichiers, controles: e.controles, date, deploiement, captures }) });
           for (const l of ETIQUETTES_A_RETIRER) if (noms(t.labels).includes(l)) gh('DELETE', `repos/${depot}/issues/${t.number}/labels/${encodeURIComponent(l)}`);
           gh('PATCH', `repos/${depot}/issues/${t.number}`, { state: 'closed', state_reason: 'completed' });
         }
         sortie.acceptees.push(ref);
+      } else if (e.attente) {
+        // Il ne manque que le déploiement ou les captures : on attend ; au-delà d'une heure après la fusion, quelqu'un doit le savoir.
+        if (heuresEntre(fusionnee.merged_at, maintenant) > ATTENTE_MAX_H) signaler(`PR #${fusionnee.number} fusionnée depuis plus d'une heure, toujours pas acceptée : ${e.raisons.join(' ; ')}`);
       } else {
         signaler(`PR #${fusionnee.number} fusionnée, non acceptée seule : ${e.raisons[0]}`);
       }
