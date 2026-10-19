@@ -26,6 +26,7 @@ GESTES = {'fait', 'reponse', 'fusionner'}
 REF = re.compile(r'^([a-z0-9._-]+)#(\d{1,6})$')
 DEPOT_BOITE, WORKFLOW_BOITE = 'MoKarade/app-template', 'boite-reacteur.yml'   # mêmes valeurs que scripts/reveil-reacteur.mjs
 REPONSES = re.compile(r'^\s*\*\*\s*Réponses\s*(?:\*\*\s*:?|:\s*\*\*)\s*$(.*?)(?=^\s*\*\*[^*\n]{1,40}?(?:\*\*\s*:|:\s*\*\*)|\Z)', re.M | re.S | re.I)
+GARDE_FOU = re.compile(r'^\s*Garde-fou\s*:\s*la PR\b', re.I)   # « Garde-fou : la PR #n attend un geste de Marc » (fil Gantt, 19/10)
 PUCE = re.compile(r'^\s*(?:[-*+]|\d+[.)])\s+(.+?)\s*$')
 
 
@@ -73,6 +74,7 @@ def plan(dem, objet, maintenant):
     if objet.get('state') != 'open': return [], 'tâche déjà fermée'
     labels = {l['name'] for l in objet.get('labels', [])}
     if 'qui:marc' not in labels: return [], 'la tâche n\'attend plus Marc'
+    if GARDE_FOU.match(objet.get('title') or ''): return [], 'le geste attendu est la fusion de la PR, pas un commentaire'
     h = heure_quebec(maintenant)
     if dem['geste'] == 'fait':
         corps = f'**Fait** — Marc, depuis la page de suivi ({h}, heure du Québec).'

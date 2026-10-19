@@ -60,6 +60,10 @@ class Plan(unittest.TestCase):
     def test_fait_refuse_fermee(self):
         self.assertEqual(R.plan(dem(), issue(state='closed'), T)[1], 'tâche déjà fermée')
 
+    def test_garde_fou_refuse_fait(self):
+        g = dict(issue(), title='Garde-fou : la PR #242 attend un geste de Marc')
+        self.assertIn('fusion', R.plan(dem(), g, T)[1])
+
     def test_reponse_doit_etre_une_option(self):
         self.assertIsNotNone(R.plan(dem(geste='reponse', texte='Tout supprimer'), issue(), T)[1])
         a, err = R.plan(dem(geste='reponse', texte='Ne garder que le titre'), issue(), T)
