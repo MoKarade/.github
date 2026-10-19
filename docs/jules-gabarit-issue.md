@@ -29,6 +29,8 @@ Mise en place : MoKarade/.github#76. Proposition d'origine : `commun/plans/2026-
 
 **Source** : <BACKLOG.md:Lnn, ADR, ou issue parente>
 
+**Attend** : aucune (ou `#n — raison`) : la ligne est obligatoire sur toute tâche (docs/cycle-de-vie-tache.md §5 ter)
+
 **À citer dans la PR** : `Tâche : #<numéro de CETTE issue>` ; sujet de commit : `<préfixe permis>: <type>: <verbe et objet>`
 ```
 

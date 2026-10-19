@@ -5,13 +5,13 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { calculer, analyserAttentes, liensManquants, indexer, ATTENTE, calculerFrein, permiseParFrein, freinDepuisFichiers, FREIN, ECARTS_ETIQUETTE } from './prochaine-tache.mjs';
+import { calculer, analyserAttentes, liensManquants, indexer, ATTENTE, ATTEND_OBLIGATOIRE, attendAbsent, calculerFrein, permiseParFrein, freinDepuisFichiers, FREIN, ECARTS_ETIQUETTE } from './prochaine-tache.mjs';
 
 // Un relevé en mémoire : données fictives, aucun réseau. Même forme que backlog.json (fetch.py).
 const tache = (n, o = {}) => ({
   n, title: `Tâche ${n}`, lvl: 'tâche', labels: ['niveau:tâche', ...(o.labels ?? [])], state: o.state ?? 'open',
   url: `https://github.com/exemple/depot/issues/${n}`, kids: [], start: o.start ?? null, closed: o.closed ?? null,
-  pr: o.pr ?? null, deps: o.deps ?? [], fq: 'fq' in o ? o.fq : 'une commande de test passe',
+  pr: o.pr ?? null, deps: o.deps ?? [], ...('attend_ligne' in o ? { attend_ligne: o.attend_ligne } : {}), ...(o.created ? { created: o.created } : {}), fq: 'fq' in o ? o.fq : 'une commande de test passe',
 });
 const mission = (n, kids, labels = []) => ({ n, title: `Mission ${n}`, lvl: 'mission', labels: ['niveau:mission', ...labels], state: 'open', kids, deps: [] });
 const chantier = (n, kids, labels = []) => ({ n, title: `Chantier ${n}`, lvl: 'chantier', labels: ['niveau:chantier', ...labels], state: 'open', kids, deps: [] });
@@ -814,4 +814,41 @@ test('`faisable-jules` réserve la tâche à Jules : hors de la file de Claude, 
   assert.equal(r.etats['a#3'].etat, 'invalide', 'réservée mais sans nouvelles depuis plus de 24 h : le silence réveille le Coordinateur');
   assert.equal(r.etats['a#3'].cause, 'fil-silencieux');
   assert.equal(etat(calculer(releve(depot('a', [tache(1)])), { maintenant: NOW })).reservees_jules.length, 0);
+});
+
+// --- Ligne « **Attend** » obligatoire (décision de Marc, 19/10/2026) ---
+const AVANT = new Date('2026-10-19T20:00:00Z');
+const APRES = new Date(ATTEND_OBLIGATOIRE.DES_TOUTES);
+const releveAttend = (o) => releve(depot('a', [mission(1, [2]), tache(2, o)]));
+
+test('attend-absent : sans le champ attend_ligne (ancien relevé du PC), aucune règle', () => {
+  const r = calculer(releveAttend({ created: '2026-10-19T17:00:00Z' }), { maintenant: AVANT });
+  assert.equal(suivante(r), 'a#2');
+  assert.deepEqual(r.attend_absent, []);
+});
+
+test('attend-absent : une tâche créée après la décision sans ligne **Attend** est invalide tout de suite', () => {
+  const r = calculer(releveAttend({ attend_ligne: false, created: '2026-10-19T17:00:00Z' }), { maintenant: AVANT });
+  assert.equal(suivante(r), null);
+  assert.equal(etat(r).exclues['a#2'].code, 'attend-absent');
+  assert.equal(r.etats['a#2'].etat, 'invalide');
+  assert.equal(r.etats['a#2'].cause, 'attend-absent');
+  assert.deepEqual(r.oubliees.map((o) => [o.ref, o.cause]), [['a#2', 'attend-absent']]);
+  assert.deepEqual(r.attend_absent, [{ ref: 'a#2', applique: true }]);
+});
+
+test('attend-absent : une tâche plus ancienne a un délai de grâce, puis la règle s\'applique', () => {
+  const o = { attend_ligne: false, created: '2026-10-10T12:00:00Z' };
+  const avant = calculer(releveAttend(o), { maintenant: AVANT });
+  assert.equal(suivante(avant), 'a#2', 'pendant la grâce la tâche reste prenable');
+  assert.deepEqual(avant.attend_absent, [{ ref: 'a#2', applique: false }]);
+  const apres = calculer(releveAttend(o), { maintenant: APRES });
+  assert.equal(suivante(apres), null);
+  assert.equal(apres.etats['a#2'].cause, 'attend-absent');
+});
+
+test('attend-absent : la ligne écrite (même « aucune ») ou une dépendance native suffit', () => {
+  assert.equal(attendAbsent({ attend_ligne: true, created: '2026-10-19T17:00:00Z' }, APRES), false);
+  assert.equal(attendAbsent({ attend_ligne: false, deps: ['a#9'], created: '2026-10-19T17:00:00Z' }, APRES), false);
+  assert.equal(attendAbsent({ attend_ligne: false, created: '2026-10-19T17:00:00Z' }, APRES), true);
 });
