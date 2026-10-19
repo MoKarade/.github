@@ -68,7 +68,9 @@ def compacter_prochaines(p):
             'oubliees': [{k: o.get(k) for k in ('ref', 'cause', 'racine', 'proprietaire', 'depuis', 'heures')} for o in p.get('oubliees') or []],
             'file_marc': [{k: m.get(k) for k in ('racine', 'depuis', 'heures', 'retient', 'retient_n', 'en_retard')} for m in p.get('file_marc') or []],
             'attentes': {r: {k: a.get(k) for k in ('racine', 'code', 'proprietaire', 'depuis', 'heures', 'oubliee')} for r, a in (p.get('attentes') or {}).items()},
-            'seuils_oubli': p.get('seuils_oubli')}
+            'seuils_oubli': p.get('seuils_oubli'),
+            # état de chaque tâche ouverte (.github#247) : a-faire, en-cours, en-attente, bloquee ou invalide, avec ce qu'elle attend
+            'etats': {r: {k: e.get(k) for k in ('etat', 'attend', 'proprietaire', 'depuis', 'cause')} for r, e in (p.get('etats') or {}).items()}}
 
 comp = {'asof': gh['asof'], 'built': iso(datetime.datetime.now(UTC)), 'v': 7, 'repos': []}
 for r in gh['repos']:
