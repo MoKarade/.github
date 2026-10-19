@@ -46,7 +46,7 @@ function github({ issues = [], prs = [], fichiers = ['app/tendances/page.tsx', '
   return { gh, appels };
 }
 const ecritures = (appels) => appels.filter((a) => a.methode !== 'GET');
-const lancer = (g, o = {}) => completerDepot({ depot: 'MoKarade/CarAI', gh: g.gh, etat: {}, maintenant: new Date('2026-10-19T20:00:00Z'), ...o });
+const lancer = (g, o = {}) => completerDepot({ depot: 'MoKarade/FinanceAI', gh: g.gh, etat: {}, maintenant: new Date('2026-10-19T20:00:00Z'), ...o });
 
 test('cheminsCites : les chemins à barre oblique, sans :Lnn ; ni noms de fonctions, ni URL, ni jetons sans barre', () => {
   const c = cheminsCites(CORPS());
@@ -90,18 +90,18 @@ test('une tâche écrite pour Claude est complétée : bloc ajouté APRÈS le te
   const g = github({ issues: [t] });
   const etat = {};
   const r = lancer(g, { etat });
-  assert.deepEqual(r.completees, ['CarAI#30']);
+  assert.deepEqual(r.completees, ['FinanceAI#30']);
   const w = ecritures(g.appels);
   assert.equal(w.length, 2);
   assert.equal(w[0].methode, 'PATCH');
-  assert.equal(w[0].chemin, 'repos/MoKarade/CarAI/issues/30');
+  assert.equal(w[0].chemin, 'repos/MoKarade/FinanceAI/issues/30');
   const corps = w[0].corps.body;
   assert.ok(corps.startsWith(t.body.replace(/\s+$/, '')), 'le texte existant est intact et en tête');
   assert.match(corps, /<!-- gabarit-auto -->\n\*\*Fichiers permis\*\*/);
   assert.match(corps, /- `app\/tendances\/page\.tsx`\n- `tests\/tendances\.test\.ts` \(nouveau\)/);
   assert.doesNotMatch(corps, /docs\/adr\/0001\.md\`\n/); // un .md de Source n'est pas à modifier
   // le corps composé est celui que le filet confierait à Jules
-  assert.deepEqual(evaluerJules({ repo: 'CarAI', n: 30, labels: ['niveau:tâche', 'faisable-jules'], body: corps }), { ok: true, raisons: [] });
+  assert.deepEqual(evaluerJules({ repo: 'FinanceAI', n: 30, labels: ['niveau:tâche', 'faisable-jules'], body: corps }), { ok: true, raisons: [] });
   assert.match(w[1].corps.body, /gabarit-auto/);
   assert.equal(etat._completion.faites.length, 1);
 });
@@ -110,14 +110,14 @@ test('à blanc : rien n\'est écrit et le plafond du jour n\'est pas entamé', (
   const g = github({ issues: [tache(30)] });
   const etat = {};
   const r = lancer(g, { etat, aBlanc: true });
-  assert.deepEqual(r.completees, ['CarAI#30']);
+  assert.deepEqual(r.completees, ['FinanceAI#30']);
   assert.equal(ecritures(g.appels).length, 0);
   assert.equal(etat._completion.faites.length, 0);
 });
 
 test('au plus une tâche par dépôt et par tour, la plus prioritaire d\'abord', () => {
   const g = github({ issues: [tache(40, { labels: ['niveau:tâche', 'prio:2'] }), tache(41, { labels: ['niveau:tâche', 'prio:1'] })] });
-  assert.deepEqual(lancer(g).completees, ['CarAI#41']);
+  assert.deepEqual(lancer(g).completees, ['FinanceAI#41']);
 });
 
 test('refus : chemin cité introuvable, motif à étoile, chemin protégé, MCP, base de données, toile : rien n\'est écrit, le refus est dit une fois', () => {
@@ -146,9 +146,9 @@ test('refus : chemin cité introuvable, motif à étoile, chemin protégé, MCP,
 });
 
 test('un refus mémorisé est relu quand la tâche est modifiée (updated_at change)', () => {
-  const etat = { _completion: { faites: [], refus: { 'CarAI#30': { vu: '2026-10-19T09:00:00Z', raison: 'x' } } } };
+  const etat = { _completion: { faites: [], refus: { 'FinanceAI#30': { vu: '2026-10-19T09:00:00Z', raison: 'x' } } } };
   const g = github({ issues: [tache(30)] });
-  assert.deepEqual(lancer(g, { etat }).completees, ['CarAI#30']);
+  assert.deepEqual(lancer(g, { etat }).completees, ['FinanceAI#30']);
 });
 
 test('refus : seulement des tests cités (les fichiers de la tâche ne se déduisent pas) ; moins de 5 fichiers permis au plus', () => {
@@ -169,7 +169,7 @@ test('refus : dossier de tests introuvable', () => {
 test('une dépendance ouverte (écrite ou native) ou illisible : pas de complétion, pas de mémoire du refus', () => {
   const ecrite = CORPS().replace('**Attend** : rien (le frein de quota retient seulement le départ).', '**Attend** : #12 — raison');
   for (const g of [
-    github({ issues: [tache(30, { body: ecrite })], etats: { 'CarAI#12': 'open' } }),
+    github({ issues: [tache(30, { body: ecrite })], etats: { 'FinanceAI#12': 'open' } }),
     github({ issues: [tache(30)], natives: { 30: [{ state: 'open' }] } }),
     github({ issues: [tache(30)], natives: { 30: 'ERR' } }),
   ]) {
@@ -205,10 +205,10 @@ test('plafond : 20 complétions par 24 h sur tous les dépôts ; les plus ancien
   const heure = (h) => new Date(maintenant.getTime() - h * 3_600_000).toISOString();
   const pleine = { _completion: { faites: Array.from({ length: PAR_JOUR_MAX }, () => heure(3)), refus: {} } };
   const g = github({ issues: [tache(30)] });
-  assert.deepEqual(completerDepot({ depot: 'MoKarade/CarAI', gh: g.gh, etat: pleine, maintenant }).completees, []);
+  assert.deepEqual(completerDepot({ depot: 'MoKarade/FinanceAI', gh: g.gh, etat: pleine, maintenant }).completees, []);
   assert.equal(g.appels.length, 0);
   const vieille = { _completion: { faites: Array.from({ length: PAR_JOUR_MAX }, () => heure(25)), refus: {} } };
-  assert.deepEqual(completerDepot({ depot: 'MoKarade/CarAI', gh: github({ issues: [tache(30)] }).gh, etat: vieille, maintenant }).completees, ['CarAI#30']);
+  assert.deepEqual(completerDepot({ depot: 'MoKarade/FinanceAI', gh: github({ issues: [tache(30)] }).gh, etat: vieille, maintenant }).completees, ['FinanceAI#30']);
   assert.equal(vieille._completion.faites.length, 1);
 });
 
@@ -225,15 +225,23 @@ test('le tour du PC : complète puis marque dans le même passage, et le dit sur
   const etatDepot = { issues: issuesInitiales.map((i) => ({ ...i })) };
   const g = github({ issues: etatDepot.issues });
   const gh = (m, c, b) => {
-    if (m === 'PATCH') { const i = etatDepot.issues.find((x) => `repos/MoKarade/CarAI/issues/${x.number}` === c); i.body = b.body; return {}; }
+    if (m === 'PATCH') { const i = etatDepot.issues.find((x) => `repos/MoKarade/FinanceAI/issues/${x.number}` === c); i.body = b.body; return {}; }
     return g.gh(m, c, b);
   };
-  const ligne = tourJulesSuivi({ fichierEtat, executer: true, aBlanc: false, maintenant: new Date('2026-10-19T20:00:00Z'), gh, depots: ['MoKarade/CarAI'] });
-  assert.match(ligne, /1 complétée\(s\) au gabarit \(CarAI#30\)/);
-  assert.match(ligne, /refus : CarAI#31 « migration »/);
-  assert.match(ligne, /1 marquée\(s\) faisable-jules \(CarAI#30\)/);
+  const ligne = tourJulesSuivi({ fichierEtat, executer: true, aBlanc: false, maintenant: new Date('2026-10-19T20:00:00Z'), gh, depots: ['MoKarade/FinanceAI'] });
+  assert.match(ligne, /1 complétée\(s\) au gabarit \(FinanceAI#30\)/);
+  assert.match(ligne, /refus : FinanceAI#31 « migration »/);
+  assert.match(ligne, /1 marquée\(s\) faisable-jules \(FinanceAI#30\)/);
   assert.doesNotMatch(ligne, /ÉCHEC/);
   const sauve = JSON.parse(readFileSync(fichierEtat, 'utf8'));
   assert.equal(sauve._completion.faites.length, 1);
-  assert.ok(sauve._completion.refus['CarAI#31']);
+  assert.ok(sauve._completion.refus['FinanceAI#31']);
+});
+
+test('écran dans une app privée : refus « écran sans captures possibles », rien n\'est écrit ; FinanceAI reste éligible', () => {
+  const g = github({ issues: [tache(30)] });
+  const r = completerDepot({ depot: 'MoKarade/CarAI', gh: g.gh, etat: {}, maintenant: new Date('2026-10-19T20:00:00Z') });
+  assert.deepEqual(r.completees, []);
+  assert.match(r.refusees[0].raison, /écran sans captures possibles/);
+  assert.equal(ecritures(g.appels).length, 0);
 });

@@ -43,6 +43,10 @@ export const CHEMINS_INTERDITS = [
 ];
 const DEPOTS_INTERDITS = { 'hub-contract': 'le contrat', };
 const ETIQUETTES_INTERDITES = ['sécurité', 'securite', 'incident', 'preuve-manquante', 'migration', 'secret'];
+// Les apps sont privées (connexion centralisée dans le hub) : sans porte « mode captures », que Marc a refusée le 19/10/2026 (« b »), le workflow
+// commun `captures.yml` ne peut pas photographier leurs pages, et le filet n'accepte seul une PR d'écran qu'avec ces captures. FinanceAI, 100 %
+// navigateur avec un mode test, est la seule app dont les écrans se photographient.
+export const DEPOTS_ECRAN_PERMIS = ['financeai'];
 const ETIQUETTES_ECRAN = ['écran', 'ecran', 'ui', 'design'];
 export const FICHIER_ECRAN = /\.(css|tsx|jsx)$|(^|\/)components\//i;
 const FICHIER_DEPENDANCES = /(^|\/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/;
@@ -97,6 +101,7 @@ export function evaluerJules({ repo, n, labels = [], body = '' }) {
     // Exclusions levées par Marc le 19/10/2026 : permises seulement si le corps porte la preuve demandée.
     const consignes = ['À faire', 'À ne pas faire', 'Vérifier', 'Fini quand'].map((t) => section(body, t) ?? '').join('\n');
     const toucheEcran = fichiers.some((f) => FICHIER_ECRAN.test(f)) || labels.some((l) => ETIQUETTES_ECRAN.includes(String(l).toLowerCase()));
+    if (toucheEcran && !DEPOTS_ECRAN_PERMIS.includes(depot)) raisons.push('écran sans captures possibles : app privée, aucune porte « mode captures » (décision de Marc du 19/10/2026)');
     if (toucheEcran && !(/capture/i.test(consignes) && /theme\.test/i.test(consignes))) {
       raisons.push('écran : le corps doit demander des captures avant/après ET le test tests/theme.test.ts');
     }

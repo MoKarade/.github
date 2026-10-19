@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { MARQUEUR, capturer, commentaire, commenter, lirePages, nomImage, nomsUniques, publier, trouverCommentaire } from './captures.mjs';
+import { MARQUEUR, capturer, commentaire, commenter, jouerEtapes, lireEtapes, lirePages, lireStockage, nomImage, nomsUniques, publier, trouverCommentaire } from './captures.mjs';
 
 test('nomImage : accueil, chemin, requête, caractères exotiques', () => {
   assert.equal(nomImage('/'), 'accueil');
@@ -165,4 +165,115 @@ test('publier : crée la branche captures, la met à jour, garde l’historique,
 
 test('publier : une erreur autre que « branche absente » remonte', () => {
   assert.throws(() => publier({ remote: 'file:///inexistant/depot.git', pr: 1, sha: 'abc', avant: '/nulle/part', apres: '/nulle/part' }));
+});
+
+test('lirePages : un fragment (#DEBT) est permis, une ligne qui commence par # reste un commentaire', () => {
+  assert.deepEqual(lirePages('/#DEBT\n# note\n/#FUTURE'), ['/#DEBT', '/#FUTURE']);
+  assert.equal(nomImage('/#DEBT'), 'debt');
+});
+
+test('lireEtapes : quatre verbes fermés, commentaires ignorés', () => {
+  assert.deepEqual(lireEtapes('aller /#SETTINGS\n# note\npointeur 1270 450\ncliquer-bouton Activer le mode test\nattendre-texte MODE TEST\n'), [
+    { verbe: 'aller', chemin: '/#SETTINGS' },
+    { verbe: 'pointeur', x: 1270, y: 450 },
+    { verbe: 'cliquer-bouton', texte: 'Activer le mode test' },
+    { verbe: 'attendre-texte', texte: 'MODE TEST' },
+  ]);
+  assert.deepEqual(lireEtapes(''), []);
+});
+
+test('lireEtapes : refuse tout ce qui sort du format (verbe inconnu, JavaScript, page hors app, nombres, texte trop long, trop d’étapes)', () => {
+  assert.throws(() => lireEtapes('evaluer document.cookie'), /étape invalide/);
+  assert.throws(() => lireEtapes('aller https://evil.example/'), /étape invalide/);
+  assert.throws(() => lireEtapes('aller //evil.example/x'), /étape invalide/);
+  assert.throws(() => lireEtapes('aller /a/../b'), /étape invalide/);
+  assert.throws(() => lireEtapes('pointeur a b'), /deux nombres/);
+  assert.throws(() => lireEtapes(`attendre-texte ${'x'.repeat(81)}`), /80 caractères/);
+  assert.throws(() => lireEtapes(Array.from({ length: 21 }, () => 'pointeur 1 1').join('\n')), /trop d'étapes/);
+});
+
+test('lireStockage : cle=valeur, refuse le reste', () => {
+  assert.deepEqual(lireStockage('app_onboarding_done=true\n# x\nlangue=fr'), [{ cle: 'app_onboarding_done', valeur: 'true' }, { cle: 'langue', valeur: 'fr' }]);
+  assert.throws(() => lireStockage('sans egal'), /stockage-local invalide/);
+  assert.throws(() => lireStockage('a b=1'), /stockage-local invalide/);
+  assert.throws(() => lireStockage(Array.from({ length: 11 }, (_, i) => `k${i}=v`).join('\n')), /trop d'entrées/);
+});
+
+/** Faux navigateur à étapes : note chaque geste, pose le stockage, et traite #fragment comme une navigation dans le même document (réponse null). */
+function fauxAvecEtapes({ echecClic = false } = {}) {
+  const journal = [];
+  const stockage = {};
+  let courant = null;
+  const navigateur = {
+    newContext: async () => ({
+      addInitScript: async (fn, [origine, entrees]) => {
+        journal.push(`init ${origine}`);
+        for (const [c, v] of entrees) stockage[c] = v;
+      },
+      newPage: async () => ({
+        goto: async (url) => {
+          const u = new URL(url);
+          const meme = courant && courant.pathname === u.pathname && courant.search === u.search;
+          courant = u;
+          journal.push(`goto ${u.pathname}${u.hash}`);
+          return meme ? null : { status: () => 200 };
+        },
+        waitForTimeout: async (ms) => journal.push(`attendre ${ms}`),
+        mouse: { move: async (x, y) => journal.push(`souris ${x},${y}`) },
+        getByRole: (role, { name, exact }) => ({
+          click: async () => {
+            if (echecClic) throw new Error('Timeout 15000ms exceeded http://interne:9/secret');
+            journal.push(`clic ${role} ${name} ${exact}`);
+          },
+        }),
+        getByText: (texte) => ({ first: () => ({ waitFor: async ({ timeout }) => journal.push(`texte ${texte} ${timeout}`) }) }),
+        screenshot: async ({ path }) => writeFileSync(path, `png:${courant.pathname}${courant.hash}`),
+      }),
+    }),
+    close: async () => journal.push('fermé'),
+  };
+  return { navigateur, journal, stockage };
+}
+
+test('capturer avec étapes : stockage posé avant le chargement, étapes dans l’ordre, pages à fragment photographiées', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cap-etapes-'));
+  try {
+    const f = fauxAvecEtapes();
+    const meta = await capturer({
+      urlBase: 'http://localhost:3000',
+      pages: ['/#DEBT', '/#FUTURE'],
+      sortie: dir,
+      etapes: lireEtapes('aller /#SETTINGS\npointeur 1270 450\ncliquer-bouton Activer le mode test\nattendre-texte MODE TEST'),
+      stockage: lireStockage('app_onboarding_done=true'),
+      lancerNavigateur: async () => f.navigateur,
+    });
+    assert.deepEqual(f.stockage, { app_onboarding_done: 'true' });
+    assert.deepEqual(f.journal, [
+      'init http://localhost:3000', 'goto /#SETTINGS', 'souris 1270,450', 'clic button Activer le mode test true', 'texte MODE TEST 15000',
+      'goto /#DEBT', 'attendre 800', 'goto /#FUTURE', 'attendre 800', 'fermé',
+    ]);
+    assert.equal(meta['/#DEBT'].fichier, 'debt.png');
+    assert.equal(meta['/#DEBT'].statut, 200);
+    assert.equal(meta['/#FUTURE'].fichier, 'future.png');
+    assert.equal(readFileSync(join(dir, 'future.png'), 'utf8'), 'png:/#FUTURE');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('capturer : une étape qui échoue marque toutes les pages « étape impossible », sans détail interne, navigateur fermé', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cap-etapes-'));
+  try {
+    const f = fauxAvecEtapes({ echecClic: true });
+    const meta = await capturer({ urlBase: 'http://localhost:3000', pages: ['/#DEBT'], sortie: dir, etapes: lireEtapes('cliquer-bouton Absent'), lancerNavigateur: async () => f.navigateur });
+    assert.deepEqual(meta['/#DEBT'], { fichier: null, statut: 0, erreur: 'étape impossible' });
+    assert.doesNotMatch(JSON.stringify(meta), /secret|interne/);
+    assert.equal(f.journal.at(-1), 'fermé');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('jouerEtapes : « aller » refuse une page hors de l’app', async () => {
+  await assert.rejects(jouerEtapes({ page: {}, etapes: [{ verbe: 'aller', chemin: '//evil.example/x' }], urlBase: 'http://localhost:3000' }), /hors de l'app/);
 });

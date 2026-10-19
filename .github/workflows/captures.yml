@@ -25,6 +25,12 @@ name: Captures avant/après (workflow commun)
 #         pages: |
 #           /
 #           /liste
+#         etapes: |                      # facultatif : à jouer avant de photographier (format fermé)
+#           aller /reglages
+#           cliquer-bouton Activer le mode test
+#           attendre-texte MODE TEST
+#         stockage-local: |              # facultatif : cle=valeur posé avant le premier chargement
+#           app_onboarding_done=true
 #
 # Le script vient de ce dépôt, jamais du code de l'appelant. Si l'app « avant » ne démarre pas (app ajoutée
 # par la PR), le commentaire le dit au lieu de faire échouer la PR ; si l'app « après » ne démarre pas, le job
@@ -48,6 +54,14 @@ on:
         description: 'Les pages à photographier, un chemin par ligne (12 au plus).'
         type: string
         default: /
+      etapes:
+        description: 'Étapes jouées avant de photographier, une par ligne, format fermé : « aller /chemin », « cliquer-bouton Nom exact », « attendre-texte Texte », « pointeur x y ». Aucun JavaScript libre.'
+        type: string
+        default: ''
+      stockage-local:
+        description: 'Valeurs posées dans le localStorage de l’app avant le premier chargement, « cle=valeur » par ligne (ex. écran d’accueil déjà passé).'
+        type: string
+        default: ''
       racine:
         description: 'Dossier de l’app dans le dépôt (« web » chez batchchef-).'
         type: string
@@ -89,6 +103,8 @@ jobs:
       CAPTURES_DEMARRAGE: ${{ inputs.demarrage }}
       CAPTURES_URL: ${{ inputs.url }}
       CAPTURES_PAGES: ${{ inputs.pages }}
+      CAPTURES_ETAPES: ${{ inputs.etapes }}
+      CAPTURES_STOCKAGE: ${{ inputs.stockage-local }}
       CAPTURES_RACINE: ${{ inputs.racine }}
       CAPTURES_ATTENTE: ${{ inputs.attente-s }}
       CAPTURES_LARGEUR: ${{ inputs.largeur }}
