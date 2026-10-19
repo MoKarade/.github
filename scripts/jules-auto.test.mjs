@@ -60,11 +60,14 @@ test('exclusions levées par Marc le 19/10 : un workflow listé, sans secret, co
   assert.equal(evalue({ 'Fichiers permis': ':\n- `.github/workflows/ci.yml`' }).ok, true);
 });
 
-test('écran : permis avec captures avant/après ET test de thème, refusé sinon', () => {
+test('écran : permis (FinanceAI) avec captures avant/après ET test de thème, refusé sinon ; refusé dans toute app privée', () => {
   const f = { 'Fichiers permis': ':\n- `app/globals.css`\n- `components/Carte.tsx`' };
-  assert.match(evalue(f).raisons.join(), /écran : le corps doit demander des captures/);
-  assert.match(evalue({ ...f, Vérifier: 'captures avant/après' }).raisons.join(), /theme\.test/);
-  assert.equal(evalue({ ...f, Vérifier: 'captures avant/après ; `npm run test -- tests/theme.test.ts`' }).ok, true);
+  const prive = evalue({ ...f, Vérifier: 'captures avant/après ; `npm run test -- tests/theme.test.ts`' });
+  assert.match(prive.raisons.join(), /écran sans captures possibles/);
+  const finance = (surcharge) => evaluerJules({ repo: 'FinanceAI', n: 7, labels: ['faisable-jules'], body: corps(7, 'FinanceAI', surcharge) });
+  assert.equal(finance({ ...f, Vérifier: 'captures avant/après ; `npm run test -- tests/theme.test.ts`' }).ok, true);
+  assert.match(finance(f).raisons.join(), /écran : le corps doit demander des captures/);
+  assert.match(finance({ ...f, Vérifier: 'captures avant/après' }).raisons.join(), /theme\.test/);
   assert.match(evalue({}, { labels: ['faisable-jules', 'écran'] }).raisons.join(), /écran/);
 });
 

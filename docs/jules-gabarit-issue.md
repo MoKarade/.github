@@ -51,7 +51,7 @@ Tests unitaires d'une fonction pure existante ; test de liens ou de présence de
 
 Chemin protégé (`scripts/`, `surveillance/`, `qualite/`, Garde-fou, relecture, Mergify, CODEOWNERS), base de données, migration, authentification, secret, jeton, Sentry, moteur DriveAI, contrat, `BACKLOG.md` / `HANDOVER.md` / `CLAUDE.md` / `AGENTS.md`, tout ce qui demande un choix de conception.
 
-**Permis depuis le 19/10/2026 (Marc), avec la preuve dans le corps** : petits écrans (captures avant/après et `tests/theme.test.ts` vert dans « Vérifier ») ; workflows `.github/workflows/*.yml` listés dans « Fichiers permis », sans secret ; autres `.md` (écrire « en français, tous les accents » dans « À faire » ou « À ne pas faire », et un test des mots) ; montées mineures/patch de dépendances (`npm audit` à 0 dans « Vérifier »).
+**Permis depuis le 19/10/2026 (Marc), avec la preuve dans le corps** : petits écrans (captures avant/après et `tests/theme.test.ts` vert dans « Vérifier »), **FinanceAI seulement** (les autres apps sont privées : pas de captures possibles, l'écran reste à Claude) ; workflows `.github/workflows/*.yml` listés dans « Fichiers permis », sans secret ; autres `.md` (écrire « en français, tous les accents » dans « À faire » ou « À ne pas faire », et un test des mots) ; montées mineures/patch de dépendances (`npm audit` à 0 dans « Vérifier »).
 
 ## Après la PR de Jules
 
