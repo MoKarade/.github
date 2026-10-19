@@ -37,13 +37,13 @@ Mise en place : MoKarade/.github#76. Proposition d'origine : `commun/plans/2026-
 1. Un seul objectif. Pas de « OU » : Jules fait alors les deux (constat Hubperso#146).
 2. Des chemins exacts, vérifiés (Grep ou carnet NotebookLM `carnet`), jamais devinés.
 3. Un « Fini quand » qu'un script peut contrôler ; sinon la tâche n'est pas prête.
-4. Une tâche tient en deux fichiers au plus et environ 150 lignes de diff ; au-delà, on découpe.
+4. Une tâche tient en cinq fichiers au plus et environ 400 lignes de diff (limite levée par Marc le 19/10/2026, avant : deux fichiers et 150 lignes) ; au-delà, on découpe.
 5. Aucune donnée personnelle dans l'issue (dépôts publics). Exemples et jeux d'essai fictifs.
 6. Écrire en toutes lettres le numéro de l'issue et le préfixe de commit permis : Jules copie sinon l'ID de la ligne « Source » (constat Hubperso#147 : `[H-25]` et `Tâche : #25`). Hubperso : `HORS-BACKLOG:` tant que `BACKLOG.md` n'est pas un fichier permis.
 
 ## Tâches qui conviennent à Jules
 
-Tests unitaires d'une fonction pure existante ; test de liens ou de présence de fichiers ; doc courte (un fichier de moins de 150 lignes ou une section ciblée) ; commentaire de code manquant ; remplacement mécanique d'un terme sur une liste fermée de fichiers ; ajout d'un cas dans un tableau de données de test.
+Depuis le 19/10/2026 (Marc a levé les exclusions 1 à 5) : petits changements d'écran (captures avant/après, tests de thème verts), workflows de `.github/` sans secret ni garde-fou touché, longs fichiers `.md` (consigne française explicite dans `AGENTS.md`), mises à jour de dépendances mineures avec `npm audit --omit=dev` à 0. Restent exclus : secrets, jetons, Sentry, authentification, base de données et migrations. Cas habituels : tests unitaires d'une fonction pure existante ; test de liens ou de présence de fichiers ; doc courte (un fichier de moins de 150 lignes ou une section ciblée) ; commentaire de code manquant ; remplacement mécanique d'un terme sur une liste fermée de fichiers ; ajout d'un cas dans un tableau de données de test.
 
 ## Tâches à garder pour Claude
 
