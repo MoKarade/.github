@@ -25,6 +25,8 @@
 // `prochaine-tache.mjs` liste dans `oubliees` (personne ne peut lever l'obstacle, geste de Marc qui dort, fil silencieux), une fois par racine
 // et par 24 h tant que ça dure. Sans cela une tâche retenue par un geste de Marc, un « bloqué » sans raison ou une dépendance illisible ne
 // revient jamais dans la file et rien ne le dit. Message à part (`RÉACTEUR : oubli : …`) : il nomme les tâches, puisque c'est son objet.
+// Quatrième rôle (demande de Marc du 19/10/2026, « Jules full auto ») : confier à Jules, sans quota Claude, la première tâche réservée
+// (`faisable-jules`) d'un dépôt libre dont le corps est une consigne complète au gabarit (`tourJules`, `scripts/jules-auto.mjs`, docs §5 quater).
 // Un échec du réveil ne fait JAMAIS échouer le tour (il se dit sur la ligne imprimée) et n'enregistre pas le signalement :
 // le tour suivant réessaie.
 import { execFileSync } from 'node:child_process';
@@ -32,6 +34,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { DEPOT_BOITE, WORKFLOW_BOITE, construireMotif } from './reveil-reacteur.mjs';
 import { lierTout, ghCli } from './lier-taches.mjs';
+import { choisirPourJules, confierAJules } from './jules-auto.mjs';
 
 export const SEUIL_LIBRE_MIN = 30;
 export const FENETRE_SIGNALEMENT_H = 2;
@@ -286,6 +289,49 @@ export function tourLiens({ fichierProchaines, aBlanc = false, executer = false,
   }
 }
 
+/** Lit une issue EN DIRECT pour `choisirPourJules` : l'état, les étiquettes et le corps (la consigne de Jules). */
+function lireIssueGh(gh) {
+  return (depot, n) => {
+    const i = gh('GET', `repos/MoKarade/${depot}/issues/${n}`);
+    return { state: i.state, labels: (i.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name)), body: i.body ?? '' };
+  };
+}
+
+/**
+ * Un tour de Jules (demande de Marc du 19/10/2026) : confier à Jules la première tâche réservée (`faisable-jules`) de chaque dépôt libre dont le
+ * corps est une consigne complète au gabarit (`scripts/jules-auto.mjs`, docs/cycle-de-vie-tache.md §5 quater). Trois Jules en même temps au plus.
+ * `prochaines.json` périmé (plus de 30 min) : rien. Rend la ligne à afficher ; ne lève jamais.
+ * @param gh (methode, chemin, corps) -> objet JSON ; par défaut `gh api` du PC
+ */
+export function tourJules({ fichierProchaines, fichierEtat, aBlanc = false, executer = false, maintenant = new Date(), gh = null }) {
+  try {
+    const prochaines = lireJson(fichierProchaines, null);
+    if (!prochaines) return 'jules : prochaines.json illisible';
+    const age = (maintenant.getTime() - Date.parse(prochaines.calcule_le)) / 60_000;
+    if (!(age <= 30)) return 'jules : prochaines.json périmé, rien';
+    const appel = gh ?? ghCli;
+    const etat = lireJson(fichierEtat, { confies: {} });
+    etat.confies ??= {};
+    const { choix, pasPretes, depotsConcernes, enCours } = choisirPourJules(prochaines, lireIssueGh(appel), etat);
+    if (depotsConcernes === 0) return `jules : aucune tâche réservée (faisable-jules), ${enCours} en cours`;
+    const confiees = [];
+    const sautees = [];
+    for (const c of choix) {
+      if (!executer && !aBlanc) { sautees.push(`${c.ref} (non confiée)`); continue; }
+      const r = confierAJules({ repo: c.repo, n: c.n }, appel, { aBlanc });
+      if (r.statut === 'confiee') {
+        confiees.push(c.ref);
+        if (!aBlanc) etat.confies[c.ref] = { fois: (etat.confies[c.ref]?.fois ?? 0) + 1, derniere: maintenant.toISOString() };
+      } else sautees.push(`${c.ref} (${r.raison})`);
+    }
+    if (!aBlanc && confiees.length) ecrireJson(fichierEtat, etat);
+    const pas = pasPretes.length ? `, ${pasPretes.length} pas prête(s) : ${pasPretes.slice(0, 3).map((p) => `${p.ref} ${p.raisons[0]}`).join(' ; ')}${pasPretes.length > 3 ? ' …' : ''}`.slice(0, 320) : '';
+    return `jules : ${confiees.length} confiée(s)${confiees.length ? ` (${confiees.join(', ')})` : ''}${aBlanc && choix.length ? ' (à blanc)' : ''}${sautees.length ? `, sautée(s) ${sautees.join(', ')}` : ''}, ${depotsConcernes} dépôt(s) avec réservée(s), ${enCours} en cours${pas}`;
+  } catch (e) {
+    return `jules : ÉCHEC (${String(e.message).slice(0, 160)})`;
+  }
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const arg = (nom) => { const i = process.argv.indexOf(nom); return i > 0 ? process.argv[i + 1] : null; };
   const fichierProchaines = process.argv[2];
@@ -299,6 +345,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const quotidien = tourQuotidien({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-quotidien.json'), ...options });
     const oublis = tourOublis({ fichierProchaines, fichierEtat: fichierEtat.replace(/(\.json)?$/, '-oublis.json'), ...options });
     const liens = tourLiens({ fichierProchaines, ...options });
-    console.log(`${reveil} · ${quotidien} · ${oublis} · ${liens}`);
+    const jules = tourJules({ fichierProchaines, fichierEtat: fichierEtat.replace(/(\.json)?$/, '-jules.json'), ...options });
+    console.log(`${reveil} · ${quotidien} · ${oublis} · ${liens} · ${jules}`);
   }
 }
