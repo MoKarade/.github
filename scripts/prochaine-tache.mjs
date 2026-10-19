@@ -238,8 +238,21 @@ function derniere(depot) {
   return meilleure?.n ?? null;
 }
 
+// Ligne `**Attend**` obligatoire. Une tâche créée à partir de `DES_NOUVELLES` la porte dès sa création ; les tâches plus anciennes ont jusqu'à
+// `DES_TOUTES` pour la recevoir de leur fil (avant : listées dans `attend_absent`, sans effet). `attend_ligne` vient de `fetch.py` ; absent (relevé
+// d'une ancienne version du PC) : aucune règle, on ne devine pas.
+export const ATTEND_OBLIGATOIRE = { DES_NOUVELLES: '2026-10-19T16:00:00Z', DES_TOUTES: '2026-10-20T16:00:00Z' };
+
+/** Vrai si la tâche n'a ni ligne `**Attend**` ni dépendance native ET que la règle s'applique déjà à elle. */
+export function attendAbsent(n, maintenant = new Date()) {
+  if (n.attend_ligne !== false || (n.deps ?? []).length) return false;
+  const creee = n.created ? Date.parse(n.created) : NaN;
+  const nouvelle = Number.isFinite(creee) && creee >= Date.parse(ATTEND_OBLIGATOIRE.DES_NOUVELLES);
+  return nouvelle || maintenant.getTime() >= Date.parse(ATTEND_OBLIGATOIRE.DES_TOUTES);
+}
+
 /** Pourquoi une tâche ouverte n'est pas prenable (code), ou null si elle l'est. */
-function ecart(n, depot, idx) {
+function ecart(n, depot, idx, maintenant = new Date()) {
   const dependances = n.deps ?? [];
   const levee = (d) => !idx.noeuds.has(minuscule(d)) && idx.fusionnees.has(minuscule(d));
   const ouverte = dependances.find((d) => idx.noeuds.has(minuscule(d)) && idx.noeuds.get(minuscule(d)).noeud.state === 'open');
@@ -252,6 +265,8 @@ function ecart(n, depot, idx) {
   const inconnue = dependances.find((d) => !idx.noeuds.has(minuscule(d)) && !levee(d));
   if (inconnue) return { code: 'attend-inconnue', detail: inconnue };
   if (ouverte) return { code: 'attend-ouverte', detail: ouverte };
+  // Toute tâche dit ce qu'elle attend (décision de Marc, 19/10/2026) : `**Attend** : aucune` ou `**Attend** : #n — raison`. Sans la ligne (et sans lien natif), rien n'est prouvé.
+  if (attendAbsent(n, maintenant)) return { code: 'attend-absent', detail: '' };
   if (n.pr?.state === 'open') return { code: 'pr-ouverte', detail: `PR ${n.pr.repo ?? depot.repo}#${n.pr.n}` };
   // Réservée à Jules par celui qui l'a rangée : Claude ne la prend pas (sinon les deux la prendraient), le filet du PC la confie quand le dépôt est libre.
   if (n.labels.includes('faisable-jules')) return { code: 'jules-reservee', detail: 'faisable-jules' };
@@ -265,7 +280,7 @@ export const ATTENTE = { marcHeures: 48, marcIsoleHeures: 168, filHeures: 24 };
 
 // Qui peut lever l'obstacle d'après son code. Un code absent de la table n'a PERSONNE pour le lever.
 const PROPRIETAIRE = { 'geste-marc': 'marc', 'preuve-attendue': 'preuve', 'en-cours': 'fil', jules: 'fil', 'pr-ouverte': 'fil', 'frein-quota': 'frein', 'jules-reservee': 'fil', prenable: 'file', mission: 'mission' };
-const CAUSE_SANS_PROPRIETAIRE = { 'preuve-chez-marc': 'preuve-chez-marc', bloquee: 'bloquee-sans-reprise', 'attend-inconnue': 'dependance-illisible', 'fini-quand-absent': 'fini-quand-absent', cycle: 'dependance-circulaire' };
+const CAUSE_SANS_PROPRIETAIRE = { 'attend-absent': 'attend-absent', 'preuve-chez-marc': 'preuve-chez-marc', bloquee: 'bloquee-sans-reprise', 'attend-inconnue': 'dependance-illisible', 'fini-quand-absent': 'fini-quand-absent', cycle: 'dependance-circulaire' };
 
 const heuresDepuis = (t, maintenant) => (t ? (maintenant.getTime() - Date.parse(t)) / 3_600_000 : null);
 const plusRecent = (...dates) => dates.filter(Boolean).sort().pop() ?? null;
@@ -393,7 +408,7 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
     const prenables = [];
     const reserveesJules = [];
     for (const n of taches) {
-      const e = ecart(n, depot, idx);
+      const e = ecart(n, depot, idx, maintenant);
       if (e) exclues[ref(depot.repo, n.n)] = e;
       else prenables.push(n);
       // Réservée à Jules (`faisable-jules`) : hors de la file de Claude, matière du filet du PC (docs §5 quater).
@@ -468,7 +483,7 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
     };
   });
   const { attentes, oubliees, file_marc, etats } = analyserAttentes(depots, idx, maintenant);
-  return { version: VERSION, source_asof: backlog.asof, non_calcule: NON_CALCULE, frein: palier, frein_detail: frein?.detail ?? null, alertes, depots, attentes, oubliees, file_marc, etats, liens_manquants: liensManquants(idx), seuils_oubli: ATTENTE };
+  return { version: VERSION, source_asof: backlog.asof, non_calcule: NON_CALCULE, frein: palier, frein_detail: frein?.detail ?? null, alertes, depots, attentes, oubliees, file_marc, etats, liens_manquants: liensManquants(idx), attend_absent: attendAbsentListe(idx, maintenant), seuils_oubli: ATTENTE };
 }
 
 function lireArguments(argv) {
@@ -489,6 +504,16 @@ function lireJsonOuNull(chemin) {
 }
 
 /** Le frein d'après `quota.json` (à côté du relevé par défaut) et le palier du `prochaines.json` précédent (idem). */
+/** Les tâches ouvertes sans ligne `**Attend**` : { ref, applique } (`applique` faux = délai de grâce, la règle ne les écarte pas encore). */
+export function attendAbsentListe(idx, maintenant = new Date()) {
+  const out = [];
+  for (const [r, { noeud: n }] of idx.noeuds) {
+    if (n.lvl !== 'tâche' || n.state !== 'open' || n.attend_ligne !== false || (n.deps ?? []).length) continue;
+    out.push({ ref: r, applique: attendAbsent(n, maintenant) });
+  }
+  return out.sort((a, b) => a.ref.localeCompare(b.ref));
+}
+
 export function freinDepuisFichiers(dossier, { quota = null, precedent = null, maintenant = new Date() } = {}) {
   const q = lireJsonOuNull(quota ?? join(dossier, 'quota.json'));
   const av = lireJsonOuNull(precedent ?? join(dossier, 'prochaines.json'));
