@@ -21,6 +21,9 @@ import { pathToFileURL } from 'node:url';
 
 export const MARQUEUR = '<!-- captures-avant-apres -->';
 export const MAX_PAGES = 12;
+export const MAX_ETAPES = 20;
+export const MAX_STOCKAGE = 10;
+const DELAI_ETAPE_MS = 15_000;
 
 /** Nom de fichier d'une page : « / » → accueil, « /a/b?x=1 » → a-b-x-1. */
 export function nomImage(chemin) {
@@ -51,7 +54,7 @@ export function lirePages(texte) {
   for (const brut of String(texte ?? '').split('\n')) {
     const l = brut.trim();
     if (!l || l.startsWith('#')) continue;
-    if (!/^\/[\w\-./%~:@!$&'()*+,;=?]*$/.test(l) || l.startsWith('//') || l.includes('..')) throw new Error(`page invalide : ${l} (un chemin de l'app, sans « .. »)`);
+    if (!/^\/[\w\-./%~:@!$&'()*+,;=?#]*$/.test(l) || l.startsWith('//') || l.includes('..')) throw new Error(`page invalide : ${l} (un chemin de l'app, sans « .. »)`);
     if (!pages.includes(l)) pages.push(l);
   }
   if (pages.length === 0) throw new Error('aucune page à photographier (CAPTURES_PAGES vide)');
@@ -60,11 +63,79 @@ export function lirePages(texte) {
 }
 
 /**
+ * Les étapes jouées AVANT de photographier (entrée `etapes`, une par ligne, `#` pour un commentaire) : un format FERMÉ, jamais de JavaScript
+ * libre. Quatre verbes :
+ *   aller <chemin>                         ouvre une page de l'app ;
+ *   cliquer-bouton <nom accessible exact>  clique le bouton de ce nom ;
+ *   attendre-texte <texte>                 attend ce texte à l'écran (15 s au plus) ;
+ *   pointeur <x> <y>                       place la souris (une navigation qui s'ouvre au survol ne masque plus le contenu).
+ * Demandé par le fil Jules pour FinanceAI (mode test à activer par l'écran), 19/10/2026 ; aucune porte d'authentification n'est ajoutée aux apps.
+ */
+export function lireEtapes(texte) {
+  const etapes = [];
+  for (const brut of String(texte ?? '').split('\n')) {
+    const l = brut.trim();
+    if (!l || l.startsWith('#')) continue;
+    const m = /^(aller|cliquer-bouton|attendre-texte|pointeur)\s+(.+)$/.exec(l);
+    if (!m) throw new Error(`étape invalide : ${l.slice(0, 40)} (verbes : aller, cliquer-bouton, attendre-texte, pointeur)`);
+    const [, verbe, arg] = m;
+    if (verbe === 'aller') {
+      if (!/^\/[\w\-./%~:@!$&'()*+,;=?#]*$/.test(arg) || arg.startsWith('//') || arg.includes('..')) throw new Error(`étape invalide : aller ${arg.slice(0, 40)} (un chemin de l'app, sans « .. »)`);
+      etapes.push({ verbe, chemin: arg });
+    } else if (verbe === 'pointeur') {
+      const xy = /^(\d{1,5})\s+(\d{1,5})$/.exec(arg);
+      if (!xy) throw new Error(`étape invalide : pointeur ${arg.slice(0, 20)} (deux nombres : x y)`);
+      etapes.push({ verbe, x: Number(xy[1]), y: Number(xy[2]) });
+    } else {
+      if (arg.length > 80) throw new Error(`étape invalide : ${verbe} (texte de 80 caractères au plus)`);
+      etapes.push({ verbe, texte: arg });
+    }
+  }
+  if (etapes.length > MAX_ETAPES) throw new Error(`trop d'étapes (${etapes.length} > ${MAX_ETAPES})`);
+  return etapes;
+}
+
+/** Les valeurs posées dans le stockage local AVANT le premier chargement (`cle=valeur`, une par ligne) : l'écran d'accueil d'une app se passe ainsi. */
+export function lireStockage(texte) {
+  const entrees = [];
+  for (const brut of String(texte ?? '').split('\n')) {
+    const l = brut.trim();
+    if (!l || l.startsWith('#')) continue;
+    const m = /^([\w.:-]{1,64})=(.{0,200})$/.exec(l);
+    if (!m) throw new Error(`stockage-local invalide : ${l.slice(0, 40)} (forme cle=valeur)`);
+    entrees.push({ cle: m[1], valeur: m[2] });
+  }
+  if (entrees.length > MAX_STOCKAGE) throw new Error(`trop d'entrées de stockage local (${entrees.length} > ${MAX_STOCKAGE})`);
+  return entrees;
+}
+
+/** Joue les étapes sur la page (Playwright en vrai, une fausse en test). Rend la dernière page ouverte (ou null). Une étape qui échoue lève : l'appelant le dit sans détail interne. */
+export async function jouerEtapes({ page, etapes, urlBase }) {
+  const origine = new URL(urlBase).origin;
+  let dernier = null; // la dernière page ouverte par « aller » : le point de départ des pages à photographier
+  for (const e of etapes) {
+    if (e.verbe === 'aller') {
+      const url = new URL(e.chemin, urlBase);
+      if (url.origin !== origine) throw new Error(`page hors de l'app : ${e.chemin}`);
+      await page.goto(url.toString(), { waitUntil: 'networkidle', timeout: 30_000 });
+      dernier = url;
+    } else if (e.verbe === 'cliquer-bouton') {
+      await page.getByRole('button', { name: e.texte, exact: true }).click({ timeout: DELAI_ETAPE_MS });
+    } else if (e.verbe === 'attendre-texte') {
+      await page.getByText(e.texte).first().waitFor({ timeout: DELAI_ETAPE_MS });
+    } else {
+      await page.mouse.move(e.x, e.y);
+    }
+  }
+  return dernier;
+}
+
+/**
  * Photographie chaque page avec un navigateur injecté (Playwright en vrai, une fausse en test).
  * Rend et écrit `meta.json` : { [chemin]: { fichier | null, statut, sha256?, erreur? } }. Une page qui répond
  * en erreur ou qui n'existe pas encore (page ajoutée par la PR, côté « avant ») n'a pas d'image : on le dit.
  */
-export async function capturer({ urlBase, pages, sortie, largeur = 1280, hauteur = 800, lancerNavigateur }) {
+export async function capturer({ urlBase, pages, sortie, largeur = 1280, hauteur = 800, lancerNavigateur, etapes = [], stockage = [] }) {
   mkdirSync(sortie, { recursive: true });
   const origine = new URL(urlBase).origin;
   const noms = nomsUniques(pages);
@@ -72,13 +143,38 @@ export async function capturer({ urlBase, pages, sortie, largeur = 1280, hauteur
   const navigateur = await lancerNavigateur();
   try {
     const contexte = await navigateur.newContext({ viewport: { width: largeur, height: hauteur } });
+    // Posé avant tout chargement, et seulement sur l'origine de l'app.
+    if (stockage.length) {
+      await contexte.addInitScript(([o, entrees]) => {
+        if (location.origin !== o) return;
+        for (const [cle, valeur] of entrees) localStorage.setItem(cle, valeur);
+      }, [origine, stockage.map((e) => [e.cle, e.valeur])]);
+    }
     const page = await contexte.newPage();
+    let etapesEnEchec = false;
+    let precedente = null;
+    if (etapes.length) {
+      try {
+        precedente = await jouerEtapes({ page, etapes, urlBase });
+      } catch {
+        // Cause fixe : le message brut d'une erreur de navigateur peut contenir un détail interne.
+        etapesEnEchec = true;
+      }
+    }
     for (const chemin of pages) {
       const url = new URL(chemin, urlBase);
       if (url.origin !== origine) throw new Error(`page hors de l'app : ${chemin}`);
+      if (etapesEnEchec) {
+        meta[chemin] = { fichier: null, statut: 0, erreur: 'étape impossible' };
+        continue;
+      }
       try {
         const reponse = await page.goto(url.toString(), { waitUntil: 'networkidle', timeout: 30_000 });
-        const statut = reponse?.status() ?? 0;
+        // Une page qui ne change que le fragment (#DEBT) est une navigation dans le même document : pas de réponse HTTP, et l'app dessine après coup.
+        const memeDocument = !reponse && precedente !== null && precedente.origin === url.origin && precedente.pathname === url.pathname && precedente.search === url.search;
+        if (memeDocument) await page.waitForTimeout?.(800);
+        const statut = reponse?.status() ?? (memeDocument ? 200 : 0);
+        precedente = url;
         if (statut === 0 || statut >= 400) {
           meta[chemin] = { fichier: null, statut };
           continue;
@@ -218,6 +314,8 @@ async function main() {
       largeur: Number(env.CAPTURES_LARGEUR || 1280),
       hauteur: Number(env.CAPTURES_HAUTEUR || 800),
       lancerNavigateur: () => chromium.launch(),
+      etapes: lireEtapes(env.CAPTURES_ETAPES),
+      stockage: lireStockage(env.CAPTURES_STOCKAGE),
     });
     for (const [chemin, m] of Object.entries(meta)) console.log(`${chemin} : ${m.fichier ?? 'sans image'} (HTTP ${m.statut})`);
   } else if (mode === 'publier') {
