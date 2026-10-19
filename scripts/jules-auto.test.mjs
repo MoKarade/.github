@@ -43,19 +43,48 @@ test('chaque section manquante ou vide est dite', () => {
 
 test('les chemins que Jules ne touche jamais sont refusés avec leur raison', () => {
   const refuse = (chemin) => evalue({ 'Fichiers permis': `:\n- \`${chemin}\`` }).raisons.join();
-  assert.match(refuse('.github/workflows/ci.yml'), /chemin protégé/);
+  assert.match(refuse('.github/CODEOWNERS'), /chemin protégé/);
+  assert.match(refuse('.github/scripts/x.sh'), /chemin protégé/);
+  assert.match(refuse('.github/workflows/garde-fou.yml'), /workflow protégé/);
+  assert.match(refuse('.github/workflows/relecture.yml'), /workflow protégé/);
+  assert.match(refuse('.github/workflows/sentry-essai.yml'), /Sentry/);
   assert.match(refuse('scripts/x.mjs'), /chemin protégé/);
-  assert.match(refuse('package.json'), /dépendances/);
   assert.match(refuse('drizzle/0001.sql'), /base de données/);
   assert.match(refuse('lib/auth.ts'), /authentification/);
   assert.match(refuse('lib/token-store.ts'), /secret/);
-  assert.match(refuse('BACKLOG.md'), /long \.md/);
-  assert.equal(evalue({ 'Fichiers permis': ':\n- `docs/court.md`' }).ok, true, 'une doc courte convient');
+  assert.match(refuse('BACKLOG.md'), /instructions/);
+  assert.match(refuse('AGENTS.md'), /instructions/);
 });
 
-test('plus de deux fichiers, ou aucun lisible : refusé', () => {
-  const trois = Array.from({ length: FICHIERS_MAX + 1 }, (_, i) => `- \`lib/f${i}.test.ts\``).join('\n');
-  assert.match(evalue({ 'Fichiers permis': `:\n${trois}` }).raisons.join(), /plus de 2 fichiers/);
+test('exclusions levées par Marc le 19/10 : un workflow listé, sans secret, convient', () => {
+  assert.equal(evalue({ 'Fichiers permis': ':\n- `.github/workflows/ci.yml`' }).ok, true);
+});
+
+test('écran : permis avec captures avant/après ET test de thème, refusé sinon', () => {
+  const f = { 'Fichiers permis': ':\n- `app/globals.css`\n- `components/Carte.tsx`' };
+  assert.match(evalue(f).raisons.join(), /écran : le corps doit demander des captures/);
+  assert.match(evalue({ ...f, Vérifier: 'captures avant/après' }).raisons.join(), /theme\.test/);
+  assert.equal(evalue({ ...f, Vérifier: 'captures avant/après ; `npm run test -- tests/theme.test.ts`' }).ok, true);
+  assert.match(evalue({}, { labels: ['faisable-jules', 'écran'] }).raisons.join(), /écran/);
+});
+
+test('dépendances : seulement mineures/patch avec npm audit, refusé sinon', () => {
+  const f = { 'Fichiers permis': ':\n- `package.json`\n- `package-lock.json`' };
+  assert.match(evalue(f).raisons.join(), /dépendances/);
+  assert.equal(evalue({ ...f, Vérifier: '`npm audit --omit=dev` rend 0 ; montée mineure seulement' }).ok, true);
+});
+
+test('long .md : le français et les accents doivent être demandés explicitement', () => {
+  const f = { 'Fichiers permis': ':\n- `docs/guide.md`' };
+  assert.match(evalue(f).raisons.join(), /\.md : le corps doit demander/);
+  assert.equal(evalue({ ...f, 'À ne pas faire': 'Écrire en français, garder tous les accents ; ne rien traduire.' }).ok, true);
+});
+
+test('plus de cinq fichiers, ou aucun lisible : refusé', () => {
+  const six = Array.from({ length: FICHIERS_MAX + 1 }, (_, i) => `- \`lib/f${i}.test.ts\``).join('\n');
+  assert.match(evalue({ 'Fichiers permis': `:\n${six}` }).raisons.join(), /plus de 5 fichiers/);
+  const cinq = six.split('\n').slice(0, FICHIERS_MAX).join('\n');
+  assert.equal(evalue({ 'Fichiers permis': `:\n${cinq}` }).ok, true);
   assert.match(evalue({ 'Fichiers permis': ':\nvoir plus haut' }).raisons.join(), /aucun fichier permis lisible/);
 });
 
