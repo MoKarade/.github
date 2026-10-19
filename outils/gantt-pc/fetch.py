@@ -51,14 +51,14 @@ if LEGER:
     try:
         prev = json.load(open(OPT['--prev'] if OPT.get('--prev') else D + OUT))
         age = time.time() - datetime.datetime.fromisoformat(prev['asof'].replace('Z', '+00:00')).timestamp()
-        if prev.get('v', 0) < 8: raise ValueError('relevé précédent d\'une ancienne version')
+        if prev.get('v', 0) < 9: raise ValueError('relevé précédent d\'une ancienne version')
         if age > 45 * 60: raise ValueError(f'relevé précédent trop ancien ({age / 60:.0f} min)')
         for r in prev['repos']:
             for k, nd in r['nodes'].items(): PREV[(r['repo'], int(k))] = nd
         PREV_PRLOG = prev.get('prlog') or []
     except Exception as e:
         print('léger impossible, relevé plein :', e, file=sys.stderr); LEGER = False; PREV = {}
-res = {'v': 8, 'asof': asof, 'mode': 'leger' if LEGER else 'plein', 'repos': []}
+res = {'v': 9, 'asof': asof, 'mode': 'leger' if LEGER else 'plein', 'repos': []}
 
 # Lien PR -> tâche : « Closes/Fixes/Resolves #n » (transition) et « Tâche : #n » / « Tâche : MoKarade/<dépôt>#n » (standard, §8)
 CLOSES = r'(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:MoKarade/([\w.-]+))?#(\d+)\b'
