@@ -189,6 +189,8 @@ Confier, c'est poser l'étiquette `jules` et un commentaire d'une ligne. Le mén
 - **PR fusionnée** dont TOUS les fichiers sont des tests (`tests/`, `__tests__/`, `*.test.*`, `*.spec.*`) ET listés dans « Fichiers permis » ET dont tous les contrôles de la tête sont verts (Mergify exclu) : le filet pose `**Acceptée** — PR #p fusionnée (<sha>), sans déploiement : tests seuls … preuve : …` (format lu par `scripts/preuve.mjs`), retire `jules`, `faisable-jules`, `en-cours`, `preuve-manquante`, `preuve-attendue`, puis ferme la tâche. La preuve est posée AVANT la fermeture.
 - **Tout autre cas** (code servi, contrôle rouge) : rien n'est fermé, le Coordinateur est réveillé une fois par 24 h. Une PR qui touche du code servi garde sa preuve de déploiement `READY` (§10), posée par le fil de l'app.
 
+**Une tâche fermée ne garde aucune étiquette d'avancement** (demande de Marc, 19/10/2026 : « ou en attente », « inacceptable »). Le même rôle (`menageFermees`) lit, à chaque tour, les 30 dernières issues fermées de chaque dépôt et retire `en-cours`, `jules`, `faisable-jules` et `preuve-attendue` (la ligne `jules-suivi` dit « N étiquette(s) retirée(s) sur tâches fermées »). Il ne touche ni à l'état, ni aux commentaires, ni à `qui:marc`.
+
 ## 6. Répartition du travail
 
 **Qui lance** : un **événement** d'abord, un relevé à l'heure seulement en filet quotidien (décision de Marc, 15/10/2026 : « plus de vérifications toutes les X heures »). Une demande directe de Marc n'attend rien : le Coordinateur ouvre le fil tout de suite.

@@ -80,6 +80,27 @@ export function prDeLaTache(n, prs) {
   return { fusionnee: fusionnee ?? null, ouverte: ouverte ?? null };
 }
 
+/** Étiquettes d'avancement qui n'ont plus de sens sur une tâche FERMÉE (le garde-fou de preuve retire les siennes à la fermeture validée ; une fermeture à la main ou par une PR les laisse). */
+export const ETIQUETTES_FERMEES = ['en-cours', 'jules', 'faisable-jules', 'preuve-attendue'];
+
+/**
+ * Retire ETIQUETTES_FERMEES des tâches fermées récemment (30 dernières mises à jour du dépôt : un seul appel par dépôt).
+ * Ne touche ni à l'état ni aux commentaires, jamais à `qui:marc`.
+ * @returns string[] « depot#n:etiquette » (retirées, ou à retirer si `aBlanc`)
+ */
+export function menageFermees({ depot, gh, aBlanc = false }) {
+  const court = depot.replace('MoKarade/', '');
+  const fermees = gh('GET', `repos/${depot}/issues?state=closed&sort=updated&direction=desc&per_page=30`).filter((i) => !i.pull_request);
+  const retirees = [];
+  for (const i of fermees) {
+    for (const l of noms(i.labels).filter((x) => ETIQUETTES_FERMEES.includes(x))) {
+      if (!aBlanc) gh('DELETE', `repos/${depot}/issues/${i.number}/labels/${encodeURIComponent(l)}`);
+      retirees.push(`${court}#${i.number}:${l}`);
+    }
+  }
+  return retirees;
+}
+
 const FENETRE_SIGNAL_H = 24;
 const heuresEntre = (depuis, maintenant) => (maintenant.getTime() - Date.parse(depuis)) / 3_600_000;
 

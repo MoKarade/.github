@@ -41,7 +41,7 @@ import { pathToFileURL } from 'node:url';
 import { DEPOT_BOITE, WORKFLOW_BOITE, construireMotif } from './reveil-reacteur.mjs';
 import { lierTout, ghCli } from './lier-taches.mjs';
 import { choisirPourJules, confierAJules } from './jules-auto.mjs';
-import { suivreDepot } from './jules-suivi.mjs';
+import { suivreDepot, menageFermees } from './jules-suivi.mjs';
 
 export const SEUIL_LIBRE_MIN = 30;
 export const FENETRE_SIGNALEMENT_H = 2;
@@ -446,13 +446,14 @@ export function tourJulesSuivi({ fichierEtat, executer = false, aBlanc = false, 
   try {
     const appel = gh ?? ghCli;
     const etat = lireJson(fichierEtat, {});
-    const total = { acceptees: [], nettoyees: [], holds: [], signaux: [], vu: 0 };
+    const total = { acceptees: [], nettoyees: [], holds: [], signaux: [], menage: [], vu: 0 };
     const echecs = [];
     for (const depot of depots) {
       try {
         const r = suivreDepot({ depot, gh: appel, etat, maintenant, aBlanc: aBlanc || !executer });
         for (const k of ['acceptees', 'nettoyees', 'holds', 'signaux']) total[k].push(...r[k]);
         total.vu += r.vu;
+        total.menage.push(...menageFermees({ depot, gh: appel, aBlanc: aBlanc || !executer }));
       } catch (e) {
         echecs.push(`${depot.replace('MoKarade/', '')} (${String(e.message).replace(/\s+/g, ' ').slice(0, 60)})`);
       }
@@ -469,7 +470,7 @@ export function tourJulesSuivi({ fichierEtat, executer = false, aBlanc = false, 
     }
     if (executer && !aBlanc) ecrireJson(fichierEtat, etat);
     const seul = !executer || aBlanc ? ' (non appliqué)' : '';
-    return `jules-suivi : ${total.vu} tâche(s) jules, ${total.acceptees.length} acceptée(s)${total.acceptees.length ? ` (${total.acceptees.join(', ')})` : ''}, ${total.nettoyees.length} PR nettoyée(s), ${total.holds.length} hold${seul}${envoi}${echecs.length ? `, ÉCHEC ${echecs.join(' ; ')}` : ''}`;
+    return `jules-suivi : ${total.vu} tâche(s) jules, ${total.acceptees.length} acceptée(s)${total.acceptees.length ? ` (${total.acceptees.join(', ')})` : ''}, ${total.nettoyees.length} PR nettoyée(s), ${total.holds.length} hold${total.menage.length ? `, ${total.menage.length} étiquette(s) retirée(s) sur tâches fermées` : ''}${seul}${envoi}${echecs.length ? `, ÉCHEC ${echecs.join(' ; ')}` : ''}`;
   } catch (e) {
     return `jules-suivi : ÉCHEC (${String(e.message).slice(0, 160)})`;
   }
