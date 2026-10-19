@@ -26,6 +26,7 @@ function github({ issues = [], prs = [], fichiers = ['app/tendances/page.tsx', '
   const appels = [];
   const gh = (methode, chemin, corps) => {
     appels.push({ methode, chemin, corps });
+    if (methode === 'GET' && /labels=faisable-jules/.test(chemin)) return issues.filter((i) => i.labels.some((l) => l.name === 'faisable-jules'));
     if (methode === 'GET' && /\/issues\?(labels=jules|state=closed)/.test(chemin)) return [];
     if (methode === 'GET' && /\/issues\?state=open/.test(chemin)) return issues;
     if (methode === 'GET' && /\/pulls\?state=open/.test(chemin)) return prs;
