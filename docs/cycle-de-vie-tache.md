@@ -422,6 +422,12 @@ Une question à Marc prend toujours la forme d'une **carte**, jamais d'une quest
 - **La réponse est consignée** dans l'issue concernée, en commentaire : « Décision de Marc (AAAA-MM-JJ HH:MM, heure du Québec) : … ». Pour le chantier, elle va dans le plan.
 - **Un geste de Marc** n'est pas une carte : c'est une issue `qui:marc` avec les étapes exactes. Le fil le dit une fois, et le Gantt le montre dans « Toi ».
 
+**Répondre depuis l'onglet « À toi » (19/10/2026, `outils/gantt-pc/reponses.py`).** Marc n'écrit pas dans GitHub : il touche un bouton de la page, qui dépose un fichier dans le dossier Drive `_Gantt` ; le PC l'applique au tour suivant avec le jeton `gh` de Marc, puis réveille le Coordinateur par la boîte du Réacteur. Trois gestes :
+- **Fait** : commentaire `**Fait** — Marc, depuis la page de suivi (…)` puis retrait de `qui:marc`, dans cet ordre. Jamais « Acceptée » : la preuve reste à Claude (§5 ter). Une issue « Garde-fou : la PR #n… » refuse « Fait » : le seul geste attendu est la fusion.
+- **Réponse** : commentaire `**Réponse de Marc** : <option>` puis retrait de `qui:marc`. L'option DOIT être une puce de la section `**Réponses**` du corps de l'issue (un fichier ne peut pas faire écrire un texte libre). Pour offrir des réponses préfaites, l'issue de la question porte une ligne `**Réponses** :` suivie d'**une puce par option**, courte (200 caractères au plus), sans autre texte entre les puces.
+- **Fusionner** : fusion squash d'une PR ouverte, hors brouillon.
+Un fichier est traité une seule fois (journal par id), puis supprimé ; un échec se lit dans le journal que la page affiche.
+
 ## 15. Qui applique ce document
 
 | Mécanisme | Applique |
