@@ -773,3 +773,27 @@ test('liensManquants liste les attentes ouvertes qui n’ont pas de lien natif, 
   )));
   assert.deepEqual(liensManquants(indexer(b)), [{ ref: 'a#2', attend: 'a#1' }]);
 });
+
+test('un geste de Marc qui dépend d’une tâche ouverte attend cette tâche, pas Marc : la chaîne a pour racine la tâche de Claude', () => {
+  const b = releve(depot('a', [
+    mission(90, [91, 92, 93]),
+    avec(tache(92, { labels: ['qui:marc'], deps: ['a#91'] }), { marc_depuis: il_y_a(120) }),
+    tache(93, { deps: ['a#92'] }),
+    tache(91),
+  ]));
+  const r = calculer(b, { maintenant: NOW });
+  assert.equal(etat(r).exclues['a#92'].code, 'attend-ouverte');
+  assert.equal(r.attentes['a#92'].racine, 'a#91');
+  assert.equal(r.attentes['a#93'].racine, 'a#91');
+  assert.equal(r.attentes['a#93'].proprietaire, 'file');
+  assert.deepEqual(r.oubliees.filter(pasLien), [], 'rien d’oublié : le dessin attend d’être pris');
+  assert.deepEqual(r.file_marc, [], 'aucun geste à faire pour Marc tant que la dépendance est ouverte');
+  assert.equal(r.etats['a#92'].etat, 'en-attente');
+  // la dépendance fermée, le geste redevient celui de Marc
+  const fermee = releve(depot('a', [
+    mission(90, [91, 92]),
+    avec(tache(92, { labels: ['qui:marc'], deps: ['a#91'] }), { marc_depuis: il_y_a(200) }),
+    tache(91, { state: 'closed', closed: '2026-10-19T10:00:00Z' }),
+  ]));
+  assert.equal(calculer(fermee, { maintenant: NOW }).oubliees.filter(pasLien)[0].cause, 'geste-marc-en-retard');
+});
