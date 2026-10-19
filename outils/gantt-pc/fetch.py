@@ -15,6 +15,7 @@
 #   `pr.au` = l'auteur de la PR ; `pr.jf` = sa portée (nombre de fichiers, lignes, premier chemin protégé) ; `fp` = nombre de « Fichiers permis » (gabarit Jules).
 # Usage : python3 fetch.py [--leger] [--sans-quota] [--prev=fichier.json] [--depots=a,b] [sortie.json]
 import json, subprocess, sys, datetime, re, os, time, threading, base64, hashlib
+from reponses import options as reponses_options     # réponses préfaites d'une question (section « Réponses » de l'issue)
 from concurrent.futures import ThreadPoolExecutor
 ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
 OPT = {a.split('=', 1)[0]: (a.split('=', 1) + [''])[1] for a in sys.argv[1:] if a.startswith('--')}
@@ -232,7 +233,7 @@ def calculer(repo, rl, i, pr):
          'gab': [c for c in GAB.get(lvl, []) if champ(body, c) is None],
          'av': champ(body, 'Avant'), 'ap': champ(body, 'Après'), 'fq': champ(body, 'Fini quand'),
          'res': champ(body, 'Résultat') or champ(body, 'Objectif'),
-         'pa': champ(body, 'Preuve attendue'), 'fp': fichiers_permis(body)}
+         'pa': champ(body, 'Preuve attendue'), 'fp': fichiers_permis(body), 'rp': reponses_options(body)}
     m = VIEILLE.search(body)
     if not pr and m:
         # ancienne forme : la PR est nommée dans le corps de l'issue, sans lien depuis la PR
