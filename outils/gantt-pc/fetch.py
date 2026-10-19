@@ -51,14 +51,14 @@ if LEGER:
     try:
         prev = json.load(open(OPT['--prev'] if OPT.get('--prev') else D + OUT))
         age = time.time() - datetime.datetime.fromisoformat(prev['asof'].replace('Z', '+00:00')).timestamp()
-        if prev.get('v', 0) < 9: raise ValueError('relevé précédent d\'une ancienne version')
+        if prev.get('v', 0) < 10: raise ValueError('relevé précédent d\'une ancienne version')
         if age > 45 * 60: raise ValueError(f'relevé précédent trop ancien ({age / 60:.0f} min)')
         for r in prev['repos']:
             for k, nd in r['nodes'].items(): PREV[(r['repo'], int(k))] = nd
         PREV_PRLOG = prev.get('prlog') or []
     except Exception as e:
         print('léger impossible, relevé plein :', e, file=sys.stderr); LEGER = False; PREV = {}
-res = {'v': 9, 'asof': asof, 'mode': 'leger' if LEGER else 'plein', 'repos': []}
+res = {'v': 10, 'asof': asof, 'mode': 'leger' if LEGER else 'plein', 'repos': []}
 
 # Lien PR -> tâche : « Closes/Fixes/Resolves #n » (transition) et « Tâche : #n » / « Tâche : MoKarade/<dépôt>#n » (standard, §8)
 CLOSES = r'(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:MoKarade/([\w.-]+))?#(\d+)\b'
@@ -255,10 +255,12 @@ def calculer(repo, rl, i, pr):
     n['upd'] = i.get('updated_at')
     # dépendances : ligne « **Attend** : #12, MoKarade/x#3 — raison » + dépendances natives GitHub (« Blocked by »)
     deps = deps_attend(body, repo)
+    natives = []
     if (i.get('issue_dependencies_summary') or {}).get('total_blocked_by'):
         for b in flat(gh(f'repos/MoKarade/{repo}/issues/{i["number"]}/dependencies/blocked_by?per_page=100')):
-            deps.append(f"{b['repository_url'].rsplit('/', 1)[1].lower()}#{b['number']}")
-    n['deps'] = sorted(set(deps))
+            natives.append(f"{b['repository_url'].rsplit('/', 1)[1].lower()}#{b['number']}")
+    n['deps'] = sorted(set(deps + natives))
+    n['deps_natives'] = sorted(set(natives))      # ceux que GitHub affiche en « Bloquée par » : prochaine-tache.mjs liste les liens qui manquent
     if lvl != 'tâche':
         # enfant du même dépôt : son numéro ; d'un autre dépôt (mission commune dans .github) : « dépôt#n »
         n['kids'] = [s['number'] if s['repository_url'].rsplit('/', 1)[1].lower() == rl
