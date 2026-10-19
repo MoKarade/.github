@@ -797,3 +797,13 @@ test('un geste de Marc qui dépend d’une tâche ouverte attend cette tâche, p
   ]));
   assert.equal(calculer(fermee, { maintenant: NOW }).oubliees.filter(pasLien)[0].cause, 'geste-marc-en-retard');
 });
+
+test('le frein expose les tâches qu’il retient, dans l’ordre de la file, pour Jules', () => {
+  const frein = { palier: 2, detail: { perime: false, raison: 'test' } };
+  const r = calculer(releve(depot('a', [tache(3, { labels: ['prio:2'] }), tache(1), tache(2, { labels: ['prio:1'] })])), { frein, maintenant: NOW });
+  const d = etat(r);
+  assert.equal(d.statut, 'frein');
+  assert.deepEqual(d.retenues_frein.map((t) => t.ref), ['a#2', 'a#3', 'a#1']);
+  assert.deepEqual(d.file, []);
+  assert.equal(etat(calculer(releve(depot('a', [tache(1)])), { maintenant: NOW })).retenues_frein.length, 0);
+});

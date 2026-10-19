@@ -169,6 +169,14 @@ Sont invalides, avec leur cause : `bloquee-sans-reprise` (`bloqué` sans rien de
 
 **Sortie** (`prochaines.json`) : `etats` (une entrée par tâche ouverte : état, ce qu'elle attend, propriétaire, depuis, cause si invalide), `oubliees` (les invalides, les gestes de Marc en retard, les fils silencieux), `attentes`, `file_marc` (les gestes de Marc par racine, le plus bloquant en tête), `liens_manquants`, `seuils_oubli`. Le format de `exclues` ne change pas. `node scripts/filet-pc.mjs prochaines.json --etat <fichier> --a-blanc` décide sans rien envoyer ni poser.
 
+## 5 quater. Jules avance seul quand le frein retient Claude (demande de Marc, 19/10/2026)
+
+Jules ne consomme pas le quota Claude. Quand le frein (§5 bis) retient **tout** ce qui reste à un dépôt (statut `frein`, aucun travail en cours), le filet du PC (`filet-pc.mjs`, `scripts/jules-auto.mjs`, sans IA) lui confie, à chaque tour, la première tâche retenue (`retenues_frein`, dans l'ordre de la file) dont le **corps d'issue est une consigne complète** : les huit sections du gabarit (`docs/jules-gabarit-issue.md` : Avant, Après, Fini quand, Fichiers permis, À faire, À ne pas faire, Vérifier, À citer dans la PR), non vides et sans `<crochets>`, au plus deux fichiers permis, aucun chemin de Claude (`.github/`, `scripts/`, `surveillance/`, `.mergify.yml`, secrets, authentification, base de données, dépendances, `BACKLOG.md`/`HANDOVER.md`/`CLAUDE.md`/`AGENTS.md`, moteur DriveAI, dépôt `hub-contract`), pas de « OU », `Tâche : #n` avec son propre numéro et jamais `Fixes`. Aucune étiquette `sécurité`, `qui:marc`, `bloqué` ni `en-cours`.
+
+Confier, c'est poser l'étiquette `jules` et un commentaire d'une ligne, après une vérification EN DIRECT : issue ouverte et aucune autre issue `jules` ou `en-cours` ouverte dans le dépôt (**une chose à la fois**, §6). Un dépôt que Claude peut servir (statut `libre`) reste à Claude : Jules ne lui prend jamais sa suivante. Une tâche déjà confiée deux fois ne l'est plus (le ménage du §7 retire l'étiquette après 24 h sans PR). Au plus trois confiées par tour, une par dépôt.
+
+La ligne `jules : …` d'`etat.json` dit ce qui est confié et, pour chaque tâche retenue qui ne l'est pas, la première raison (« sections absentes : À ne pas faire », « scripts/x.mjs : chemin protégé scripts/ »…). **Une tâche sans consigne complète n'est pas confiable, elle n'est pas oubliée** : elle reste en attente du frein, et celui qui la rédige (le fil Jules, ou n'importe quel fil qui crée une tâche petite) la met au gabarit. Claude relit la PR de Jules et pose la preuve « Acceptée » ; le Réacteur le réveille à la fusion comme pour toute PR.
+
 ## 6. Répartition du travail
 
 **Qui lance** : un **événement** d'abord, un relevé à l'heure seulement en filet quotidien (décision de Marc, 15/10/2026 : « plus de vérifications toutes les X heures »). Une demande directe de Marc n'attend rien : le Coordinateur ouvre le fil tout de suite.

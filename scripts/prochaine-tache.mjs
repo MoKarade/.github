@@ -415,6 +415,7 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
     let alternanceEnJeu = false;
 
     let retenues = 0;
+    const retenuesFrein = [];
     const file = prenables.map((n) => {
       const r = ref(depot.repo, n.n);
       const haut = ascendants(r, idx);
@@ -434,11 +435,14 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
       if (!permiseParFrein({ labels: n.labels, tier }, palier)) {
         exclues[r] = { code: 'frein-quota', detail: `palier ${palier}` };
         retenues += 1;
+        retenuesFrein.push({ ref: r, n: n.n, titre: n.title, url: n.url, prio: prioDe(n.labels), tier, labels: n.labels });
         return null;
       }
       return { ref: r, n: n.n, titre: n.title, url: n.url, prio: prioDe(n.labels), tier, raison: TIERS[tier], mission: haut.mission, chantier: haut.chantier };
     }).filter(Boolean);
     file.sort((a, b) => a.tier - b.tier || a.prio - b.prio || a.n - b.n);
+    // Les tâches que le frein retient, dans le même ordre : la matière première de Jules, qui ne consomme pas le quota Claude (docs §5 quater).
+    retenuesFrein.sort((a, b) => a.tier - b.tier || a.prio - b.prio || a.n - b.n);
     file.forEach((f, i) => { f.rang = i + 1; });
     if (alternanceEnJeu && hautDerniere.chantier && !typeDerniere) chantiersSansType.add(hautDerniere.chantier);
     if (chantiersSansType.size) alertes.push(`${depot.name} : alternance standard/fonction non calculable (chantier sans étiquette chantier:standard ou chantier:fonction : ${[...chantiersSansType].join(', ')})`);
@@ -457,6 +461,7 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
       attend_marc: enAttenteMarc.map((n) => ({ ref: ref(depot.repo, n.n), pr: n.pr.n })),
       derniere: refDerniere,
       file,
+      retenues_frein: retenuesFrein,
       exclues,
     };
   });

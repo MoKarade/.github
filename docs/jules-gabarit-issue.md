@@ -4,6 +4,8 @@ Pour qui : Claude, quand il rédige une issue à confier à Jules (étiquette `j
 
 Mise en place : MoKarade/.github#76. Proposition d'origine : `commun/plans/2026-10-16_jules-a-plein-regime.md`.
 
+**Automatique** : quand le frein de quota retient un dépôt entier, le filet du PC confie à Jules la première tâche retenue dont le corps respecte ce gabarit (sections non vides, deux fichiers au plus, aucun chemin de la liste ci-dessous) ; règles exactes dans `docs/cycle-de-vie-tache.md` §5 quater et `scripts/jules-auto.mjs`. Une issue rédigée au gabarit est donc prête à partir seule.
+
 ## Gabarit à copier dans le corps de l'issue
 
 ```
