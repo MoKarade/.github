@@ -63,7 +63,12 @@ def compacter_prochaines(p):
             'depots': [{'repo': d['repo'], 'cle': d['cle'], 'nom': d['depot'], 'statut': d['statut'], 'suivante': d['suivante']['ref'] if d.get('suivante') else None,
                         'incidents': d.get('incidents', []), 'occupe_par': d.get('occupe_par', []), 'derniere': d.get('derniere'),
                         'file': [{k: f.get(k) for k in ('ref', 'rang', 'tier', 'prio', 'raison', 'mission', 'chantier')} for f in d.get('file', [])],
-                        'exclues': d.get('exclues', {})} for d in p.get('depots', [])]}
+                        'exclues': d.get('exclues', {})} for d in p.get('depots', [])],
+            # tâches oubliées et attentes (.github#238) : la page les montre telles que le script les détecte, sans rien recalculer
+            'oubliees': [{k: o.get(k) for k in ('ref', 'cause', 'racine', 'proprietaire', 'depuis', 'heures')} for o in p.get('oubliees') or []],
+            'file_marc': [{k: m.get(k) for k in ('racine', 'depuis', 'heures', 'retient', 'retient_n', 'en_retard')} for m in p.get('file_marc') or []],
+            'attentes': {r: {k: a.get(k) for k in ('racine', 'code', 'proprietaire', 'depuis', 'heures', 'oubliee')} for r, a in (p.get('attentes') or {}).items()},
+            'seuils_oubli': p.get('seuils_oubli')}
 
 comp = {'asof': gh['asof'], 'built': iso(datetime.datetime.now(UTC)), 'v': 7, 'repos': []}
 for r in gh['repos']:
