@@ -1,14 +1,15 @@
 #!/usr/bin/env node
-// Jules prend seul les tâches que le frein de quota retient (demande de Marc du 19/10/2026 : « full auto, mécaniquement, pour qu'il
-// avance autant que possible malgré le quota bas de Claude »). Jules ne consomme pas le quota Claude : quand le frein retient tout ce
-// qui reste à un dépôt, le filet du PC (`filet-pc.mjs`) lui confie la première tâche dont le CORPS est une consigne complète au
-// gabarit `docs/jules-gabarit-issue.md`. Aucune IA, aucun jugement : une tâche est confiable ou elle ne l'est pas, et la raison s'écrit.
+// Jules prend seul les tâches faisables (demande de Marc du 19/10/2026 : « full auto, mécaniquement, pour qu'il avance autant que possible
+// malgré le quota bas de Claude »). Jules ne consomme pas le quota Claude : le filet du PC (`filet-pc.mjs`) lui confie, à chaque tour, la
+// première tâche RÉSERVÉE (étiquette `faisable-jules`, posée par qui écrit ou range la tâche : le filet ne devine pas) d'un dépôt LIBRE
+// dont le CORPS est une consigne complète au gabarit `docs/jules-gabarit-issue.md`. Aucune IA, aucun jugement : une tâche est confiable
+// ou elle ne l'est pas, et la raison s'écrit. Règles : plan du fil Jules, `commun/plans/2026-10-19_jules-automatique.md`.
 //
-// Quand : le dépôt est au statut `frein` (rien de ce qui reste n'est permis à Claude, aucun travail en cours), jamais sinon. Un dépôt
-// que Claude peut servir reste à Claude : Jules ne lui prend pas sa suivante. Une seule tâche Jules par dépôt, vérifiée EN DIRECT
-// (aucune issue `jules` ou `en-cours` ouverte) au moment de la confier.
-// Confier = poser l'étiquette `jules` (le signal que Jules lit) + un commentaire d'une ligne. Le « ménage » du cycle de vie (§7)
-// retire l'étiquette après 24 h sans PR ; une tâche déjà confiée deux fois ne l'est plus (elle revient à Claude).
+// Dépôt libre : aucun incident, aucune issue `jules` ou `en-cours` ouverte, aucune PR ouverte (hors robots et boîte du Réacteur) ; vérifié EN
+// DIRECT au moment de confier. Plafond : trois tâches Jules en même temps sur les dix dépôts (le quota de Jules est de 15 simultanées).
+// Confier = poser l'étiquette `jules` (le signal que Jules lit) + un commentaire d'une ligne. Le « ménage » du cycle de vie (§7) retire
+// l'étiquette après 24 h sans PR ; une tâche déjà confiée deux fois ne l'est plus (elle reste réservée : le silence de 24 h réveille alors le
+// Coordinateur, qui corrige le corps).
 //
 // Fonctions pures (`evaluerJules`, `choisirPourJules`), I/O injecté (`lireIssue`, `gh`) : les tests n'ont besoin ni de réseau ni de fichier.
 
@@ -18,6 +19,8 @@ export const SECTIONS_REQUISES = ['Avant', 'Après', 'Fini quand', 'Fichiers per
 export const FICHIERS_MAX = 2;
 export const CANDIDATES_MAX = 8;
 export const FOIS_MAX = 2;
+export const SIMULTANEES_MAX = 3;
+const BOITE = { depot: 'app-template', pr: 58 };
 
 // Ce que Jules ne touche jamais (AGENTS.md, gabarit « Tâches à garder pour Claude »).
 const CHEMINS_INTERDITS = [
@@ -62,6 +65,7 @@ export function evaluerJules({ repo, n, labels = [], body = '' }) {
   const raisons = [];
   const depot = String(repo ?? '').toLowerCase();
   if (DEPOTS_INTERDITS[depot]) raisons.push(`dépôt réservé à Claude (${DEPOTS_INTERDITS[depot]})`);
+  if (!labels.includes('faisable-jules')) raisons.push('étiquette « faisable-jules » absente');
   for (const l of labels) if (ETIQUETTES_INTERDITES.includes(String(l).toLowerCase())) raisons.push(`étiquette « ${l} » : tâche à garder pour Claude`);
   for (const l of ETIQUETTES_QUI_ECARTENT) if (labels.includes(l)) raisons.push(`étiquette « ${l} »`);
 
@@ -99,18 +103,23 @@ export function evaluerJules({ repo, n, labels = [], body = '' }) {
 }
 
 /**
- * Pour chaque dépôt au frein, la première tâche retenue dont le corps est une consigne complète.
- * @param prochaines contenu de prochaines.json
+ * Pour chaque dépôt libre, la première tâche réservée dont le corps est une consigne complète.
+ * @param prochaines contenu de prochaines.json (`depots[].reservees_jules`, `occupe_par`, `incidents`)
  * @param lireIssue (depot, n) -> { state, labels, body } (EN DIRECT)
  * @param etat { confies: { ref: { fois } } } : une tâche déjà confiée `FOIS_MAX` fois n'est plus proposée
- * @returns {{ choix: {repo, ref, n, titre}[], pasPretes: {ref, raisons}[], depotsAuFrein: number }}
+ * @returns {{ choix: {repo, ref, n, titre}[], pasPretes: {ref, raisons}[], depotsConcernes: number, enCours: number }}
  */
 export function choisirPourJules(prochaines, lireIssue, etat = {}) {
-  const resultat = { choix: [], pasPretes: [], depotsAuFrein: 0 };
-  for (const d of prochaines.depots ?? []) {
-    if (d.statut !== 'frein') continue;
-    resultat.depotsAuFrein += 1;
-    for (const c of (d.retenues_frein ?? []).slice(0, CANDIDATES_MAX)) {
+  const depots = prochaines.depots ?? [];
+  const enCours = depots.filter((d) => (d.occupe_par ?? []).some((o) => o.motif === 'jules')).length;
+  const resultat = { choix: [], pasPretes: [], depotsConcernes: 0, enCours };
+  for (const d of depots) {
+    if (!(d.reservees_jules ?? []).length) continue;
+    resultat.depotsConcernes += 1;
+    // Un dépôt occupé (travail en cours, PR ouverte, incident) attend : une chose à la fois. La tâche reste réservée.
+    if ((d.occupe_par ?? []).length || (d.incidents ?? []).length) continue;
+    if (enCours + resultat.choix.length >= SIMULTANEES_MAX) continue;
+    for (const c of d.reservees_jules.slice(0, CANDIDATES_MAX)) {
       if ((etat.confies?.[c.ref]?.fois ?? 0) >= FOIS_MAX) { resultat.pasPretes.push({ ref: c.ref, raisons: [`déjà confiée ${FOIS_MAX} fois`] }); continue; }
       let issue;
       try { issue = lireIssue(d.repo, c.n); } catch (e) { resultat.pasPretes.push({ ref: c.ref, raisons: [`issue illisible (${String(e.message).slice(0, 60)})`] }); continue; }
@@ -126,10 +135,10 @@ export function choisirPourJules(prochaines, lireIssue, etat = {}) {
 
 /**
  * Confie la tâche à Jules après une dernière vérification EN DIRECT : issue ouverte, aucune étiquette qui l'écarte, et aucun autre travail
- * `jules` ou `en-cours` ouvert dans le dépôt. `gh(methode, chemin, corps)` rend l'objet JSON ou lève.
+ * `jules` ou `en-cours` ouvert, et aucune PR ouverte (hors robots et boîte du Réacteur). `gh(methode, chemin, corps)` rend l'objet JSON ou lève.
  * @returns {{ statut: 'confiee'|'sautee', raison?: string }}
  */
-export function confierAJules({ repo, n, palier }, gh, { aBlanc = false } = {}) {
+export function confierAJules({ repo, n }, gh, { aBlanc = false } = {}) {
   const base = `repos/${ORG}/${repo}`;
   const issue = gh('GET', `${base}/issues/${n}`);
   const etiquettes = (issue.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
@@ -140,10 +149,13 @@ export function confierAJules({ repo, n, palier }, gh, { aBlanc = false } = {}) 
     const ouvertes = gh('GET', `${base}/issues?labels=${encodeURIComponent(l)}&state=open&per_page=5`);
     if ((Array.isArray(ouvertes) ? ouvertes : []).some((i) => !i.pull_request)) return { statut: 'sautee', raison: `dépôt occupé (issue « ${l} » ouverte)` };
   }
+  const prs = gh('GET', `${base}/pulls?state=open&per_page=30`);
+  const travail = (Array.isArray(prs) ? prs : []).find((p) => p.user?.type !== 'Bot' && !String(p.user?.login ?? '').endsWith('[bot]') && !(repo.toLowerCase() === BOITE.depot && p.number === BOITE.pr));
+  if (travail) return { statut: 'sautee', raison: `dépôt occupé (PR #${travail.number} ouverte)` };
   if (aBlanc) return { statut: 'confiee', raison: 'à blanc' };
   gh('POST', `${base}/issues/${n}/labels`, { 'labels[]': 'jules' });
   gh('POST', `${base}/issues/${n}/comments`, {
-    body: `Confiée à Jules automatiquement par le filet du PC : le frein de quota Claude est au palier ${palier}, Claude ne prend pas cette tâche, Jules n'en consomme pas. Le corps de l'issue est sa consigne. Claude relit la PR et pose la preuve « Acceptée ».`,
+    body: `Confiée à Jules automatiquement par le filet du PC (tâche réservée \`faisable-jules\`, dépôt libre, corps au gabarit). Le corps de l'issue est sa consigne. Claude relit la PR et pose la preuve « Acceptée ».`,
   });
   return { statut: 'confiee' };
 }

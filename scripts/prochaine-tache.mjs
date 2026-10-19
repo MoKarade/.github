@@ -253,6 +253,8 @@ function ecart(n, depot, idx) {
   if (inconnue) return { code: 'attend-inconnue', detail: inconnue };
   if (ouverte) return { code: 'attend-ouverte', detail: ouverte };
   if (n.pr?.state === 'open') return { code: 'pr-ouverte', detail: `PR ${n.pr.repo ?? depot.repo}#${n.pr.n}` };
+  // Réservée à Jules par celui qui l'a rangée : Claude ne la prend pas (sinon les deux la prendraient), le filet du PC la confie quand le dépôt est libre.
+  if (n.labels.includes('faisable-jules')) return { code: 'jules-reservee', detail: 'faisable-jules' };
   if (!String(n.fq ?? '').trim()) return { code: 'fini-quand-absent', detail: '' };
   return null;
 }
@@ -262,7 +264,7 @@ function ecart(n, depot, idx) {
 export const ATTENTE = { marcHeures: 48, marcIsoleHeures: 168, filHeures: 24 };
 
 // Qui peut lever l'obstacle d'après son code. Un code absent de la table n'a PERSONNE pour le lever.
-const PROPRIETAIRE = { 'geste-marc': 'marc', 'preuve-attendue': 'preuve', 'en-cours': 'fil', jules: 'fil', 'pr-ouverte': 'fil', 'frein-quota': 'frein', prenable: 'file', mission: 'mission' };
+const PROPRIETAIRE = { 'geste-marc': 'marc', 'preuve-attendue': 'preuve', 'en-cours': 'fil', jules: 'fil', 'pr-ouverte': 'fil', 'frein-quota': 'frein', 'jules-reservee': 'fil', prenable: 'file', mission: 'mission' };
 const CAUSE_SANS_PROPRIETAIRE = { 'preuve-chez-marc': 'preuve-chez-marc', bloquee: 'bloquee-sans-reprise', 'attend-inconnue': 'dependance-illisible', 'fini-quand-absent': 'fini-quand-absent', cycle: 'dependance-circulaire' };
 
 const heuresDepuis = (t, maintenant) => (t ? (maintenant.getTime() - Date.parse(t)) / 3_600_000 : null);
@@ -389,11 +391,15 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
     const taches = Object.values(depot.nodes).filter((n) => n.lvl === 'tâche' && n.state === 'open');
     const exclues = {};
     const prenables = [];
+    const reserveesJules = [];
     for (const n of taches) {
       const e = ecart(n, depot, idx);
       if (e) exclues[ref(depot.repo, n.n)] = e;
       else prenables.push(n);
+      // Réservée à Jules (`faisable-jules`) : hors de la file de Claude, matière du filet du PC (docs §5 quater).
+      if (e?.code === 'jules-reservee') reserveesJules.push({ ref: ref(depot.repo, n.n), n: n.n, titre: n.title, url: n.url, prio: prioDe(n.labels) });
     }
+    reserveesJules.sort((a, b) => a.prio - b.prio || a.n - b.n);
     // Une PR dont le seul obstacle est un geste de Marc (le Garde-fou a ouvert « la PR #n attend un geste de Marc », `qui:marc`) n'occupe
     // plus le dépôt : le fil qui l'a ouverte n'a plus rien à faire dessus (tâche #197). La PR garde son état, le geste reste chez Marc.
     const attendMarc = new Set(depot.pr_attend_marc ?? []);
@@ -415,7 +421,6 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
     let alternanceEnJeu = false;
 
     let retenues = 0;
-    const retenuesFrein = [];
     const file = prenables.map((n) => {
       const r = ref(depot.repo, n.n);
       const haut = ascendants(r, idx);
@@ -435,14 +440,11 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
       if (!permiseParFrein({ labels: n.labels, tier }, palier)) {
         exclues[r] = { code: 'frein-quota', detail: `palier ${palier}` };
         retenues += 1;
-        retenuesFrein.push({ ref: r, n: n.n, titre: n.title, url: n.url, prio: prioDe(n.labels), tier, labels: n.labels });
         return null;
       }
       return { ref: r, n: n.n, titre: n.title, url: n.url, prio: prioDe(n.labels), tier, raison: TIERS[tier], mission: haut.mission, chantier: haut.chantier };
     }).filter(Boolean);
     file.sort((a, b) => a.tier - b.tier || a.prio - b.prio || a.n - b.n);
-    // Les tâches que le frein retient, dans le même ordre : la matière première de Jules, qui ne consomme pas le quota Claude (docs §5 quater).
-    retenuesFrein.sort((a, b) => a.tier - b.tier || a.prio - b.prio || a.n - b.n);
     file.forEach((f, i) => { f.rang = i + 1; });
     if (alternanceEnJeu && hautDerniere.chantier && !typeDerniere) chantiersSansType.add(hautDerniere.chantier);
     if (chantiersSansType.size) alertes.push(`${depot.name} : alternance standard/fonction non calculable (chantier sans étiquette chantier:standard ou chantier:fonction : ${[...chantiersSansType].join(', ')})`);
@@ -461,7 +463,7 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
       attend_marc: enAttenteMarc.map((n) => ({ ref: ref(depot.repo, n.n), pr: n.pr.n })),
       derniere: refDerniere,
       file,
-      retenues_frein: retenuesFrein,
+      reservees_jules: reserveesJules,
       exclues,
     };
   });

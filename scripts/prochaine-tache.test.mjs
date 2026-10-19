@@ -798,12 +798,20 @@ test('un geste de Marc qui dépend d’une tâche ouverte attend cette tâche, p
   assert.equal(calculer(fermee, { maintenant: NOW }).oubliees.filter(pasLien)[0].cause, 'geste-marc-en-retard');
 });
 
-test('le frein expose les tâches qu’il retient, dans l’ordre de la file, pour Jules', () => {
-  const frein = { palier: 2, detail: { perime: false, raison: 'test' } };
-  const r = calculer(releve(depot('a', [tache(3, { labels: ['prio:2'] }), tache(1), tache(2, { labels: ['prio:1'] })])), { frein, maintenant: NOW });
+test('`faisable-jules` réserve la tâche à Jules : hors de la file de Claude, listée dans `reservees_jules`, « en attente » de lui', () => {
+  const r = calculer(releve(depot('a', [
+    mission(90, [1, 2, 3, 4]),
+    tache(1), avec(tache(2, { labels: ['faisable-jules', 'prio:2'] }), { upd: il_y_a(1) }), avec(tache(3, { labels: ['faisable-jules'] }), { upd: il_y_a(30) }),
+    tache(4, { labels: ['faisable-jules'], deps: ['a#1'] }),
+  ])), { maintenant: NOW });
   const d = etat(r);
-  assert.equal(d.statut, 'frein');
-  assert.deepEqual(d.retenues_frein.map((t) => t.ref), ['a#2', 'a#3', 'a#1']);
-  assert.deepEqual(d.file, []);
-  assert.equal(etat(calculer(releve(depot('a', [tache(1)])), { maintenant: NOW })).retenues_frein.length, 0);
+  assert.deepEqual(d.file.map((f) => f.ref), ['a#1']);
+  assert.equal(d.exclues['a#2'].code, 'jules-reservee');
+  assert.equal(d.exclues['a#4'].code, 'attend-ouverte', 'une dépendance ouverte passe avant la réserve');
+  assert.deepEqual(d.reservees_jules.map((t) => t.ref), ['a#2', 'a#3'], 'prio puis numéro');
+  assert.equal(r.etats['a#2'].etat, 'en-attente');
+  assert.equal(r.attentes['a#2'].proprietaire, 'fil');
+  assert.equal(r.etats['a#3'].etat, 'invalide', 'réservée mais sans nouvelles depuis plus de 24 h : le silence réveille le Coordinateur');
+  assert.equal(r.etats['a#3'].cause, 'fil-silencieux');
+  assert.equal(etat(calculer(releve(depot('a', [tache(1)])), { maintenant: NOW })).reservees_jules.length, 0);
 });

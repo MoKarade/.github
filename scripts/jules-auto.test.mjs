@@ -17,7 +17,7 @@ const corps = (n = 7, repo = 'carai', surcharge = {}) => {
   };
   return Object.entries(s).filter(([, v]) => v !== null).map(([k, v]) => (k === 'Fichiers permis' ? `**${k}** ${v}` : `**${k}** : ${v}`)).join('\n\n');
 };
-const evalue = (surcharge, extra = {}) => evaluerJules({ repo: 'carai', n: 7, labels: [], body: corps(7, 'carai', surcharge), ...extra });
+const evalue = (surcharge, extra = {}) => evaluerJules({ repo: 'carai', n: 7, labels: ['faisable-jules'], body: corps(7, 'carai', surcharge), ...extra });
 
 test('section lit « **Titre** : texte » jusqu’à la section suivante, parenthèse tolérée', () => {
   const b = corps();
@@ -60,10 +60,11 @@ test('plus de deux fichiers, ou aucun lisible : refusé', () => {
 });
 
 test('les dépôts et les étiquettes réservés à Claude sont refusés', () => {
-  assert.match(evaluerJules({ repo: 'hub-contract', n: 7, labels: [], body: corps(7, 'hub-contract') }).raisons.join(), /dépôt réservé/);
-  assert.match(evalue({}, { labels: ['sécurité'] }).raisons.join(), /sécurité/);
-  assert.match(evalue({}, { labels: ['qui:marc'] }).raisons.join(), /qui:marc/);
-  assert.match(evaluerJules({ repo: 'DriveAI', n: 7, labels: [], body: corps(7, 'DriveAI', { 'Fichiers permis': ':\n- `src/Router.gs`' }) }).raisons.join(), /moteur DriveAI/);
+  assert.match(evaluerJules({ repo: 'hub-contract', n: 7, labels: ['faisable-jules'], body: corps(7, 'hub-contract') }).raisons.join(), /dépôt réservé/);
+  assert.match(evalue({}, { labels: ['faisable-jules', 'sécurité'] }).raisons.join(), /sécurité/);
+  assert.match(evalue({}, { labels: ['faisable-jules', 'qui:marc'] }).raisons.join(), /qui:marc/);
+  assert.match(evalue({}, { labels: [] }).raisons.join(), /faisable-jules/);
+  assert.match(evaluerJules({ repo: 'DriveAI', n: 7, labels: ['faisable-jules'], body: corps(7, 'DriveAI', { 'Fichiers permis': ':\n- `src/Router.gs`' }) }).raisons.join(), /moteur DriveAI/);
 });
 
 test('« OU », crochets du gabarit, mauvais numéro et Fixes sont refusés', () => {
@@ -74,40 +75,57 @@ test('« OU », crochets du gabarit, mauvais numéro et Fixes sont refusés', ()
   assert.equal(evalue({ 'À citer dans la PR': '`Tâche : MoKarade/carai#7`' }).ok, true, 'la forme avec dépôt est permise');
 });
 
-// prochaines.json minimal : un dépôt au frein avec ses tâches retenues.
-const prochaines = (retenues, extra = {}) => ({ frein: 2, depots: [{ repo: 'carai', statut: 'frein', retenues_frein: retenues, ...extra }] });
-const issues = (table) => (depot, n) => {
+// prochaines.json minimal : des dépôts avec leurs tâches réservées à Jules (`reservees_jules`).
+const depot = (repo, reservees, extra = {}) => ({ repo, statut: 'rien', reservees_jules: reservees, occupe_par: [], incidents: [], ...extra });
+const prochaines = (...depots) => ({ depots });
+const issues = (table) => (repo, n) => {
   if (!table[n]) throw new Error('404');
   return table[n];
 };
-const ouverte = (n, surcharge = {}, labels = []) => ({ state: 'open', labels, body: corps(n, 'carai', surcharge) });
+const ouverte = (n, surcharge = {}, labels = ['faisable-jules']) => ({ state: 'open', labels, body: corps(n, 'carai', surcharge) });
 
-test('choisirPourJules prend la première retenue confiable, et dit pourquoi les autres ne le sont pas', () => {
-  const p = prochaines([{ ref: 'carai#5', n: 5 }, { ref: 'carai#6', n: 6 }, { ref: 'carai#7', n: 7 }]);
-  const r = choisirPourJules(p, issues({ 5: { state: 'open', labels: [], body: 'sans gabarit' }, 6: { ...ouverte(6), state: 'closed' }, 7: ouverte(7) }));
+test('choisirPourJules prend la première réservée confiable, et dit pourquoi les autres ne le sont pas', () => {
+  const p = prochaines(depot('carai', [{ ref: 'carai#5', n: 5 }, { ref: 'carai#6', n: 6 }, { ref: 'carai#7', n: 7 }]));
+  const r = choisirPourJules(p, issues({ 5: { state: 'open', labels: ['faisable-jules'], body: 'sans gabarit' }, 6: { ...ouverte(6), state: 'closed' }, 7: ouverte(7) }));
   assert.deepEqual(r.choix.map((c) => c.ref), ['carai#7']);
   assert.deepEqual(r.pasPretes.map((x) => x.ref), ['carai#5', 'carai#6']);
-  assert.equal(r.depotsAuFrein, 1);
+  assert.equal(r.depotsConcernes, 1);
 });
 
-test('choisirPourJules ignore un dépôt qui n’est pas au frein, et une tâche déjà confiée deux fois', () => {
+test('choisirPourJules attend qu’un dépôt soit libre : travail en cours, PR ouverte ou incident', () => {
   const lire = () => { throw new Error('ne doit pas être lu'); };
-  assert.deepEqual(choisirPourJules({ depots: [{ repo: 'carai', statut: 'libre', retenues_frein: [{ ref: 'carai#7', n: 7 }] }] }, lire).choix, []);
-  const r = choisirPourJules(prochaines([{ ref: 'carai#7', n: 7 }]), lire, { confies: { 'carai#7': { fois: FOIS_MAX } } });
-  assert.deepEqual(r.choix, []);
-  assert.match(r.pasPretes[0].raisons[0], /déjà confiée 2 fois/);
+  const r = (extra) => choisirPourJules(prochaines(depot('carai', [{ ref: 'carai#7', n: 7 }], extra)), lire);
+  assert.deepEqual(r({ occupe_par: [{ ref: 'carai#2', motif: 'en-cours' }] }).choix, []);
+  assert.deepEqual(r({ occupe_par: [{ ref: 'carai#2', motif: 'pr-ouverte' }] }).choix, []);
+  assert.deepEqual(r({ occupe_par: [{ ref: 'carai#2', motif: 'jules' }] }).choix, []);
+  assert.deepEqual(r({ incidents: [{ n: 9 }] }).choix, []);
+});
+
+test('choisirPourJules plafonne à trois Jules en même temps, et ne reconfie pas une tâche confiée deux fois', () => {
+  const lire = (repo, n) => ouverte(n);
+  const quatre = ['a', 'b', 'c', 'd'].map((x, i) => depot(x, [{ ref: `${x}#${i + 1}`, n: i + 1 }]));
+  const tous = choisirPourJules(prochaines(...quatre), (repo, n) => ({ ...ouverte(n), body: corps(n, repo) }));
+  assert.equal(tous.choix.length, 3);
+  const dejaUn = choisirPourJules(prochaines(depot('z', [], { occupe_par: [{ ref: 'z#1', motif: 'jules' }] }), ...quatre), (repo, n) => ({ ...ouverte(n), body: corps(n, repo) }));
+  assert.equal(dejaUn.choix.length, 2);
+  assert.equal(dejaUn.enCours, 1);
+  void lire;
+  const deux = choisirPourJules(prochaines(depot('carai', [{ ref: 'carai#7', n: 7 }])), () => { throw new Error('ne doit pas être lu'); }, { confies: { 'carai#7': { fois: FOIS_MAX } } });
+  assert.deepEqual(deux.choix, []);
+  assert.match(deux.pasPretes[0].raisons[0], /déjà confiée 2 fois/);
 });
 
 test('choisirPourJules ne lève pas sur une issue illisible', () => {
-  const r = choisirPourJules(prochaines([{ ref: 'carai#9', n: 9 }]), issues({}));
+  const r = choisirPourJules(prochaines(depot('carai', [{ ref: 'carai#9', n: 9 }])), issues({}));
   assert.match(r.pasPretes[0].raisons[0], /illisible/);
 });
 
-// gh factice : un dépôt avec ses issues et ce qu'on y écrit.
-const ghFactice = ({ issue = { state: 'open', labels: [] }, ouvertes = {} } = {}) => {
+// gh factice : un dépôt avec ses issues, ses PR ouvertes et ce qu'on y écrit.
+const ghFactice = ({ issue = { state: 'open', labels: [] }, ouvertes = {}, prs = [] } = {}) => {
   const appels = [];
   const gh = (m, chemin, corps) => {
     appels.push([m, chemin, corps]);
+    if (m === 'GET' && /\/pulls\?/.test(chemin)) return prs;
     if (m === 'GET' && /issues\?labels=/.test(chemin)) return ouvertes[decodeURIComponent(/labels=([^&]+)/.exec(chemin)[1])] ?? [];
     if (m === 'GET') return issue;
     return {};
@@ -117,23 +135,33 @@ const ghFactice = ({ issue = { state: 'open', labels: [] }, ouvertes = {} } = {}
 
 test('confierAJules pose l’étiquette jules et un commentaire, après avoir vérifié le dépôt en direct', () => {
   const { gh, appels } = ghFactice();
-  const r = confierAJules({ repo: 'CarAI', n: 7, palier: 2 }, gh);
+  const r = confierAJules({ repo: 'CarAI', n: 7 }, gh);
   assert.equal(r.statut, 'confiee');
   const ecritures = appels.filter(([m]) => m === 'POST');
   assert.equal(ecritures[0][1], 'repos/MoKarade/CarAI/issues/7/labels');
   assert.deepEqual(ecritures[0][2], { 'labels[]': 'jules' });
-  assert.match(ecritures[1][2].body, /palier 2/);
+  assert.match(ecritures[1][2].body, /faisable-jules/);
 });
 
 test('confierAJules ne fait rien si le dépôt est occupé ou l’issue écartée, et rien à blanc', () => {
   const occupe = ghFactice({ ouvertes: { 'en-cours': [{ number: 3 }] } });
-  assert.match(confierAJules({ repo: 'CarAI', n: 7, palier: 2 }, occupe.gh).raison, /dépôt occupé/);
+  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, occupe.gh).raison, /dépôt occupé/);
   assert.equal(occupe.appels.some(([m]) => m === 'POST'), false);
   const pr = ghFactice({ ouvertes: { 'en-cours': [{ number: 3, pull_request: {} }] } });
-  assert.equal(confierAJules({ repo: 'CarAI', n: 7, palier: 2 }, pr.gh).statut, 'confiee', 'une PR étiquetée n’est pas un travail');
+  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, pr.gh).statut, 'confiee', 'une PR étiquetée n’est pas une issue de travail');
   const marc = ghFactice({ issue: { state: 'open', labels: [{ name: 'qui:marc' }] } });
-  assert.match(confierAJules({ repo: 'CarAI', n: 7, palier: 2 }, marc.gh).raison, /qui:marc/);
+  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, marc.gh).raison, /qui:marc/);
   const blanc = ghFactice();
-  assert.equal(confierAJules({ repo: 'CarAI', n: 7, palier: 2 }, blanc.gh, { aBlanc: true }).raison, 'à blanc');
+  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, blanc.gh, { aBlanc: true }).raison, 'à blanc');
   assert.equal(blanc.appels.some(([m]) => m === 'POST'), false);
+});
+
+test('confierAJules attend une PR ouverte, sauf celles des robots et la boîte du Réacteur', () => {
+  const humaine = ghFactice({ prs: [{ number: 12, user: { login: 'MoKarade', type: 'User' } }] });
+  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, humaine.gh).raison, /PR #12 ouverte/);
+  const robot = ghFactice({ prs: [{ number: 13, user: { login: 'dependabot[bot]', type: 'Bot' } }] });
+  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, robot.gh).statut, 'confiee');
+  const boite = ghFactice({ prs: [{ number: 58, user: { login: 'MoKarade', type: 'User' } }] });
+  assert.equal(confierAJules({ repo: 'app-template', n: 7 }, boite.gh).statut, 'confiee');
+  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, ghFactice({ prs: [{ number: 58, user: { login: 'MoKarade', type: 'User' } }] }).gh).raison, /PR #58/, 'la boîte n’est exclue que dans app-template');
 });
