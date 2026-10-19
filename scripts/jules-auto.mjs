@@ -16,15 +16,18 @@
 const ORG = 'MoKarade';
 
 export const SECTIONS_REQUISES = ['Avant', 'Après', 'Fini quand', 'Fichiers permis', 'À faire', 'À ne pas faire', 'Vérifier', 'À citer dans la PR'];
-export const FICHIERS_MAX = 2;
+export const FICHIERS_MAX = 5;
 export const CANDIDATES_MAX = 8;
 export const FOIS_MAX = 2;
 export const SIMULTANEES_MAX = 3;
 const BOITE = { depot: 'app-template', pr: 58 };
 
-// Ce que Jules ne touche jamais (AGENTS.md, gabarit « Tâches à garder pour Claude »).
+// Ce que Jules ne touche jamais (AGENTS.md, gabarit « Tâches à garder pour Claude »). Marc a levé cinq exclusions le 19/10/2026 (taille,
+// petits écrans, workflows de `.github/`, longs .md, dépendances mineures) : elles passent par les conditions de `evaluerJules`, qui
+// exigent la preuve dans le corps. Restent exclus : secrets, jetons, Sentry, authentification, base de données, migrations.
 const CHEMINS_INTERDITS = [
-  [/^\.github\//, 'chemin protégé .github/'],
+  [/^\.github\/(?!workflows\/[\w.-]+\.ya?ml$)/, 'chemin protégé .github/ (seuls les workflows listés sont permis)'],
+  [/^\.github\/workflows\/.*(garde-?fou|relecture|codeowners|mergify|reacteur|reveil)/i, 'workflow protégé (garde-fou, relecture, Mergify, Réacteur)'],
   [/^scripts\//, 'chemin protégé scripts/'],
   [/^surveillance\//, 'chemin protégé surveillance/'],
   [/^qualite\//, 'chemin protégé qualite/'],
@@ -32,15 +35,18 @@ const CHEMINS_INTERDITS = [
   [/(^|\/)\.mergify\.yml$/, 'chemin protégé .mergify.yml'],
   [/(^|\/)(CODEOWNERS|vercel\.json)$/, 'chemin protégé'],
   [/(^|\/)\.env/, 'secret (.env)'],
-  [/(^|\/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/, 'dépendances'],
   [/(^|\/)(drizzle|migrations?)\//i, 'base de données'],
   [/schema\.(ts|sql)$|\.sql$/i, 'base de données'],
   [/(^|\/)(auth|middleware|proxy)[\w.-]*\.(ts|tsx|js|mjs)$/i, 'authentification'],
-  [/secret|token|credential/i, 'secret ou jeton'],
-  [/(^|\/)(BACKLOG|HANDOVER|CLAUDE|AGENTS)\.md$/, 'long .md à ne pas réécrire'],
+  [/secret|token|credential|sentry/i, 'secret, jeton ou Sentry'],
+  [/(^|\/)(BACKLOG|HANDOVER|CLAUDE|AGENTS)\.md$/, 'fichier d\'instructions à ne pas réécrire'],
 ];
 const DEPOTS_INTERDITS = { 'hub-contract': 'le contrat', };
-const ETIQUETTES_INTERDITES = ['sécurité', 'securite', 'incident', 'preuve-manquante', 'écran', 'ecran', 'ui', 'design', 'migration', 'secret'];
+const ETIQUETTES_INTERDITES = ['sécurité', 'securite', 'incident', 'preuve-manquante', 'migration', 'secret'];
+const ETIQUETTES_ECRAN = ['écran', 'ecran', 'ui', 'design'];
+const FICHIER_ECRAN = /\.(css|tsx|jsx)$|(^|\/)components\//i;
+const FICHIER_DEPENDANCES = /(^|\/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/;
+const FICHIER_MD = /\.md$/i;
 const ETIQUETTES_QUI_OCCUPENT = ['en-cours', 'jules'];
 const ETIQUETTES_QUI_ECARTENT = ['en-cours', 'jules', 'qui:marc', 'bloqué', 'preuve-attendue'];
 
@@ -87,6 +93,21 @@ export function evaluerJules({ repo, n, labels = [], body = '' }) {
     if (fichiers.length > FICHIERS_MAX) raisons.push(`plus de ${FICHIERS_MAX} fichiers permis (${fichiers.length})`);
     for (const f of fichiers) for (const [motif, pourquoi] of CHEMINS_INTERDITS) if (motif.test(f)) { raisons.push(`${f} : ${pourquoi}`); break; }
     if (depot === 'driveai' && fichiers.some((f) => /^src\//.test(f))) raisons.push('moteur DriveAI (src/) réservé à Claude');
+
+    // Exclusions levées par Marc le 19/10/2026 : permises seulement si le corps porte la preuve demandée.
+    const consignes = ['À faire', 'À ne pas faire', 'Vérifier', 'Fini quand'].map((t) => section(body, t) ?? '').join('\n');
+    const toucheEcran = fichiers.some((f) => FICHIER_ECRAN.test(f)) || labels.some((l) => ETIQUETTES_ECRAN.includes(String(l).toLowerCase()));
+    if (toucheEcran && !(/capture/i.test(consignes) && /theme\.test/i.test(consignes))) {
+      raisons.push('écran : le corps doit demander des captures avant/après ET le test tests/theme.test.ts');
+    }
+    if (fichiers.some((f) => FICHIER_DEPENDANCES.test(f)) && !(/npm audit/i.test(consignes) && /mineure|patch/i.test(consignes))) {
+      raisons.push('dépendances : seulement des montées mineures/patch, avec « npm audit » à 0 dans Vérifier');
+    }
+    if (fichiers.some((f) => FICHIER_MD.test(f)) && !(/fran[cç]ais/i.test(consignes) && /accent/i.test(consignes))) {
+      raisons.push('.md : le corps doit demander explicitement le français et les accents (et un test des mots)');
+    }
+  } else {
+    for (const l of labels) if (ETIQUETTES_ECRAN.includes(String(l).toLowerCase())) raisons.push(`étiquette « ${l} » : tâche à garder pour Claude`);
   }
 
   // Un seul objectif : un « OU » en majuscules dans la consigne, et Jules fait les deux (constat Hubperso#146).
