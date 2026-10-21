@@ -353,6 +353,48 @@ test('frein : un relevé de plus de 3 h garde le dernier palier connu et le dit 
   assert.equal(frein(85, undefined, vieux).detail.perime, true);
 });
 
+test('frein : remise à zéro passée sans nouvelle mesure = fenêtre neuve, palier normal et dit non mesuré (#319)', () => {
+  const vieux = '2026-10-16T08:30Z'; // 3,5 h avant MAINTENANT : périmé
+  const apres = (precedent, extra = {}) => calculerFrein({ pct: 100, mesureUtc: vieux, precedent, resetUtc: '2026-10-16T10:00Z', maintenant: MAINTENANT, ...extra });
+  for (const precedent of [2, 1, 'normal', undefined]) {
+    const r = apres(precedent);
+    assert.equal(r.palier, 'normal', `précédent ${precedent}`);
+    assert.equal(r.detail.apres_reset, true);
+    assert.equal(r.detail.perime, true, 'la mesure reste dite périmée');
+    assert.equal(r.detail.inconnu, false);
+    assert.match(r.detail.raison, /remise à zéro passée/);
+  }
+  const alertes = calculer(releve(sorte()), { frein: apres(2) }).alertes.join(' ');
+  assert.match(alertes, /palier normal : remise à zéro passée/);
+  assert.equal(fileA(calculer(releve(sorte()), { frein: apres(2) })).length, 6, 'rien n’est plus retenu');
+  assert.equal(etat(calculer(releve(depot('a', [tache(1, { labels: ['prio:2'] })])), { frein: apres(2) })).statut, 'libre');
+});
+
+test('frein : la remise à zéro ne libère rien si elle est future, illisible, ou si la mesure lui est postérieure (#319)', () => {
+  const vieux = '2026-10-16T08:30Z';
+  const garde = (extra) => calculerFrein({ pct: 100, mesureUtc: vieux, precedent: 2, maintenant: MAINTENANT, ...extra });
+  for (const extra of [
+    { resetUtc: '2026-10-16T12:00:01Z' }, // pas encore passée
+    { resetUtc: '2026-10-17T10:00Z' },
+    { resetUtc: 'bientôt' },
+    { resetUtc: undefined },
+    { resetUtc: '2026-10-16T08:00Z' }, // mesure postérieure à la remise à zéro : la fenêtre est la même
+  ]) {
+    const r = garde(extra);
+    assert.equal(r.palier, 2, JSON.stringify(extra));
+    assert.equal(r.detail.apres_reset, false);
+    assert.equal(r.detail.perime, true);
+  }
+  // Une mesure fraîche gouverne, même avec une remise à zéro passée avant elle.
+  const fraiche = calculerFrein({ pct: 85, mesureUtc: FRAIS, precedent: 2, resetUtc: '2026-10-16T10:00Z', maintenant: MAINTENANT });
+  assert.equal(fraiche.palier, 1);
+  assert.equal(fraiche.detail.apres_reset, false);
+  // Sans mesure exploitable, rien ne prouve la fenêtre : palier précédent gardé.
+  const sans = calculerFrein({ precedent: 2, resetUtc: '2026-10-16T10:00Z', maintenant: MAINTENANT });
+  assert.equal(sans.palier, 2);
+  assert.equal(sans.detail.apres_reset, false);
+});
+
 test('frein : aucun relevé exploitable = palier précédent, sinon normal MAIS marqué inconnu', () => {
   for (const sansReleve of [{}, { pct: null }, { pct: 'beaucoup', mesureUtc: FRAIS }, { pct: 85, mesureUtc: 'hier' }, { pct: -1, mesureUtc: FRAIS }]) {
     const r = calculerFrein({ ...sansReleve, precedent: 2, maintenant: MAINTENANT });
