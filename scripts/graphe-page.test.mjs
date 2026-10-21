@@ -65,3 +65,17 @@ test('un graphe sans lien entre fichiers ne produit aucune page', () => {
   const r = reduire({ nodes: [noeud('a', 'lib/a.ts')], links: [] });
   assert.deepEqual(r.gardes, []);
 });
+
+test('meta.json porte les champs lus par Hubperso, avec le filtre versionné', () => {
+  const programme = [
+    'import importlib.util, json, sys',
+    'spec = importlib.util.spec_from_file_location("graphe_page", sys.argv[1])',
+    'm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)',
+    'print(json.dumps(m.meta("MoKarade/exemple", "abc1234", "2026-10-21T15:00:00Z", 12, 30, 400)))',
+  ].join('\n');
+  const r = spawnSync('python3', ['-I', '-B', '-c', programme, SCRIPT], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout), {
+    depot: 'MoKarade/exemple', sha: 'abc1234', genereLe: '2026-10-21T15:00:00Z', noeuds: 12, aretes: 30, filtre: 'fichiers-v1;max400',
+  });
+});
