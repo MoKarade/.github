@@ -5,13 +5,13 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { calculer, analyserAttentes, liensManquants, indexer, ATTENTE, ATTEND_OBLIGATOIRE, attendAbsent, calculerFrein, permiseParFrein, freinDepuisFichiers, FREIN, ECARTS_ETIQUETTE } from './prochaine-tache.mjs';
+import { calculer, choisirSuivantes, couloirsDe, analyserAttentes, liensManquants, indexer, ATTENTE, ATTEND_OBLIGATOIRE, attendAbsent, calculerFrein, permiseParFrein, freinDepuisFichiers, FREIN, ECARTS_ETIQUETTE } from './prochaine-tache.mjs';
 
 // Un relevé en mémoire : données fictives, aucun réseau. Même forme que backlog.json (fetch.py).
 const tache = (n, o = {}) => ({
   n, title: `Tâche ${n}`, lvl: 'tâche', labels: ['niveau:tâche', ...(o.labels ?? [])], state: o.state ?? 'open',
   url: `https://github.com/exemple/depot/issues/${n}`, kids: [], start: o.start ?? null, closed: o.closed ?? null,
-  pr: o.pr ?? null, deps: o.deps ?? [], ...('attend_ligne' in o ? { attend_ligne: o.attend_ligne } : {}), ...(o.created ? { created: o.created } : {}), fq: 'fq' in o ? o.fq : 'une commande de test passe',
+  pr: o.pr ?? null, deps: o.deps ?? [], ...(o.fpl ? { fpl: o.fpl } : {}), ...('attend_ligne' in o ? { attend_ligne: o.attend_ligne } : {}), ...(o.created ? { created: o.created } : {}), fq: 'fq' in o ? o.fq : 'une commande de test passe',
 });
 const mission = (n, kids, labels = []) => ({ n, title: `Mission ${n}`, lvl: 'mission', labels: ['niveau:mission', ...labels], state: 'open', kids, deps: [] });
 const chantier = (n, kids, labels = []) => ({ n, title: `Chantier ${n}`, lvl: 'chantier', labels: ['niveau:chantier', ...labels], state: 'open', kids, deps: [] });
@@ -916,4 +916,84 @@ test('attend-absent : attend_absent ne liste ni les tâches fermées ni les miss
     tache(4, { attend_ligne: true, created: '2026-10-19T17:00:00Z' }),
   ])), { maintenant: AVANT });
   assert.deepEqual(r.attend_absent.map((x) => x.ref), ['a#2']);
+});
+
+// ---- Deux travaux par dépôt, sur des fichiers disjoints (décision de Marc, 21/10/2026) -------------------------------------------------
+
+test('capacité : un dépôt sans travail propose deux tâches à fichiers disjoints, couloirs prévus', () => {
+  const r = calculer(releve(depot('a', [tache(1, { fpl: ['src/a.ts'] }), tache(2, { fpl: ['src/b.ts'] }), tache(3, { fpl: ['src/c.ts'] })])));
+  const d = etat(r);
+  assert.equal(d.statut, 'libre');
+  assert.deepEqual(d.suivantes.map((s) => s.ref), ['a#1', 'a#2']);
+  assert.equal(d.suivante.ref, 'a#1');
+  assert.deepEqual(d.places, { total: 2, prises: 0, libres: 2 });
+  assert.deepEqual(d.couloirs.map((c) => [c.place, c.etat, c.ref]), [[1, 'prevue', 'a#1'], [2, 'prevue', 'a#2']]);
+});
+
+test('capacité : sans fichiers déclarés, une seule tâche est proposée (dans le doute, un seul)', () => {
+  const d = etat(calculer(releve(depot('a', [tache(1), tache(2)]))));
+  assert.deepEqual(d.suivantes.map((s) => s.ref), ['a#1']);
+  assert.deepEqual(d.sautees_conflit.map((s) => [s.ref, s.raison]), [['a#2', 'fichiers-inconnus']]);
+});
+
+test('capacité : un travail en cours et une tâche à fichiers disjoints donnent le statut partiel', () => {
+  const r = calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], fpl: ['src/a.ts'] }), tache(2, { fpl: ['src/b.ts'] })])));
+  const d = etat(r);
+  assert.equal(d.statut, 'partiel');
+  assert.equal(d.suivante.ref, 'a#2');
+  assert.deepEqual(d.suivantes.map((s) => s.ref), ['a#2']);
+  assert.deepEqual(d.places, { total: 2, prises: 1, libres: 1 });
+  assert.deepEqual(d.couloirs.map((c) => [c.place, c.etat, c.ref]), [[1, 'occupee', 'a#1'], [2, 'prevue', 'a#2']]);
+  assert.deepEqual(d.occupe_par.map((o) => o.fichiers), [['src/a.ts']]);
+});
+
+test('capacité : un chemin commun (fichier ou dossier) garde le dépôt occupé, la tâche sautée dit pourquoi', () => {
+  for (const commun of [['src/a.ts'], ['src/']]) {
+    const d = etat(calculer(releve(depot('a', [tache(1, { labels: ['jules'], fpl: ['src/a.ts'] }), tache(2, { fpl: commun })]))));
+    assert.equal(d.statut, 'occupe', commun.join());
+    assert.equal(d.suivante, null);
+    assert.equal(d.sautees_conflit[0].ref, 'a#2');
+    assert.match(d.sautees_conflit[0].raison, /^fichier-commun:/);
+    assert.equal(d.sautees_conflit[0].avec, 'a#1');
+  }
+});
+
+test('capacité : le travail en cours sans fichiers déclarés, ou un fil actif, ne laisse aucune place', () => {
+  assert.equal(etat(calculer(releve(depot('a', [tache(1, { labels: ['en-cours'] }), tache(2, { fpl: ['src/b.ts'] })])))).statut, 'occupe');
+  assert.equal(etat(calculer(releve(depot('a', [tache(2, { fpl: ['src/b.ts'] })])), { filsActifs: ['a'] })).statut, 'occupe');
+});
+
+test('capacité : deux travaux en cours = occupé, aucune suivante, même avec des fichiers disjoints', () => {
+  const d = etat(calculer(releve(depot('a', [
+    tache(1, { labels: ['en-cours'], fpl: ['x/a.ts'] }), tache(2, { labels: ['jules'], fpl: ['x/b.ts'] }), tache(3, { fpl: ['x/c.ts'] }),
+  ]))));
+  assert.equal(d.statut, 'occupe');
+  assert.deepEqual(d.suivantes, []);
+  assert.deepEqual(d.places, { total: 2, prises: 2, libres: 0 });
+  assert.equal(d.si_libre, 'a#3', 'la tête de file reste annoncée pour la mesure I4');
+});
+
+test('capacité : la PR ouverte d’une tâche en-cours ne compte qu’une fois', () => {
+  const d = etat(calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], pr: prOuverte(10), fpl: ['x/a.ts'] }), tache(2, { fpl: ['x/b.ts'] })]))));
+  assert.equal(d.occupe_par.length, 1);
+  assert.equal(d.statut, 'partiel');
+});
+
+test('capacité : un incident garde l’état incident et ne propose rien', () => {
+  const d = etat(calculer(releve(depot('a', [tache(1, { fpl: ['x/a.ts'] })], { incidents: [{ n: 9, t: 'panne', url: 'u' }] }))));
+  assert.equal(d.statut, 'incident');
+  assert.deepEqual(d.suivantes, []);
+});
+
+test('capacité : choisirSuivantes saute une tâche incompatible et retient la suivante qui va', () => {
+  const f = (ref, fichiers) => ({ ref, fichiers });
+  const { suivantes, sautees } = choisirSuivantes([f('a#1', ['m/x.ts']), f('a#2', ['m/x.ts']), f('a#3', ['m/z.ts'])], [], 2);
+  assert.deepEqual(suivantes.map((s) => s.ref), ['a#1', 'a#3']);
+  assert.deepEqual(sautees.map((s) => s.ref), ['a#2']);
+  assert.deepEqual(couloirsDe([{ ref: 'a#9', motif: 'en-cours', fichiers: null }], [f('a#1', ['m/x.ts'])]).map((c) => c.etat), ['occupee', 'prevue']);
+});
+
+test('capacité : un journal commun (HANDOVER.md, CHANGELOG.md) n’empêche pas le parallèle', () => {
+  const d = etat(calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], fpl: ['src/a.ts', 'HANDOVER.md'] }), tache(2, { fpl: ['src/b.ts', 'HANDOVER.md'] })]))));
+  assert.equal(d.statut, 'partiel');
 });

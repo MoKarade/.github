@@ -2,7 +2,7 @@
 // Tâche suivante de chaque dépôt (docs/cycle-de-vie-tache.md §5 et §6) : UN seul calcul, lu par le Gantt ET par la routine.
 //
 // Rôle : lit le relevé `backlog.json` (écrit par fetch.py) et écrit `prochaines.json` : pour chaque dépôt, son état
-// (`libre`, `occupe`, `incident`, `frein`, `rien`), la tâche suivante, la file complète dans l'ordre, et pour chaque tâche
+// (`libre`, `partiel`, `occupe`, `incident`, `frein`, `rien`), ses deux places, les tâches suivantes, la file complète dans l'ordre, et pour chaque tâche
 // ouverte écartée la raison. Rien n'est lu sur le réseau : le fichier peut dater de quelques dizaines de minutes,
 // donc l'appelant revérifie EN DIRECT la tâche choisie (ouverte, sans `en-cours`, sans PR ouverte) avant de la lancer.
 //
@@ -15,9 +15,12 @@
 // Prenable : ouverte et `niveau:tâche` ; sans `qui:marc`, `bloqué`, `en-cours`, `jules`, `preuve-attendue` ;
 // toutes les tâches attendues fermées ; aucune PR ouverte ne la cite ; un « Fini quand » écrit.
 // Frein de quota (palier `frein` en tête du fichier) : retient les tâches non permises, état `frein` si c'est tout ce qui reste.
-// Capacité : un seul travail par dépôt. Le dépôt est occupé par une tâche `en-cours` ou `jules` ouverte, une PR de
-// tâche ouverte, ou un fil actif passé en option. Une tâche `preuve-attendue` n'occupe pas le dépôt, ni une tâche dont la PR
-// ouverte n'attend plus qu'un geste de Marc (`pr_attend_marc` du dépôt dans le relevé, tâche #197) : elle sort de `occupe_par`, reste dans `attend_marc`.
+// Capacité : DEUX travaux par dépôt au plus (décision de Marc, 21/10/2026), sur des fichiers disjoints (`capacite.mjs`). Un travail est une
+// tâche `en-cours` ou `jules` ouverte, une PR de tâche ouverte, ou un fil actif passé en option. Une tâche `preuve-attendue` n'occupe pas
+// le dépôt, ni une tâche dont la PR ouverte n'attend plus qu'un geste de Marc (`pr_attend_marc` du dépôt dans le relevé, tâche #197) : elle
+// sort de `occupe_par`, reste dans `attend_marc`. Statut : `libre` (aucun travail), `partiel` (un travail et une tâche à fichiers disjoints
+// à lui associer), `occupe` (deux travaux, ou un seul sans tâche compatible : fichiers non déclarés ou communs = un seul). `suivantes` : les
+// tâches à lancer, autant que de places libres, deux à deux disjointes ; `suivante` en est la tête. `couloirs` : les deux places.
 //
 // Frein de quota (MoKarade/.github#184, docs/cycle-de-vie-tache.md §5 bis) : le pourcentage hebdomadaire du quota Claude,
 // relevé par la tâche du PC (`quota.json`, .github#45), fixe un palier `frein` (`normal`, `1`, `2`) qui ne laisse passer
@@ -34,6 +37,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { PLACES_PAR_DEPOT, raisonIncompatible } from './capacite.mjs';
 
 export const VERSION = 1;
 
@@ -53,6 +57,7 @@ export const NON_CALCULE = [
   'avis de sécurité Dependabot ou npm (seule l’étiquette `sécurité` compte)',
   'fil actif du projet (à passer avec --fils-actifs)',
   '« Fini quand » prouvable vite (seule sa présence est vérifiée)',
+  'conflit réel entre deux travaux (seuls les fichiers DÉCLARÉS sont comparés : non déclarés, un dépôt n’a qu’une place utilisable)',
 ];
 
 const TIERS = {
@@ -405,6 +410,41 @@ export function liensManquants(idx) {
 }
 
 /**
+ * Les tâches à lancer dans les places libres : la file dans l'ordre, en sautant ce qui ne va pas avec un travail en cours (ou avec une tâche
+ * déjà retenue) faute de fichiers déclarés ou à cause d'un fichier commun. La première tâche d'un dépôt sans travail n'a rien à éviter.
+ * Rend { suivantes, sautees } ; `sautees` (cinq au plus) dit pourquoi une tâche de la file n'a pas été retenue.
+ */
+export function choisirSuivantes(file, occupePar, libres) {
+  const suivantes = [];
+  const sautees = [];
+  for (const f of file) {
+    if (suivantes.length >= libres) break;
+    let raison = null;
+    let avec = null;
+    for (const o of [...occupePar, ...suivantes]) {
+      raison = raisonIncompatible(o.fichiers ?? null, f.fichiers ?? null);
+      if (raison) { avec = o.ref ?? o.motif; break; }
+    }
+    if (raison) { if (sautees.length < 5) sautees.push({ ref: f.ref, avec, raison }); continue; }
+    suivantes.push(f);
+  }
+  return { suivantes, sautees };
+}
+
+/** Les deux places d'un dépôt : travail en cours, tâche prévue ou place libre (le Gantt en fait ses deux couloirs). */
+export function couloirsDe(occupePar, suivantes) {
+  const couloirs = [];
+  for (let i = 0; i < PLACES_PAR_DEPOT; i++) {
+    const o = occupePar[i];
+    const s = suivantes[i - occupePar.length];
+    if (o) couloirs.push({ place: i + 1, etat: 'occupee', ref: o.ref, motif: o.motif, fichiers: o.fichiers ?? null });
+    else if (s) couloirs.push({ place: i + 1, etat: 'prevue', ref: s.ref, motif: null, fichiers: s.fichiers ?? null });
+    else couloirs.push({ place: i + 1, etat: 'libre', ref: null, motif: null, fichiers: null });
+  }
+  return couloirs;
+}
+
+/**
  * Calcule la file de chaque dépôt.
  * @param backlog le contenu de backlog.json
  * @param options.filsActifs dépôts (nom ou clé) où un fil de ce projet travaille déjà
@@ -435,11 +475,11 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
     const attendMarc = new Set(depot.pr_attend_marc ?? []);
     const enAttenteMarc = taches.filter((n) => n.pr?.state === 'open' && attendMarc.has(n.pr.n));
     const attend = new Set(enAttenteMarc);
-    // Capacité : un seul travail à la fois.
+    // Capacité : deux travaux à la fois, sur des fichiers disjoints. Un fil actif passé en option n'a pas de fichiers connus.
     const occupePar = [
-      ...taches.filter((n) => !attend.has(n) && (n.labels.includes('en-cours') || n.labels.includes('jules'))).map((n) => ({ ref: ref(depot.repo, n.n), motif: n.labels.includes('jules') ? 'jules' : 'en-cours' })),
-      ...taches.filter((n) => !attend.has(n) && n.pr?.state === 'open' && !n.labels.includes('en-cours') && !n.labels.includes('jules')).map((n) => ({ ref: ref(depot.repo, n.n), motif: 'pr-ouverte' })),
-      ...(actifs.has(minuscule(depot.repo)) || actifs.has(minuscule(depot.name)) || actifs.has(minuscule(depot.key)) ? [{ ref: null, motif: 'fil-actif' }] : []),
+      ...taches.filter((n) => !attend.has(n) && (n.labels.includes('en-cours') || n.labels.includes('jules'))).map((n) => ({ ref: ref(depot.repo, n.n), motif: n.labels.includes('jules') ? 'jules' : 'en-cours', fichiers: n.fpl ?? null })),
+      ...taches.filter((n) => !attend.has(n) && n.pr?.state === 'open' && !n.labels.includes('en-cours') && !n.labels.includes('jules')).map((n) => ({ ref: ref(depot.repo, n.n), motif: 'pr-ouverte', fichiers: n.fpl ?? null })),
+      ...(actifs.has(minuscule(depot.repo)) || actifs.has(minuscule(depot.name)) || actifs.has(minuscule(depot.key)) ? [{ ref: null, motif: 'fil-actif', fichiers: null }] : []),
     ];
 
     const derniereTache = derniere(depot);
@@ -472,7 +512,7 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
         retenues += 1;
         return null;
       }
-      return { ref: r, n: n.n, titre: n.title, url: n.url, prio: prioDe(n.labels), tier, raison: TIERS[tier], mission: haut.mission, chantier: haut.chantier };
+      return { ref: r, n: n.n, titre: n.title, url: n.url, prio: prioDe(n.labels), tier, raison: TIERS[tier], mission: haut.mission, chantier: haut.chantier, fichiers: n.fpl ?? null };
     }).filter(Boolean);
     file.sort((a, b) => a.tier - b.tier || a.prio - b.prio || a.n - b.n);
     file.forEach((f, i) => { f.rang = i + 1; });
@@ -480,13 +520,19 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
     if (chantiersSansType.size) alertes.push(`${depot.name} : alternance standard/fonction non calculable (chantier sans étiquette chantier:standard ou chantier:fonction : ${[...chantiersSansType].join(', ')})`);
 
     const incidents = depot.incidents ?? [];
-    const statut = incidents.length ? 'incident' : occupePar.length ? 'occupe' : file.length ? 'libre' : retenues ? 'frein' : 'rien';
+    const places = { total: PLACES_PAR_DEPOT, prises: occupePar.length, libres: Math.max(0, PLACES_PAR_DEPOT - occupePar.length) };
+    const { suivantes, sautees } = choisirSuivantes(file, occupePar, incidents.length ? 0 : places.libres);
+    const statut = incidents.length ? 'incident' : occupePar.length === 0 ? (file.length ? 'libre' : retenues ? 'frein' : 'rien') : suivantes.length ? 'partiel' : 'occupe';
     return {
       depot: depot.name,
       cle: depot.key,
       repo: depot.repo,
       statut,
-      suivante: statut === 'libre' ? file[0] : null,
+      suivante: suivantes[0] ?? null,
+      suivantes,
+      sautees_conflit: sautees,
+      places,
+      couloirs: couloirsDe(occupePar, suivantes),
       si_libre: file[0]?.ref ?? null,
       incidents: incidents.map((i) => ({ n: i.n, titre: i.t, url: i.url })),
       occupe_par: occupePar,

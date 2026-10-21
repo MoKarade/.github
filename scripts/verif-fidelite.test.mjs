@@ -294,3 +294,20 @@ test('--snapshot-seulement : le fichier garde sa date de dernière mesure, tout 
   execFileSync('node', [script, '--snapshot-seulement', pro, '--sortie', absent]);
   assert.throws(() => statSync(absent));
 });
+
+test('I4 : deux places libres, la deuxième des suivantes annoncées est un accord', () => {
+  const r = releve([noeud(2, { start: '2026-10-16T10:14:00Z' })]);
+  const snapshots = { hubperso: [{ asof: '2026-10-16T10:10:00Z', statut: 'libre', suivante: 'hubperso#1', suivantes: ['hubperso#1', 'hubperso#2'] }] };
+  const { i4 } = mesure(r, vivant(), { snapshots, depuisI4: '2026-10-16T10:00:00Z' });
+  assert.equal(i4.accords, 1);
+  assert.deepEqual(i4.ecarts, []);
+});
+
+test('I4 : deux occupants au calcul, l’un fermé avant le lancement = accord ; les deux ouverts = écart', () => {
+  const snapshots = { hubperso: [{ asof: '2026-10-16T10:10:00Z', statut: 'occupe', suivante: null, si_libre: 'hubperso#3', occupe_par: ['hubperso#1', 'hubperso#2'] }] };
+  const un = releve([noeud(1, { state: 'closed', closed: '2026-10-16T10:12:00Z', start: '2026-10-16T09:00:00Z' }), noeud(2, { start: '2026-10-16T09:30:00Z' }), noeud(3, { start: '2026-10-16T10:14:00Z' })]);
+  const accord = mesure(un, vivant(), { snapshots, depuisI4: '2026-10-16T10:00:00Z' }).i4;
+  assert.deepEqual(accord.accords_apres_liberation.map((x) => x.ref), ['hubperso#3']);
+  const deux = releve([noeud(1, { start: '2026-10-16T09:00:00Z' }), noeud(2, { start: '2026-10-16T09:30:00Z' }), noeud(3, { start: '2026-10-16T10:14:00Z' })]);
+  assert.deepEqual(mesure(deux, vivant(), { snapshots, depuisI4: '2026-10-16T10:00:00Z' }).i4.ecarts.map((e) => e.ref), ['hubperso#3']);
+});

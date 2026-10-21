@@ -91,6 +91,24 @@ def fichiers_permis(body):
     m = FP.search(body or '')
     return len([l for l in m.group(1).splitlines() if l.strip()]) if m else None
 
+# Fichiers qu'une tâche déclare toucher (deux places par dépôt, 21/10/2026) : même grammaire que `fichiersDeclares` de scripts/capacite.mjs
+# (« Fichiers permis » ou « Fichiers touchés », chemins entre backticks, journaux HANDOVER/CHANGELOG ignorés). None = rien de lisible : pas de parallèle.
+FD = re.compile(r'^\s*\*\*\s*Fichiers (?:permis|touchés)\s*\*\*[^\n]*\n((?:[ \t]*[-*][^\n]*(?:\n|$))+)', re.I | re.M)
+JOURNAUX = re.compile(r'(^|/)(HANDOVER|CHANGELOG)\.md$', re.I)
+def fichiers_declares(body):
+    m = FD.search(body or '')
+    if not m: return None
+    chemins = []
+    for ligne in m.group(1).split('\n'):
+        if not re.match(r'^[ \t]*[-*]', ligne): continue
+        texte = re.sub(r'^[ \t]*[-*]\s*', '', ligne)
+        cites = re.findall(r'`([^`]+)`', texte)
+        for c in (cites or texte.split()[:1]):
+            c = re.sub(r'[`,;:.]+$', '', re.sub(r'^\./', '', c.strip())).replace('\\', '/')
+            if c and not re.fullmatch(r'(aucun|rien|n/a)', c, re.I) and c not in chemins: chemins.append(c)
+    utiles = [c for c in chemins if not JOURNAUX.search(c)]
+    return utiles or None
+
 # Étapes d'une tâche (demande de Marc, 19/10) : à chaque événement, l'étape est celle de l'étiquette d'état la plus forte.
 # Sortie : [[étape, début ISO], ...] ; une étape court jusqu'au début de la suivante, la dernière jusqu'au relevé (la page le calcule).
 # « corr » = rouverte (garde-fou de preuve ou à la main) jusqu'à la fermeture suivante ; « pause » = commencée, puis plus aucune étiquette d'état.
@@ -233,7 +251,7 @@ def calculer(repo, rl, i, pr):
          'gab': [c for c in GAB.get(lvl, []) if champ(body, c) is None],
          'av': champ(body, 'Avant'), 'ap': champ(body, 'Après'), 'fq': champ(body, 'Fini quand'),
          'res': champ(body, 'Résultat') or champ(body, 'Objectif'),
-         'pa': champ(body, 'Preuve attendue'), 'fp': fichiers_permis(body), 'rp': reponses_options(body)}
+         'pa': champ(body, 'Preuve attendue'), 'fp': fichiers_permis(body), 'fpl': fichiers_declares(body), 'rp': reponses_options(body)}
     m = VIEILLE.search(body)
     if not pr and m:
         # ancienne forme : la PR est nommée dans le corps de l'issue, sans lien depuis la PR
@@ -316,7 +334,7 @@ def traiter(rk):
         pr = pr_de(f'{rl}#{i["number"]}')
         sig = signature(i, pr, i.get('body') or '')
         ancien = PREV.get((repo, i['number']))
-        if LEGER and ancien and sig is not None and ancien.get('sig') == sig:
+        if LEGER and ancien and sig is not None and ancien.get('sig') == sig and 'fpl' in ancien:   # 'fpl' absent = relevé d'avant les deux places : recalculé
             # non-tâche : ses sous-issues ont-elles changé ? (les enfants disent qui est leur parent)
             if ancien['lvl'] == 'tâche' or refs_enfants(rl, ancien['kids']) == ENFANTS.get(f'{rl}#{i["number"]}', set()):
                 nodes[i['number']] = ancien; reutilises += 1
