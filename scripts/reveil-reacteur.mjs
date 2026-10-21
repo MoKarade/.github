@@ -41,6 +41,7 @@ import { pathToFileURL } from 'node:url';
 import { prAttendantMarc } from './attend-marc.mjs';
 import { dispense, extraireTaches } from './tache-liee.mjs';
 import { PLACES_PAR_DEPOT } from './capacite.mjs';
+import { accepterApresFusion } from './acceptation-auto.mjs';
 
 export const DEPOT_BOITE = 'MoKarade/app-template';
 export const WORKFLOW_BOITE = 'boite-reacteur.yml';
@@ -227,7 +228,7 @@ export function signeLibre(depot, travauxEnCours) {
  * Décide quoi faire d'un événement. Rend { action: 'reveiller', motif } | { action: 'relance', run } | { action: 'balayer' } | { action: 'rien', raison }.
  * `evt` : { type, depot, pr, issue, raison, evenement, sha, run, brancheRun, brancheDefaut, forcer }.
  */
-export async function decider({ api, evt, maintenant = new Date() }) {
+export async function decider({ api, evt, maintenant = new Date(), accepter = accepterApresFusion }) {
   const { type, depot } = evt;
   if (type === 'filet') return filet({ api, evt, maintenant });
   if (type === 'pr_ouverte') return { action: 'balayer' };
@@ -244,6 +245,12 @@ export async function decider({ api, evt, maintenant = new Date() }) {
     const taches = extraireTaches(pr?.body, depot);
     // Une mise à jour de robot (Dependabot…) sans tâche ne libère aucun dépôt : pas de réveil, donc pas de quota.
     if (taches.length === 0 && ROBOTS.has(pr?.user?.login)) return { action: 'rien', raison: 'PR de robot sans tâche' };
+    // Une tâche dont la preuve est lisible par une machine s'accepte ICI (scripts/acceptation-auto.mjs, §10 ter), avant de lire ce qui reste à prouver.
+    // Un échec n'arrête rien : la tâche reste ouverte et le Coordinateur est réveillé comme avant (« preuve à poser »).
+    const config = { deploiement: evt.deploiement === 'aucun' ? 'aucun' : 'vercel', workflows: String(evt.workflows ?? '').split(',').map((x) => x.trim()).filter(Boolean) };
+    const acceptation = await accepter({ api, depot, numeroPr: Number(evt.pr), config }).catch((e) => ({ statut: 'erreur', motifs: [e.message] }));
+    // « ignoree » est le cas ordinaire (la tâche n'a rien demandé) : il ne sort pas de la décision.
+    const dit = acceptation.statut === 'ignoree' ? {} : { acceptation };
     const preuves = [];
     for (const t of taches) {
       const cle = `${t.depot}#${t.numero}`;
@@ -255,8 +262,9 @@ export async function decider({ api, evt, maintenant = new Date() }) {
     const tachesExclues = taches.filter((t) => t.depot === depot).map((t) => t.numero);
     const en = await travaux({ api, depot, tachesExclues });
     // Dépôt dont les deux places sont prises et rien à prouver : la fusion n'apprend rien au Coordinateur.
-    if (en >= PLACES_PAR_DEPOT && preuves.length === 0) return { action: 'rien', raison: 'dépôt encore occupé' };
-    return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), `PR #${evt.pr} fusionnée`, ...preuves]) };
+    if (en >= PLACES_PAR_DEPOT && preuves.length === 0) return { action: 'rien', raison: 'dépôt encore occupé', ...dit };
+    const acceptee = acceptation.statut === 'acceptee' ? `tâche ${depot}#${acceptation.tache} acceptée seule` : '';
+    return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), `PR #${evt.pr} fusionnée`, acceptee, ...preuves]), ...dit };
   }
 
   if (type === 'ci_rouge') {
@@ -289,6 +297,8 @@ export async function decider({ api, evt, maintenant = new Date() }) {
 /** Exécute la décision. `journal` reçoit les lignes à afficher ; rend un résumé court. */
 export async function traiter({ api, evt, jetonReveil, journal = console.log, maintenant = new Date() }) {
   const d = await decider({ api, evt, maintenant });
+  if (d.acceptation?.statut === 'acceptee') journal(`Réacteur : tâche #${d.acceptation.tache} acceptée automatiquement (docs/cycle-de-vie-tache.md §10 ter).`);
+  else if (d.acceptation?.statut === 'erreur') journal(`::warning::Réacteur : acceptation automatique non faite (${d.acceptation.motifs.join(' ; ')}). Un fil prouvera.`);
   if (d.action === 'rien') {
     journal(`Réacteur : rien à faire (${d.raison}).`);
     return d;
@@ -375,6 +385,8 @@ export async function main(env = process.env) {
     brancheRun: env.REVEIL_BRANCHE_RUN || '',
     brancheDefaut: env.REVEIL_BRANCHE_DEFAUT || '',
     forcer: env.REVEIL_FORCER || '',
+    deploiement: env.REVEIL_DEPLOIEMENT || '',
+    workflows: env.REVEIL_WORKFLOWS || '',
   };
   try {
     await traiter({ api: apiGitHub(env.GITHUB_TOKEN), evt, jetonReveil: env.REVEIL_TOKEN });
