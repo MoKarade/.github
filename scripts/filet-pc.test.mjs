@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
-import { DEPOTS_FILET, annulerSignalements, dateQuebec, evaluerFilet, evaluerOublis, evaluerQuotidien, grouperOublis, lancerFilet, ligneOubli, motifDesOublis, motifDuFilet, reveiller, tour, tourOublis, tourQuotidien, tourLiens, LIENS_PAR_TOUR, tourJules, evaluerFile, motifDeLaFile, tourFile } from './filet-pc.mjs';
+import { DEPOTS_FILET, annulerSignalements, dateQuebec, evaluerFilet, evaluerOublis, evaluerQuotidien, grouperOublis, lancerFilet, ligneOubli, motifDesOublis, motifDuFilet, reveiller, tour, tourOublis, tourQuotidien, tourLiens, LIENS_PAR_TOUR, tourJules, evaluerFile, motifDeLaFile, tourFile, versionDuCode, MODULES_VERSION } from './filet-pc.mjs';
 
 const T0 = new Date('2026-10-17T18:00:00Z');
 const apres = (min, base = T0) => new Date(base.getTime() + min * 60_000);
@@ -519,4 +519,12 @@ test('tourFile : à blanc ne touche à rien ; une erreur GitHub se dit sans fair
   assert.ok(!appels.some((a) => a.startsWith('PUT')));
   const ko = tourFile({ fichierEtat: f, executer: true, gh: () => { throw new Error('réseau coupé'); }, depots: ['MoKarade/.github'], maintenant: apresF(12) });
   assert.match(ko, /^file : ÉCHEC \(réseau coupé\)/);
+});
+
+test('versionDuCode : le sha git de chaque fichier, comme git hash-object ; un fichier absent est dit « absent »', () => {
+  const ligne = versionDuCode((nom) => { if (nom === 'jules-auto') throw new Error('absent'); return Buffer.from('abc'); });
+  assert.match(ligne, /^code : filet-pc f2ba8f8, jules-suivi f2ba8f8, jules-marquage f2ba8f8, jules-gabarit f2ba8f8, jules-auto absent$/);
+  assert.equal(MODULES_VERSION.length, 5);
+  // les vrais fichiers de ce dépôt sont tous lisibles
+  assert.doesNotMatch(versionDuCode(), /absent/);
 });
