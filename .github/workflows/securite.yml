@@ -37,7 +37,7 @@ jobs:
   secrets:
     name: Secrets (gitleaks)
     timeout-minutes: 10
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || fromJSON('["self-hosted","pc-marc"]') }} # dépôt public : machines GitHub (gratuites) ; privé : robot du PC
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -81,7 +81,7 @@ jobs:
   osv:
     name: Failles connues (OSV-Scanner)
     timeout-minutes: 10
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || fromJSON('["self-hosted","pc-marc"]') }} # dépôt public : machines GitHub (gratuites) ; privé : robot du PC
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -111,7 +111,7 @@ jobs:
     # Dépôt privé : l'analyse CodeQL demande une offre payante, qu'on ne prend pas. Sauté, pas rouge.
     if: github.event.repository.private == false
     timeout-minutes: 30
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || fromJSON('["self-hosted","pc-marc"]') }} # dépôt public : machines GitHub (gratuites) ; privé : robot du PC
     permissions:
       contents: read
       security-events: write

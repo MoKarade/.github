@@ -37,7 +37,7 @@ jobs:
   conformite:
     name: Conformité
     timeout-minutes: 10
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || fromJSON('["self-hosted","pc-marc"]') }} # dépôt public : machines GitHub (gratuites) ; privé : robot du PC
     steps:
       - name: Récupérer le dépôt à contrôler
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
