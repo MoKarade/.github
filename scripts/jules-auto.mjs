@@ -15,7 +15,7 @@
 //
 // Fonctions pures (`evaluerJules`, `choisirPourJules`), I/O injecté (`lireIssue`, `gh`) : les tests n'ont besoin ni de réseau ni de fichier.
 
-import { PLACES_PAR_DEPOT, fichiersDeclares, raisonIncompatible } from './capacite.mjs';
+import { PLACES_PAR_DEPOT, fichiersDeclares, fichiersDuTravail, raisonIncompatible } from './capacite.mjs';
 import { extraireTaches } from './tache-liee.mjs';
 
 const ORG = 'MoKarade';
@@ -205,11 +205,19 @@ export function confierAJules({ repo, n }, gh, { aBlanc = false } = {}) {
     return { statut: 'sautee', raison: `dépôt occupé (${premier}, ${travaux} travaux sur ${PLACES_PAR_DEPOT} places)` };
   }
   if (travaux === 1) {
-    // Deuxième place : seulement si le seul autre travail déclare ses fichiers et qu'ils sont disjoints de ceux de cette tâche.
+    // Deuxième place : seulement si le seul autre travail a des fichiers connus (ceux qu'il déclare plus ceux de sa PR ouverte, lus en direct)
+    // et qu'ils sont disjoints de ceux de cette tâche.
     const autre = [...issuesTravail.values()][0];
-    if (!autre) return { statut: 'sautee', raison: `dépôt occupé (PR #${prsSeules[0].number} ouverte : fichiers inconnus, un seul travail à la fois)` };
-    const gene = raisonIncompatible(fichiersDeclares(autre.body), fichiersDeclares(issue.body));
-    if (gene) return { statut: 'sautee', raison: `dépôt occupé (${nom(autre)} en cours : ${gene})` };
+    const fichiersDe = (p) => {
+      try {
+        const fs = gh('GET', `${base}/pulls/${p.number}/files?per_page=100`);
+        return Array.isArray(fs) && fs.length < 100 ? fs.flatMap((f) => [f.filename, f.previous_filename].filter(Boolean)) : null; // 100 fichiers : liste tronquée, elle ne prouve rien
+      } catch { return null; }
+    };
+    const prDeLAutre = autre ? prsTravail.find((p) => extraireTaches(p.body, repo).some((t) => t.depot.toLowerCase() === repo.toLowerCase() && t.numero === autre.number)) : prsSeules[0];
+    const fichiers = fichiersDuTravail(autre ? fichiersDeclares(autre.body) : null, prDeLAutre ? fichiersDe(prDeLAutre) : null);
+    const gene = raisonIncompatible(fichiers, fichiersDeclares(issue.body));
+    if (gene) return { statut: 'sautee', raison: `dépôt occupé (${autre ? `${nom(autre)} en cours` : `PR #${prDeLAutre.number} ouverte`} : ${gene})` };
   }
   if (aBlanc) return { statut: 'confiee', raison: 'à blanc' };
   gh('POST', `${base}/issues/${n}/labels`, { 'labels[]': 'jules' });

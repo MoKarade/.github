@@ -37,7 +37,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { PLACES_PAR_DEPOT, raisonIncompatible } from './capacite.mjs';
+import { PLACES_PAR_DEPOT, raisonIncompatible, fichiersDuTravail } from './capacite.mjs';
 
 export const VERSION = 1;
 
@@ -477,8 +477,8 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
     const attend = new Set(enAttenteMarc);
     // Capacité : deux travaux à la fois, sur des fichiers disjoints. Un fil actif passé en option n'a pas de fichiers connus.
     const occupePar = [
-      ...taches.filter((n) => !attend.has(n) && (n.labels.includes('en-cours') || n.labels.includes('jules'))).map((n) => ({ ref: ref(depot.repo, n.n), motif: n.labels.includes('jules') ? 'jules' : 'en-cours', fichiers: n.fpl ?? null })),
-      ...taches.filter((n) => !attend.has(n) && n.pr?.state === 'open' && !n.labels.includes('en-cours') && !n.labels.includes('jules')).map((n) => ({ ref: ref(depot.repo, n.n), motif: 'pr-ouverte', fichiers: n.fpl ?? null })),
+      ...taches.filter((n) => !attend.has(n) && (n.labels.includes('en-cours') || n.labels.includes('jules'))).map((n) => ({ ref: ref(depot.repo, n.n), motif: n.labels.includes('jules') ? 'jules' : 'en-cours', fichiers: fichiersDuTravail(n.fpl, n.pr?.state === 'open' ? n.pr.ff : null) })),
+      ...taches.filter((n) => !attend.has(n) && n.pr?.state === 'open' && !n.labels.includes('en-cours') && !n.labels.includes('jules')).map((n) => ({ ref: ref(depot.repo, n.n), motif: 'pr-ouverte', fichiers: fichiersDuTravail(n.fpl, n.pr.ff) })),
       ...(actifs.has(minuscule(depot.repo)) || actifs.has(minuscule(depot.name)) || actifs.has(minuscule(depot.key)) ? [{ ref: null, motif: 'fil-actif', fichiers: null }] : []),
     ];
 
