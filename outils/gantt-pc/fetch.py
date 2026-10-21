@@ -180,12 +180,13 @@ def pa_commentaires(com):
     return (pick[1], pick[2]) if pick else (None, None)
 
 # 1. Listes de chaque dépôt, lues en parallèle : PR ouvertes, 100 dernières PR fermées, issues, incidents.
-# Vitesse de sortie (onglet « Vitesse ») : toutes les PR fusionnées depuis 8 jours, liées à une tâche ou non
-CUTOFF = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=8)).strftime('%Y-%m-%dT%H:%M:%SZ')
+# Vitesse de sortie (onglet « Rythme ») : toutes les PR fusionnées depuis 92 jours, liées à une tâche ou non. 92 et non 8 depuis le 21/10 :
+# Marc choisit 24 h, 7 j, 1 mois ou 3 mois et chaque courbe ne montre que cette durée. Le relevé léger garde l'historique du précédent.
+CUTOFF = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=92)).strftime('%Y-%m-%dT%H:%M:%SZ')
 def fusionnees(repo, premiere):
     # la page de 100 déjà lue, puis les suivantes tant que la liste (triée par dernière modification) remonte encore dans la fenêtre
     out, last, page = list(premiere), premiere, 1
-    while len(last) == 100 and out[-1]['updated_at'] >= CUTOFF and page < 8:
+    while len(last) == 100 and out[-1]['updated_at'] >= CUTOFF and page < 20:
         page += 1
         last = gh1(f'repos/MoKarade/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page={page}')
         out += last
@@ -206,7 +207,9 @@ LIEN = {}
 PRLOG = []
 for repo, key, name in REPOS:
     ouvertes, fermees, fus, _, _ = LISTES[repo]
-    nouveaux = [{'r': key, 'n': p['number'], 'c': p['created_at'], 'm': p['merged_at'],
+    # au, b : auteur et branche de la PR. Jules ouvre ses PR au nom de Marc : la page le reconnaît à l'étiquette `jules` de la tâche
+    # liée, jamais au nom de la branche (« claude/jules-suivi » est une PR d'un fil Claude SUR Jules). `b` dit seulement « fil Claude » (claude/*)
+    nouveaux = [{'r': key, 'n': p['number'], 'c': p['created_at'], 'm': p['merged_at'], 'au': (p.get('user') or {}).get('login'), 'b': (p.get('head') or {}).get('ref'),
                  'k': 'tache' if liens(p.get('body'), repo) else 'robot' if (p.get('user') or {}).get('type') == 'Bot' else 'autre'} for p in fus]
     if LEGER:
         vus = {x['n'] for x in nouveaux}
