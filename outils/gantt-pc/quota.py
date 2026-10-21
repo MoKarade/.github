@@ -9,7 +9,7 @@
 #   - Gemini : l'instant où l'étiquette `gemini:fait` ou `gemini:echec` est posée, et `libere_a` (quand une place se libère).
 # Usage : python3 quota.py [--rapide] [--seulement=a,b] [--sortie=fichier]
 #   (sans option : tout, Actions sur le mois entier ; --rapide : Actions sur 36 h seulement, tout le reste identique)
-import re, json, sys, os, datetime, math, urllib.request
+import re, json, sys, os, datetime, math, threading, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 import ghcache
 
@@ -45,6 +45,7 @@ RAPIDE = '--rapide' in OPT
 SORTIE = OPT.get('--sortie') or D + 'quota.json'
 
 def gh(path): return ghcache.lire(path)
+VERROU_HIST = threading.Lock()     # quota_hist.json : claude() et api() y écrivent chacun leur clé
 def pages(path, key=None, stop=None, maxp=30):
     """Pages successives d'une liste ; stop(item) -> True arrête (les listes sont triées du plus récent au plus ancien)."""
     out = []
@@ -339,7 +340,10 @@ def claude():
         pts.append({'t': d['mesure_utc'], 'pct': d['pct'], 'session': (d.get('session') or {}).get('pct')})
     garde = (NOW - datetime.timedelta(days=LONG + 8)).strftime('%Y-%m-%dT%H:%MZ')
     h['claude'] = sorted([p for p in pts if p['t'] >= garde], key=lambda p: p['t'])
-    json.dump(h, open(f + '.tmp', 'w'), ensure_ascii=False); os.replace(f + '.tmp', f)
+    with VERROU_HIST:     # api() écrit le même fichier en parallèle : relu sous verrou, chacun ne remplace que sa clé
+        try: h2 = json.load(open(f))
+        except Exception: h2 = {}
+        h2['claude'] = h['claude']; json.dump(h2, open(f + '.tmp', 'w'), ensure_ascii=False); os.replace(f + '.tmp', f)
     fin = t(d['reset_utc'])
     g['historique'] = [p for p in h['claude'] if fin - datetime.timedelta(days=7) < t(p['t']) <= fin]
     # toutes les mesures gardées (plusieurs semaines) : la page montre 1 mois ou 3 mois, remises à zéro comprises
@@ -363,6 +367,20 @@ def api():
         return {**base, 'nom': 'API Anthropic des apps (coût cumulé)', 'periode': 'total', 'utilise': d['cumulCad'], 'data_as_of': d['dataAsOf'], 'source_asof': d['dataAsOf'],
                 'non_lisibles': (d.get('apps') or {}).get('nonLisibles') or [],
                 'note': 'Hubperso ne publie pas encore le total du mois : seul le cumul est lisible, et il ne se compare pas au repère de 20 $/mois.'}
+    # historique du total du mois (Marc, 21/10/2026 : coût API sur la période choisie) : Hubperso ne garde que le dernier total, la courbe se construit
+    # ici, relevé après relevé. La page ne soustrait que deux points du même mois (le total repart de zéro au 1er). Pas de détail par app : /api/cout n'en publie pas.
+    f = D + 'quota_hist.json'
+    try: h = json.load(open(f))
+    except Exception: h = {}
+    pts = h.get('api', [])
+    if not any(q['t'] == m['dernierReleve'] for q in pts): pts.append({'t': m['dernierReleve'], 'cad': m['totalCad'], 'mois': m.get('debut')})
+    garde = (NOW - datetime.timedelta(days=LONG + 8)).strftime('%Y-%m-%dT%H:%MZ')
+    h['api'] = sorted([q for q in pts if q['t'] >= garde], key=lambda q: q['t'])
+    with VERROU_HIST:
+        try: h2 = json.load(open(f))
+        except Exception: h2 = {}
+        h2['api'] = h['api']; json.dump(h2, open(f + '.tmp', 'w'), ensure_ascii=False); os.replace(f + '.tmp', f)
+    base['historique_long'] = [q for q in h['api'] if t(q['t']) >= NOW - LONG * 24 * H]
     return {**base, 'nom': 'API Anthropic des apps (coût du mois)', 'periode': 'mois', 'utilise': m['totalCad'], 'repere': 20,
             'mois_debut': m.get('debut'), 'partiel': bool(m.get('partiel')), 'data_as_of': m['dernierReleve'], 'source_asof': m['dernierReleve'],
             'non_lisibles': m.get('nonLisibles') or [],
