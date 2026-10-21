@@ -62,7 +62,12 @@ def compacter_prochaines(p):
             'alertes': p.get('alertes', []), 'script': p.get('script'), 'frein': p.get('frein'), 'frein_detail': p.get('frein_detail'),
             'depots': [{'repo': d['repo'], 'cle': d['cle'], 'nom': d['depot'], 'statut': d['statut'], 'suivante': d['suivante']['ref'] if d.get('suivante') else None,
                         'incidents': d.get('incidents', []), 'occupe_par': d.get('occupe_par', []), 'derniere': d.get('derniere'),
-                        'file': [{k: f.get(k) for k in ('ref', 'rang', 'tier', 'prio', 'raison', 'mission', 'chantier')} for f in d.get('file', [])],
+                        # deux places par dépôt (21/10) : sans ces champs la page retombait sur « 2 places, fichiers inconnus » et ne pouvait
+                        # ni montrer les couloirs réels ni prévoir deux tâches à la fois ; les alertes du PC ne gèlent pas la file (incidents_pc)
+                        'places': d.get('places'), 'couloirs': d.get('couloirs', []), 'incidents_pc': d.get('incidents_pc', []),
+                        'suivantes': [s['ref'] for s in d.get('suivantes') or [] if s and s.get('ref')],
+                        'sautees_conflit': d.get('sautees_conflit', []),
+                        'file': [{k: f.get(k) for k in ('ref', 'rang', 'tier', 'prio', 'raison', 'mission', 'chantier', 'fichiers')} for f in d.get('file', [])],
                         'exclues': d.get('exclues', {}),
                         # PR dont le seul obstacle est un geste de Marc (#197) : l'onglet « À toi » les range dans « à fusionner »
                         'attend_marc': d.get('attend_marc', [])} for d in p.get('depots', [])],
