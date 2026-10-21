@@ -38,14 +38,11 @@ test('un runs-on ubuntu-latest seul est refusé, l\'expression du garde-fou est 
   assert.equal(selonVisibilite(bon), true);
 });
 
-test('securite.yml : OSV-Scanner a une voie sans Docker, vérifiée, pour le robot du PC (dépôt privé)', () => {
+test('securite.yml : OSV-Scanner passe par un binaire vérifié, sans aucune action Docker', () => {
   const yaml = readFileSync(new URL('../.github/workflows/securite.yml', import.meta.url), 'utf8');
-  // L'action Docker ne sert qu'en public ; l'étape privée vérifie la somme du binaire avant de l'exécuter.
-  const bloc = yaml.slice(yaml.indexOf('Analyser les dépendances (binaire, dépôt privé)'));
-  assert.ok(bloc.length > 0, 'étape OSV pour dépôt privé absente');
-  assert.match(bloc, /visibility != 'public'/);
-  assert.match(bloc, /sha256sum -c/);
-  assert.match(bloc, /osv-scanner" scan source --lockfile=/);
-  const action = yaml.slice(yaml.indexOf('name: Analyser les dépendances\n'), yaml.indexOf('Analyser les dépendances (binaire'));
-  assert.match(action, /visibility == 'public'/, 'l\'action Docker doit être réservée au dépôt public');
+  // Le runner tire l'image d'une action Docker pendant « Set up job », même si son étape est sautée : une seule référence
+  // à l'action suffit à faire échouer le job sur le robot du PC (pas de Docker).
+  assert.doesNotMatch(yaml, /uses:\s*google\/osv-scanner-action/, 'l\'action Docker osv-scanner ne doit plus être référencée');
+  assert.match(yaml, /sha256sum -c/);
+  assert.match(yaml, /osv-scanner" scan source --lockfile=/);
 });
