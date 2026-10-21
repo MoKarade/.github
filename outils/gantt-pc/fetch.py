@@ -86,7 +86,7 @@ def portee_jules(files):
     p = next((f['filename'] for f in files if PROTEGE.search(f['filename'])), None)
     return {'f': len(files), 'l': sum(f['additions'] + f['deletions'] for f in files), 'p': p}
 # Gabarit Jules : « **Fichiers permis** (aucun autre) : » suivi d'une liste ; le nombre d'éléments dit que la tâche a été préparée pour Jules
-FP = re.compile(r'^\s*\*\*\s*Fichiers permis\s*\*\*[^\n]*\n((?:[ \t]*[-*][^\n]*(?:\n|$))+)', re.I | re.M)
+FP = re.compile(r'^\s*\*\*\s*Fichiers permis\s*\*\*[^\n]*\n((?:[ \t]*[-*][ \t][^\n]*(?:\n|$))+)', re.I | re.M)
 def fichiers_permis(body):
     m = FP.search(body or '')
     return len([l for l in m.group(1).splitlines() if l.strip()]) if m else None
@@ -94,7 +94,7 @@ def fichiers_permis(body):
 # Fichiers qu'une tâche déclare toucher (deux places par dépôt, 21/10/2026) : même grammaire que `fichiersDeclares` de scripts/capacite.mjs
 # (« Fichiers permis » ou « Fichiers touchés », chemins entre backticks, journaux HANDOVER/CHANGELOG ignorés). None = rien de lisible : pas de parallèle.
 # Un corps peut porter les deux (estimation automatique de scripts/fichiers-touches.mjs, puis « Fichiers permis » exact du gabarit Jules) : « permis » d'abord.
-FD = re.compile(r'^\s*\*\*\s*Fichiers (permis|touchés)\s*\*\*[^\n]*\n((?:[ \t]*[-*][^\n]*(?:\n|$))+)', re.I | re.M)
+FD = re.compile(r'^\s*\*\*\s*Fichiers (permis|touchés)\s*\*\*[^\n]*\n((?:[ \t]*[-*][ \t][^\n]*(?:\n|$))+)', re.I | re.M)
 # La ligne existe-t-elle (même « non déterminés ») ? prochaine-tache.mjs l'exige sur toute tâche (#360), comme `**Attend**`.
 FT_LIGNE = re.compile(r'^\s*\*\*\s*Fichiers (?:permis|touchés)\s*\*\*', re.I | re.M)
 JOURNAUX = re.compile(r'(^|/)(HANDOVER|CHANGELOG)\.md$|^docs/(INDEX|adr/README)\.md$', re.I)   # journaux et index que chaque tâche complète : voir capacite.mjs
@@ -102,7 +102,7 @@ def fichiers_declares(body):
     for m in sorted(FD.finditer(body or ''), key=lambda x: bool(re.match('touch', x.group(1), re.I))):
         chemins = []
         for ligne in m.group(2).split('\n'):
-            if not re.match(r'^[ \t]*[-*]', ligne): continue
+            if not re.match(r'^[ \t]*[-*][ \t]', ligne): continue
             texte = re.sub(r'^[ \t]*[-*]\s*', '', ligne)
             cites = re.findall(r'`([^`]+)`', texte)
             for c in (cites or texte.split()[:1]):

@@ -8,6 +8,9 @@ champ = ESPACE['champ']
 ESPACE['LEGER'] = True
 exec(SRC[SRC.index('def pr_gardee'):SRC.index('ATTEND_MARC =')], ESPACE)
 pr_gardee = ESPACE['pr_gardee']
+exec(SRC[SRC.index('FP = re.compile'):SRC.index("# Étapes d'une tâche")], ESPACE)
+fichiers_declares = ESPACE['fichiers_declares']
+fichiers_permis = ESPACE['fichiers_permis']
 
 
 class TestChamp(unittest.TestCase):
@@ -21,6 +24,23 @@ class TestChamp(unittest.TestCase):
     def test_champ_absent(self):
         self.assertIsNone(champ('**Avant** : a\n**Fini quand** : x', 'Après'))
         self.assertIsNone(champ('**Après** (sans deux-points)\n', 'Après'))
+
+
+class TestFichiersDeclares(unittest.TestCase):
+    # « **Attend** : aucune » commence par « * » : ce n'est pas une puce (une puce est suivie d'une espace), sinon la liste déborde (.github#374, #375).
+    def test_la_ligne_suivante_en_gras_n_est_pas_une_puce(self):
+        corps = '**Fichiers touchés** :\n- `scripts/a.mjs`\n- `docs/b.md`\n**Attend** : aucune\n'
+        self.assertEqual(fichiers_declares(corps), ['scripts/a.mjs', 'docs/b.md'])
+
+    def test_puces_avec_tiret_ou_etoile(self):
+        self.assertEqual(fichiers_declares('**Fichiers touchés** :\n- app/page.tsx pour la carte\n* lib/x.ts\n'), ['app/page.tsx', 'lib/x.ts'])
+
+    def test_liste_vide_suivie_d_un_champ_en_gras_ne_lit_rien(self):
+        self.assertIsNone(fichiers_declares('**Fichiers touchés** :\n**Attend** : aucune\n'))
+
+    def test_fichiers_permis_ne_compte_pas_le_champ_suivant(self):
+        corps = '**Fichiers permis** (aucun autre) :\n- `a.py`\n- `b.py`\n**Attend** : aucune\n'
+        self.assertEqual(fichiers_permis(corps), 2)
 
 
 class TestPrGardee(unittest.TestCase):
