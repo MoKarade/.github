@@ -37,3 +37,15 @@ test('un runs-on ubuntu-latest seul est refusé, l\'expression du garde-fou est 
     "${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || fromJSON('[\"self-hosted\",\"pc-marc\"]') }}";
   assert.equal(selonVisibilite(bon), true);
 });
+
+test('securite.yml : OSV-Scanner a une voie sans Docker, vérifiée, pour le robot du PC (dépôt privé)', () => {
+  const yaml = readFileSync(new URL('../.github/workflows/securite.yml', import.meta.url), 'utf8');
+  // L'action Docker ne sert qu'en public ; l'étape privée vérifie la somme du binaire avant de l'exécuter.
+  const bloc = yaml.slice(yaml.indexOf('Analyser les dépendances (binaire, dépôt privé)'));
+  assert.ok(bloc.length > 0, 'étape OSV pour dépôt privé absente');
+  assert.match(bloc, /visibility != 'public'/);
+  assert.match(bloc, /sha256sum -c/);
+  assert.match(bloc, /osv-scanner" scan source --lockfile=/);
+  const action = yaml.slice(yaml.indexOf('name: Analyser les dépendances\n'), yaml.indexOf('Analyser les dépendances (binaire'));
+  assert.match(action, /visibility == 'public'/, 'l\'action Docker doit être réservée au dépôt public');
+});
