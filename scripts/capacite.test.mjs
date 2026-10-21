@@ -59,6 +59,8 @@ test('fetch.py lit les fichiers déclarés comme capacite.mjs (même grammaire, 
     '**Fichiers permis** (aucun autre) :\n- `lib/exact.ts`\n\n**Fichiers touchés** :\n- `lib/large.ts`\n',
     '**Fichiers touchés** : non déterminés (aucun chemin).\n',
     '**Fichiers touchés** :\n- `CHANGELOG.md`\n',
+    '**Fichiers touchés** :\n- `lib/a.ts`\n- `docs/INDEX.md`\n- `docs/adr/README.md`\n',
+    '**Fichiers touchés** :\n- `docs/INDEX.md`\n- `docs/adr/README.md`\n',
     'rien de tel',
     '',
   ];
@@ -80,4 +82,9 @@ test('fichiersDuTravail : déclarés ∪ réels, journaux ignorés, null si rien
   assert.equal(fichiersDuTravail(null, null), null);
   assert.equal(fichiersDuTravail(undefined, []), null);
   assert.equal(fichiersDuTravail(null, ['CHANGELOG.md']), null);
+  // les deux index que chaque tâche complète (demande de JobAI, 21/10/2026) ne rendent pas deux travaux incompatibles ; un autre docs/README.md ou un autre INDEX compte
+  assert.deepEqual(fichiersDuTravail(['lib/a.ts', 'docs/INDEX.md', 'docs/adr/README.md'], null), ['lib/a.ts']);
+  assert.equal(fichiersDuTravail(null, ['docs/INDEX.md', 'docs/adr/README.md']), null);
+  assert.deepEqual(fichiersDuTravail(['docs/claude/INDEX.md', 'README.md', 'web/docs/INDEX.md'], null), ['docs/claude/INDEX.md', 'README.md', 'web/docs/INDEX.md']);
+  assert.equal(compatibles(['lib/a.ts', 'docs/INDEX.md', 'docs/adr/README.md'], ['lib/b.ts', 'docs/INDEX.md', 'docs/adr/README.md']), true);
 });
