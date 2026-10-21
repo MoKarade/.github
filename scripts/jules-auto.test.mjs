@@ -153,11 +153,13 @@ test('choisirPourJules ne lève pas sur une issue illisible', () => {
 });
 
 // gh factice : un dépôt avec ses issues, ses PR ouvertes et ce qu'on y écrit.
-const ghFactice = ({ issue = { state: 'open', labels: [] }, ouvertes = {}, prs = [] } = {}) => {
+const ghFactice = ({ issue = { state: 'open', labels: [] }, ouvertes = {}, prs = [], fichiersPr = {} } = {}) => {
   const appels = [];
   const gh = (m, chemin, corps) => {
     appels.push([m, chemin, corps]);
     if (m === 'GET' && /\/pulls\?/.test(chemin)) return prs;
+    const fp = /\/pulls\/(\d+)\/files/.exec(chemin);
+    if (m === 'GET' && fp) { if (!(fp[1] in fichiersPr)) throw new Error('HTTP 502'); return fichiersPr[fp[1]].map((f) => (typeof f === 'string' ? { filename: f } : f)); }
     if (m === 'GET' && /issues\?labels=/.test(chemin)) return ouvertes[decodeURIComponent(/labels=([^&]+)/.exec(chemin)[1])] ?? [];
     if (m === 'GET') return issue;
     return {};
@@ -252,4 +254,31 @@ test('confierAJules : deux travaux = dépôt occupé ; une tâche et sa PR compt
   const prSeule = { number: 21, user: { login: 'MoKarade', type: 'User' }, body: 'sans tâche' };
   const avecPr = ghFactice({ issue, ouvertes: { 'en-cours': [a] }, prs: [prDeA, prSeule] });
   assert.match(confierAJules({ repo: 'CarAI', n: 7 }, avecPr.gh).raison, /2 travaux sur 2 places/);
+});
+
+test('confierAJules : les fichiers RÉELS de la PR ouverte de l’autre travail comptent, déclarés ou non', () => {
+  const issue = { state: 'open', labels: [], body: corps(7, 'carai') }; // lib/format.test.ts
+  const prDeA = { number: 20, user: { login: 'MoKarade', type: 'User' }, body: 'Tâche : #3' };
+  const a = { number: 3, body: '**Fichiers touchés** :\n- `app/a.ts`' };
+  const deborde = ghFactice({ issue, ouvertes: { 'en-cours': [a] }, prs: [prDeA], fichiersPr: { 20: ['app/a.ts', { filename: 'lib/neuf.ts', previous_filename: 'lib/format.test.ts' }] } });
+  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, deborde.gh).raison, /dépôt occupé \(issue #3 en cours : fichier-commun:lib\/format\.test\.ts\)/, 'un renommage compte pour l’ancien chemin');
+  const sage = ghFactice({ issue, ouvertes: { 'en-cours': [a] }, prs: [prDeA], fichiersPr: { 20: ['app/a.ts', 'app/a.test.ts'] } });
+  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, sage.gh).statut, 'confiee');
+  const sansDeclaration = ghFactice({ issue, ouvertes: { 'en-cours': [{ number: 3, body: 'sans gabarit' }] }, prs: [prDeA], fichiersPr: { 20: ['app/a.ts'] } });
+  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, sansDeclaration.gh).statut, 'confiee', 'la PR dit ce que la tâche ne dit pas');
+  const illisible = ghFactice({ issue, ouvertes: { 'en-cours': [{ number: 3, body: 'sans gabarit' }] }, prs: [prDeA] });
+  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, illisible.gh).raison, /fichiers-inconnus/, 'lecture impossible = inconnu = un seul');
+  const tronquee = ghFactice({ issue, ouvertes: { 'en-cours': [{ number: 3, body: 'sans gabarit' }] }, prs: [prDeA], fichiersPr: { 20: Array.from({ length: 100 }, (_, i) => `f${i}.ts`) } });
+  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, tronquee.gh).raison, /fichiers-inconnus/, '100 fichiers : liste tronquée');
+});
+
+test('confierAJules : une PR seule (sans tâche) dont les fichiers sont lisibles laisse la 2e place si disjoints, la garde sinon', () => {
+  const issue = { state: 'open', labels: [], body: corps(7, 'carai') };
+  const prSeule = { number: 21, user: { login: 'MoKarade', type: 'User' }, body: 'sans tâche' };
+  const disjointe = ghFactice({ issue, prs: [prSeule], fichiersPr: { 21: ['app/z.ts'] } });
+  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, disjointe.gh).statut, 'confiee');
+  const commune = ghFactice({ issue, prs: [prSeule], fichiersPr: { 21: ['lib/format.test.ts'] } });
+  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, commune.gh).raison, /dépôt occupé \(PR #21 ouverte : fichier-commun:lib\/format\.test\.ts\)/);
+  const inconnue = ghFactice({ issue, prs: [prSeule] });
+  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, inconnue.gh).raison, /PR #21 ouverte : fichiers-inconnus/);
 });

@@ -997,3 +997,57 @@ test('capacité : un journal commun (HANDOVER.md, CHANGELOG.md) n’empêche pas
   const d = etat(calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], fpl: ['src/a.ts', 'HANDOVER.md'] }), tache(2, { fpl: ['src/b.ts', 'HANDOVER.md'] })]))));
   assert.equal(d.statut, 'partiel');
 });
+
+// Les fichiers RÉELS de la PR ouverte (`pr.ff`, relevé du PC) s'ajoutent aux fichiers déclarés du travail (tâche #359).
+const prAvecFichiers = (n, ff) => ({ ...prOuverte(n), ff });
+
+test('capacité : un travail sans fichiers déclarés mais dont la PR ouverte a des fichiers connus laisse la deuxième place à une tâche disjointe', () => {
+  const d = etat(calculer(releve(depot('a', [
+    tache(1, { labels: ['en-cours'], pr: prAvecFichiers(10, ['x/a.ts', 'tests/a.test.ts']) }),
+    tache(2, { fpl: ['y/b.ts'] }),
+  ]))));
+  assert.deepEqual(d.occupe_par[0].fichiers, ['x/a.ts', 'tests/a.test.ts']);
+  assert.equal(d.statut, 'partiel');
+  assert.equal(d.suivante.ref, 'a#2');
+});
+
+test('capacité : la PR qui déborde de la déclaration est comptée (déclarés ∪ réels) : la tâche qui touche ce fichier-là est sautée', () => {
+  const d = etat(calculer(releve(depot('a', [
+    tache(1, { labels: ['jules'], fpl: ['x/a.ts'], pr: prAvecFichiers(10, ['x/a.ts', 'lib/imprevu.ts']) }),
+    tache(2, { fpl: ['lib/imprevu.ts'] }),
+    tache(3, { fpl: ['z/c.ts'] }),
+  ]))));
+  assert.deepEqual(d.occupe_par[0].fichiers, ['x/a.ts', 'lib/imprevu.ts']);
+  assert.deepEqual(d.sautees_conflit.map((s) => [s.ref, s.raison]), [['a#2', 'fichier-commun:lib/imprevu.ts']]);
+  assert.deepEqual(d.suivantes.map((s) => s.ref), ['a#3']);
+});
+
+test('capacité : une PR sans fichiers lisibles (liste tronquée, vide, journaux seuls, relevé d’avant) ne change rien : inconnu = un seul travail', () => {
+  for (const ff of [null, [], ['HANDOVER.md', 'CHANGELOG.md'], undefined]) {
+    const d = etat(calculer(releve(depot('a', [
+      tache(1, { labels: ['en-cours'], pr: ff === undefined ? prOuverte(10) : prAvecFichiers(10, ff) }),
+      tache(2, { fpl: ['y/b.ts'] }),
+    ]))));
+    assert.equal(d.occupe_par[0].fichiers, null, `ff = ${JSON.stringify(ff)}`);
+    assert.equal(d.statut, 'occupe');
+    assert.equal(d.sautees_conflit[0].raison, 'fichiers-inconnus');
+  }
+});
+
+test('capacité : les fichiers de la PR comptent aussi pour une tâche sans étiquette dont la PR est ouverte (pr-ouverte)', () => {
+  const d = etat(calculer(releve(depot('a', [
+    tache(1, { pr: prAvecFichiers(10, ['x/a.ts']) }),
+    tache(2, { fpl: ['x/a.ts'] }),
+  ]))));
+  assert.equal(d.occupe_par[0].motif, 'pr-ouverte');
+  assert.deepEqual(d.occupe_par[0].fichiers, ['x/a.ts']);
+  assert.equal(d.sautees_conflit[0].raison, 'fichier-commun:x/a.ts');
+});
+
+test('capacité : une PR fusionnée ou fermée ne fournit pas de fichiers au travail (seule la PR ouverte compte)', () => {
+  const d = etat(calculer(releve(depot('a', [
+    tache(1, { labels: ['en-cours'], pr: { n: 10, state: 'closed', merged: null, kind: 'tache', ff: ['x/a.ts'] } }),
+    tache(2, { fpl: ['y/b.ts'] }),
+  ]))));
+  assert.equal(d.occupe_par[0].fichiers, null);
+});

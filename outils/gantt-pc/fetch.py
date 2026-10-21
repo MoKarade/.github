@@ -261,7 +261,11 @@ def calculer(repo, rl, i, pr):
               'merged': p.get('merged_at'), 'kind': 'corps'}
     if pr and lvl == 'tâche':
         fs = flat(gh(f"repos/MoKarade/{pr['repo']}/pulls/{pr['n']}/files?per_page=100"))
-        if pr['state'] == 'open': pr['lignes'] = taille(fs)
+        if pr['state'] == 'open':
+            pr['lignes'] = taille(fs)
+            # fichiers RÉELS de la PR ouverte (deux places par dépôt) : prochaine-tache.mjs les ajoute aux fichiers déclarés de la tâche.
+            # None = liste tronquée (la page des fichiers ne rend que 100 entrées) : elle ne prouve rien. Un renommage compte pour l'ancien chemin aussi.
+            pr['ff'] = None if len(fs) >= 100 else sorted({c for f in fs for c in (f['filename'], f.get('previous_filename')) if c and not JOURNAUX.search(c)})
         pr['jf'] = portee_jules(fs)
     if pr and lvl == 'tâche' and 'c0' not in pr:
         # le travail réel : première et dernière modification (commits) de la PR
@@ -335,7 +339,8 @@ def traiter(rk):
         pr = pr_de(f'{rl}#{i["number"]}')
         sig = signature(i, pr, i.get('body') or '')
         ancien = PREV.get((repo, i['number']))
-        if LEGER and ancien and sig is not None and ancien.get('sig') == sig and 'fpl' in ancien:   # 'fpl' absent = relevé d'avant les deux places : recalculé
+        pr_a = ancien.get('pr') if ancien else None
+        if LEGER and ancien and sig is not None and ancien.get('sig') == sig and 'fpl' in ancien and not (pr_a and pr_a.get('state') == 'open' and 'ff' not in pr_a):   # 'fpl' ou 'ff' absent = relevé d'avant les deux places : recalculé
             # non-tâche : ses sous-issues ont-elles changé ? (les enfants disent qui est leur parent)
             if ancien['lvl'] == 'tâche' or refs_enfants(rl, ancien['kids']) == ENFANTS.get(f'{rl}#{i["number"]}', set()):
                 nodes[i['number']] = ancien; reutilises += 1

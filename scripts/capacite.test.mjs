@@ -71,3 +71,13 @@ test('fetch.py lit les fichiers déclarés comme capacite.mjs (même grammaire, 
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(JSON.parse(r.stdout), corps.map((c) => fichiersDeclares(c)));
 });
+
+test('fichiersDuTravail : déclarés ∪ réels, journaux ignorés, null si rien de connu', async () => {
+  const { fichiersDuTravail } = await import('./capacite.mjs');
+  assert.deepEqual(fichiersDuTravail(['a.ts'], ['a.ts', 'b.ts', 'HANDOVER.md']), ['a.ts', 'b.ts']);
+  assert.deepEqual(fichiersDuTravail(null, ['b.ts']), ['b.ts']);
+  assert.deepEqual(fichiersDuTravail(['a.ts'], null), ['a.ts']);
+  assert.equal(fichiersDuTravail(null, null), null);
+  assert.equal(fichiersDuTravail(undefined, []), null);
+  assert.equal(fichiersDuTravail(null, ['CHANGELOG.md']), null);
+});
