@@ -254,3 +254,48 @@ test('prio:3 est complétée au gabarit (réponse de Marc du 21/10/2026), Hubper
   assert.deepEqual(r.refusees, []);
   assert.equal(ecritures(h.appels).length, 0);
 });
+
+const CORPS_VITE = `**Avant** : trois alertes Dependabot sont ouvertes sur \`main\`, toutes via \`launch-editor\` embarqué par \`vite\` 8.3.0 à 8.3.2.
+
+**Après** : \`vite\` est mis à jour vers une version corrigée (mise à jour mineure ou correctif, jamais \`npm audit fix --force\`).
+
+**Fini quand** : \`npm audit --omit=dev\` rend 0 sur le commit fusionné et les trois alertes sont lues fermées.
+
+**Source** : demande du Coordinateur du 21/10/2026.
+
+**Attend** : aucune
+`;
+
+test('montée de dépendance : « Fini quand » qui cite npm audit tient lieu de test, les fichiers sont package.json et son lockfile, Jules l\'accepte', () => {
+  const t = tache(28, { body: CORPS_VITE, title: 'Mettre à jour vite pour fermer les trois alertes « launch-editor »', labels: ['niveau:tâche', 'prio:1'] });
+  const g = github({ issues: [t], fichiers: ['package.json', 'package-lock.json'], dossiers: [] });
+  const r = lancer(g);
+  assert.deepEqual(r.completees, ['FinanceAI#28']);
+  const corps = ecritures(g.appels)[0].corps.body;
+  assert.match(corps, /\*\*Fichiers permis\*\* \(aucun autre\) :\n- `package\.json`\n- `package-lock\.json`/);
+  assert.doesNotMatch(corps, /\(nouveau\)/); // aucun test inventé
+  assert.match(corps, /mise à jour mineure ou un correctif \(patch\) seulement, jamais `npm audit fix --force`/);
+  assert.match(corps, /`npm audit --omit=dev` : il doit rendre 0 vulnérabilité/);
+  assert.deepEqual(evaluerJules({ repo: 'FinanceAI', n: 28, labels: ['niveau:tâche', 'faisable-jules'], body: corps }), { ok: true, raisons: [] });
+});
+
+test('montée de dépendance : sans package.json à la racine, ou sans npm audit ni test dans « Fini quand », ou sans mot de mise à jour : refus dit', () => {
+  const t = tache(28, { body: CORPS_VITE, title: 'Mettre à jour vite', labels: ['niveau:tâche', 'prio:1'] });
+  const sans = github({ issues: [t], fichiers: [], dossiers: [] });
+  assert.match(lancer(sans).refusees[0].raison, /package\.json introuvable/);
+  assert.equal(ecritures(sans.appels).length, 0);
+
+  const aucun = github({ issues: [tache(29, { body: CORPS_VITE.replace('`npm audit --omit=dev` rend 0', 'les alertes sont closes'), title: 'Mettre à jour vite' })], fichiers: ['package.json'], dossiers: [] });
+  assert.match(lancer(aucun).refusees[0].raison, /ne cite aucun test/);
+
+  const autre = github({ issues: [tache(30, { body: CORPS_VITE.replace('mis à jour vers', 'remplacé par').replace('mise à jour mineure ou correctif', 'correctif'), title: 'Changer vite' })], fichiers: ['package.json'], dossiers: [] });
+  assert.match(lancer(autre).refusees[0].raison, /aucun chemin de fichier existant cité/);
+});
+
+test('montée de dépendance : le préfixe de l\'app (web/ chez BatchChef) est respecté', () => {
+  const g = github({ issues: [tache(28, { body: CORPS_VITE, title: 'Mettre à jour vite' })], fichiers: ['web/package.json', 'web/package-lock.json'], dossiers: [] });
+  const r = completerDepot({ depot: 'MoKarade/batchchef-', gh: g.gh, etat: {}, maintenant: new Date('2026-10-19T20:00:00Z') });
+  assert.deepEqual(r.completees, ['batchchef-#28']);
+  assert.match(ecritures(g.appels)[0].corps.body, /- `web\/package\.json`\n- `web\/package-lock\.json`/);
+  assert.match(ecritures(g.appels)[0].corps.body, /`cd web && npm audit --omit=dev`/);
+});
