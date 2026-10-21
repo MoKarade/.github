@@ -58,6 +58,7 @@ Titre : un verbe et un objet, en mots simples. Le corps suit toujours ces gabari
 **Fichiers touchés** (OBLIGATOIRE, comme `**Attend**` : liste à puces de chemins entre `backticks`, ou `non déterminés` avec la raison) : ce que la tâche modifie ; sans eux, ou sans « Fichiers permis » du gabarit Jules, la tâche ne va jamais en parallèle d'une autre (§6, capacité). Qui crée la tâche l'écrit. Si elle manque, le filet du PC en écrit une **estimation** à la fin du corps (§6, capacité) et le fil qui prend la tâche la corrige ; passé le délai, une tâche sans cette ligne est invalide (§5 ter).
 **Attend** : aucune — OU — #n — raison (OBLIGATOIRE : la ligne existe toujours ; une dépendance n'est écrite que si elle est prouvée).
 **Preuve attendue** : AAAA-MM-JJ HH:MM (heure du Québec) — événement (seulement si la preuve dépend d'un événement, voir §10).
+**Acceptation automatique** : oui — raison (facultatif ; seulement si le « Fini quand » est un contrôle CI ou un déploiement, jamais une lecture de la production : voir §10 ter).
 ```
 
 Un « Fini quand » non vérifiable (« c'est mieux ») est refusé. Un « Fini quand » qui dépend d'un événement lent (un cron, une échéance) est refusé tel quel : on le réécrit pour qu'il soit prouvable dans l'heure, ou on applique la règle du §10. On le réécrit avant de prendre la tâche.
@@ -319,7 +320,7 @@ La procédure pas à pas est la compétence `livrer-une-tache`. Elle applique ce
 - un déploiement réussi dont le résultat attendu n'a pas été lu (FinanceAI#1156, 16/10 : « je n'ai pas lu le `GET /hub/summary` déployé », [Probable], issue fermée). Quand le fil ne peut pas lire (jeton absent), la tâche reste en `preuve-attendue` avec `qui:marc` si un geste est nécessaire ;
 - un commentaire qui avoue un doute : `[Probable]`, `[Supposition]`, `[À vérifier]`, « pas lu », « non testé », « je n'ai pas pu vérifier » ;
 - une CI verte ou un test seuls, quand le « Fini quand » est en production ;
-- une preuve écrite par un robot ou par Jules, ou datée d'avant la fusion de la PR ;
+- une preuve écrite par un robot ou par Jules (seule exception : l'acceptation automatique marquée du §10 ter), ou datée d'avant la fusion de la PR ;
 - une fusion : Mergify, `Fixes #n` ou un fil pressé ne ferment jamais la tâche.
 
 Le Gantt marque une tâche **acceptée** seulement si l'issue est fermée avec ce commentaire. Sans commentaire, la pastille la signale.
@@ -348,6 +349,25 @@ Une fermeture `not_planned` ou doublon est valide avec un commentaire `**Abandon
 **Ce que le garde-fou ne fait pas.** Il ne lit pas la production (c'est le fil, §10) et ne juge pas le texte : il vérifie la forme et ce que GitHub sait (PR, empreinte, déploiement). Un faux commentaire bien formé passe. Deux filets restent : la pastille du Gantt (§13) et le ménage de la routine (§6), qui rouvrent ce que le garde-fou a manqué. Limite connue : chez DriveAI, `deploy.yml` réussit sans rien déployer quand ses secrets manquent.
 
 **Sécurité.** Le script vient de `main` de ce dépôt, jamais du code de l'appelant ; le jeton du job (`github.token`) suffit, aucun secret ; le texte des commentaires est traité comme donnée, jamais exécuté.
+
+## 10 ter. Acceptation automatique (décision de Marc, 21/10/2026)
+
+Constat (relevé du 14 au 21/10/2026, 544 PR fusionnées, rapport `commun/rapports/2026-10-21_fusion-rapide.md`) : Mergify fusionne en moyenne une minute après la CI verte et la PR prête (p90 : 11 min) ; l'attente est après la fusion, jusqu'au « **Acceptée** » posé par un fil (médiane 11 min, 35 % des tâches au-delà d'une heure, dont une tâche sur dix sans aucune attente légitime). Marc (21/10, option B) : une tâche dont la preuve est entièrement lisible par une machine s'accepte toute seule, et le signal « fusionné, accepté » arrive tout de suite.
+
+**Qui.** Le Réacteur (`scripts/reveil-reacteur.mjs`), à la fusion d'une PR, avant de réveiller le Coordinateur : `scripts/acceptation-auto.mjs`, sans IA, sans quota. Il pose le commentaire « **Acceptée** » et ferme la tâche `completed` SEULEMENT si TOUT est vrai :
+1. la tâche porte la ligne `**Acceptation automatique** : oui — <pourquoi>`. Celui qui écrit la tâche affirme que son « Fini quand » est un contrôle CI ou un déploiement ; une machine ne lit pas la production, donc une tâche dont le « Fini quand » est une réponse HTTP, une donnée ou un écran ne porte jamais cette ligne ;
+2. la PR est fusionnée et cite exactement UNE tâche, ouverte, de son dépôt ; aucune autre PR ouverte ne la cite ;
+3. la tâche n'attend rien : ni `preuve-attendue`, `qui:marc`, `bloqué`, `essai`, `preuve-manquante` ;
+4. aucun écran n'est touché (jsx, tsx, css, html, images, `public/`) : un écran se prouve en le regardant, par un fil, avec les captures du §8 ;
+5. aucun contrôle de la tête de la PR n'est rouge ;
+6. si la PR change du code servi (hors docs, tests, CI, qualité) dans un dépôt qui se déploie : un déploiement de production réussi existe sur le commit fusionné (4 essais, 45 s entre) ; sinon rien ne s'écrit et un fil prouve comme avant ;
+7. le commentaire passe le garde-fou de preuve (§10 bis) AVANT d'être posé : une acceptation automatique n'est jamais rouverte après coup.
+
+**Ce que dit le commentaire** : la PR, le commit fusionné, le déploiement (ou « sans déploiement : <raison> »), le nombre de contrôles réussis sur la tête de la PR, le nombre de fichiers, et noir sur blanc « la production n'a pas été lue par une personne ». Il est écrit par `github-actions[bot]` et porte `<!-- acceptation-auto -->` ; c'est la seule exception à « jamais un robot » du §10 bis, et seulement pour « Acceptée », jamais pour un abandon. La PR reçoit une ligne « Fusionnée et acceptée automatiquement » : c'est le signal pour Marc, sur son téléphone, sans ouvrir de fil. Le réveil du Coordinateur dit « tâche D#n acceptée seule » au lieu de « preuve à poser ».
+
+**Ce que ça ne change pas.** Toute autre tâche suit le §10 : un fil prouve, au plus 1 h après le déploiement. Un refus de l'acceptation automatique ne coûte rien : rien n'est écrit, le Coordinateur est réveillé comme avant. Un échec de l'API est un avertissement, jamais un job rouge. Pour retirer la règle : enlever l'appel dans `decider` (`reveil-reacteur.mjs`).
+
+**Réglage par dépôt** : le `reacteur.yml` de chacun donne à son job `reveiller` les droits `issues: write` et `deployments: read` et passe `deploiement` et `workflows-deploiement` (les mêmes valeurs que son job `preuve`). Sans ces droits : avertissement, et un fil prouve.
 
 ## 11. Retour en arrière (automatique)
 
