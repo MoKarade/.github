@@ -38,14 +38,35 @@
 // Un échec du réveil ne fait JAMAIS échouer le tour (il se dit sur la ligne imprimée) et n'enregistre pas le signalement :
 // le tour suivant réessaie.
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DEPOT_BOITE, WORKFLOW_BOITE, construireMotif } from './reveil-reacteur.mjs';
 import { lierTout, ghCli } from './lier-taches.mjs';
 import { choisirPourJules, confierAJules } from './jules-auto.mjs';
 import { suivreDepot, menageFermees } from './jules-suivi.mjs';
 import { marquerFaisables, retirerPerimees } from './jules-marquage.mjs';
 import { completerDepot } from './jules-gabarit.mjs';
+
+export const MODULES_VERSION = ['filet-pc', 'jules-suivi', 'jules-marquage', 'jules-gabarit', 'jules-auto'];
+
+/**
+ * La version du code que ce tour exécute : le sha git (7 caractères) de chaque fichier, calculé comme `git hash-object` (le PC n'a pas de dépôt,
+ * il reçoit les scripts un par un). Se compare à `git rev-parse origin/main:scripts/<nom>.mjs` : « sans ÉCHEC » seul ne prouve pas qu'une fonction
+ * fusionnée tourne (limite relevée par le fil .github, 19/10/2026).
+ * @param lire (nom) -> Buffer, ou lève si le fichier manque
+ */
+export function versionDuCode(lire = (nom) => readFileSync(fileURLToPath(new URL(`./${nom}.mjs`, import.meta.url)))) {
+  const parties = MODULES_VERSION.map((nom) => {
+    try {
+      const contenu = lire(nom);
+      return `${nom} ${createHash('sha1').update(`blob ${contenu.length}\0`).update(contenu).digest('hex').slice(0, 7)}`;
+    } catch {
+      return `${nom} absent`;
+    }
+  });
+  return `code : ${parties.join(', ')}`;
+}
 
 export const SEUIL_LIBRE_MIN = 30;
 export const FENETRE_SIGNALEMENT_H = 2;
@@ -501,6 +522,6 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const jules = tourJules({ fichierProchaines, fichierEtat: fichierEtat.replace(/(\.json)?$/, '-jules.json'), ...options });
     const file = tourFile({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-file.json'), ...options });
     const suivi = tourJulesSuivi({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-jules-suivi.json'), ...options });
-    console.log(`${reveil} · ${quotidien} · ${oublis} · ${liens} · ${jules} · ${file} · ${suivi}`);
+    console.log(`${reveil} · ${quotidien} · ${oublis} · ${liens} · ${jules} · ${file} · ${suivi} · ${versionDuCode()}`);
   }
 }
