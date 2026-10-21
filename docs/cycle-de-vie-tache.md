@@ -369,6 +369,8 @@ Constat (relevé du 14 au 21/10/2026, 544 PR fusionnées, rapport `commun/rappor
 
 **Réglage par dépôt** : le `reacteur.yml` de chacun donne à son job `reveiller` les droits `issues: write` et `deployments: read` et passe `deploiement` et `workflows-deploiement` (les mêmes valeurs que son job `preuve`). Sans ces droits : avertissement, et un fil prouve.
 
+**État au 21/10/2026** : les droits sont posés dans les dix dépôts (neuf PR de la phase 2 et MoKarade/.github#399 pour ce dépôt et pour `reveil-reacteur.yml`). Premier essai réel : MoKarade/.github#402.
+
 ## 11. Retour en arrière (automatique)
 
 Le workflow commun `fumee` tourne après chaque déploiement de production. Il contrôle `/api/sante`, le summary du hub et la page de connexion.
