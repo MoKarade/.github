@@ -39,7 +39,7 @@
 // Ne fait jamais échouer le job (un avertissement dit ce qui n'a pas marché) : le filet de 6 h reprend la main.
 import { pathToFileURL } from 'node:url';
 import { prAttendantMarc } from './attend-marc.mjs';
-import { dispense, extraireTaches } from './tache-liee.mjs';
+import { dispense, extraireTachesCompletes } from './tache-liee.mjs';
 import { PLACES_PAR_DEPOT } from './capacite.mjs';
 import { accepterApresFusion } from './acceptation-auto.mjs';
 
@@ -202,7 +202,7 @@ async function lireOccupations({ api, depot, tachesExclues }) {
   try {
     const ouvertes = ((await api('GET', `/repos/${depot}/pulls?state=open&per_page=30`)) ?? []).filter((pr) => !dispense(pr));
     const attendMarc = new Set(prAttendantMarc((await api('GET', `/repos/${depot}/issues?labels=qui:marc&state=open&per_page=100`)) ?? []));
-    const tachesDe = (prs) => prs.flatMap((pr) => extraireTaches(pr.body, depot).filter((t) => t.depot === depot).map((t) => t.numero));
+    const tachesDe = (prs) => prs.flatMap((pr) => extraireTachesCompletes(pr.body, depot).filter((t) => t.depot === depot).map((t) => t.numero));
     const prs = ouvertes.filter((pr) => !attendMarc.has(pr.number));
     const encore = new Set(tachesDe(prs));
     const exclues = new Set([...tachesExclues, ...tachesDe(ouvertes.filter((pr) => attendMarc.has(pr.number)))].filter((n) => !encore.has(n)));
@@ -242,7 +242,7 @@ export async function decider({ api, evt, maintenant = new Date(), accepter = ac
 
   if (type === 'pr_fusionnee') {
     const pr = await api('GET', `/repos/${depot}/pulls/${evt.pr}`);
-    const taches = extraireTaches(pr?.body, depot);
+    const taches = extraireTachesCompletes(pr?.body, depot);
     // Une mise à jour de robot (Dependabot…) sans tâche ne libère aucun dépôt : pas de réveil, donc pas de quota.
     if (taches.length === 0 && ROBOTS.has(pr?.user?.login)) return { action: 'rien', raison: 'PR de robot sans tâche' };
     // Une tâche dont la preuve est lisible par une machine s'accepte ICI (scripts/acceptation-auto.mjs, §10 ter), avant de lire ce qui reste à prouver.
