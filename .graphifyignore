@@ -1,0 +1,5 @@
+# Exclusions du graphe de code (syntaxe .gitignore ; s'ajoute à .gitignore). Détail : docs/graphe-code.md
+package-lock.json
+*.lock
+docs/captures-demo/
+tests/
