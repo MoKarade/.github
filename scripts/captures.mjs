@@ -229,7 +229,14 @@ export function commentaire({ depot, pr, sha, pages, avant, apres, branche = 'ca
 }
 
 /**
- * Range les images dans la branche `captures`, sous pr-<n>/{avant,apres}. La branche garde l'historique
+ * Le `vercel.json` de la branche `captures` : Vercel lit `git.deploymentEnabled` dans le `vercel.json` du commit poussé, donc celui de la
+ * branche par défaut ne couvre pas cette branche orpheline (une préversion en erreur est apparue dans FinanceAI, MoKarade/FinanceAI#1170).
+ */
+export const VERCEL_CAPTURES = `${JSON.stringify({ git: { deploymentEnabled: false } }, null, 2)}\n`;
+
+/**
+ * Range les images dans la branche `captures`, sous pr-<n>/{avant,apres}, avec un `vercel.json` qui coupe tout déploiement
+ * (réécrit à chaque commit : une branche poussée avant ce correctif le reçoit au prochain push). La branche garde l'historique
  * (un commit par push de la PR). `remote` est une URL git ; l'authentification vient de `gh auth setup-git`.
  * Rend { pousse: boolean } ; relance jusqu'à 3 fois si un autre push est passé entre-temps.
  */
@@ -249,6 +256,7 @@ export function publier({ remote, pr, sha, avant, apres, branche = 'captures' })
         // Première PR : la branche n'existe pas encore, on la crée orpheline. Toute autre erreur remonte.
         if (!/couldn't find remote ref/i.test(String(err.stderr))) throw err;
       }
+      writeFileSync(join(dir, 'vercel.json'), VERCEL_CAPTURES);
       const cible = join(dir, `pr-${pr}`);
       rmSync(cible, { recursive: true, force: true });
       if (existsSync(avant)) cpSync(avant, join(cible, 'avant'), { recursive: true });
