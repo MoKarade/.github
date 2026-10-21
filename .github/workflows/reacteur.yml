@@ -67,9 +67,10 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-      issues: read
+      issues: write
       checks: read
       actions: write
+      deployments: read
     # Workflow commun de MoKarade/.github (tâche MoKarade/.github#139) : filtre, relance une fois un échec de charge du
     # robot, puis lance boite-reacteur.yml. Le jeton de réveil (secret du dépôt) lui est transmis sans être nommé ici.
     uses: ./.github/workflows/reveil-reacteur.yml
