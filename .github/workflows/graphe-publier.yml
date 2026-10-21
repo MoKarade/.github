@@ -1,0 +1,20 @@
+name: Graphe
+
+# Publie l'artefact `graphe` de CE dépôt (page de graphe lisible + meta.json) que Hubperso affiche, à chaque push sur la branche
+# par défaut. Le travail est dans le workflow commun `graphe.yml` (même dépôt) ; ici, seulement l'appel.
+# Job séparé : jamais un check requis d'une PR. Tâche : .github#437 (mission #327).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  graphe:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/graphe.yml
+    with:
+      runner: ${{ github.event.repository.visibility == 'public' && '"ubuntu-latest"' || '["self-hosted","pc-marc"]' }}
+      depot: ${{ github.repository }}
