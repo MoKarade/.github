@@ -2,7 +2,7 @@
 # Pourquoi : le relevé tournait dans une machine Claude qui est recyclée sans prévenir ; le relancer coûtait du quota Claude.
 # Ici il tourne sur le PC, sans Claude : tâche Windows cachée toutes les 10 min, résultats déposés dans le Drive (dossier _Gantt),
 # que la page « Chantier Apps » lit avec le connecteur Google Drive.
-# Usage (PowerShell, utilisateur de Marc, pas en administrateur) : powershell -ExecutionPolicy Bypass -File installer.ps1 [-Drive "G:\Mon disque\_Gantt"]
+# Usage (PowerShell, utilisateur de Marc, pas en administrateur) : powershell -ExecutionPolicy Bypass -File installer.ps1 [-Drive "<chemin du dossier _Gantt>"]
 # Relancer le script est sans risque : il remplace la tâche et met le code à jour.
 param([string]$Drive = '', [string]$Etat = 'C:\dev\_pc-local\gantt-releve')
 # 'Continue' : sous PowerShell 5.1, une ligne écrite sur stderr par un programme (git, gh) deviendrait une erreur fatale en 'Stop'
@@ -22,18 +22,26 @@ if ($manque) { throw 'Outil manquant : installer ce qui est marqué MANQUE, puis
 gh api user --jq .login 2>&1 | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "gh n'est pas connecté : lancer « gh auth login » puis relancer." }
 
-# dossier Drive : celui donné, sinon <lecteur>:\Mon disque\_Gantt (ou My Drive) sur le premier lecteur qui l'a
+# dossier Drive : celui donné, sinon le dossier `_Gantt` EXISTANT sous « Mon disque » / « My Drive » d'un lecteur, à n'importe quelle profondeur (Marc range son Drive :
+# « Nouvelle structure 2026\08 · Perso & projets\Projets\… », 21/10/2026). Celui qui porte déjà `etat.json` (écrit par ce relevé) gagne. On ne CRÉE jamais `_Gantt` de soi-même :
+# un dossier neuf aurait de nouveaux identifiants et la page, qui lit ces fichiers par nom dans le dossier, ne les retrouverait plus. Plusieurs candidats sans `etat.json` = on s'arrête.
 if (-not $Drive) {
+    $trouves = @()
     foreach ($l in Get-PSDrive -PSProvider FileSystem) {
         foreach ($n in 'Mon disque', 'My Drive') {
             $p = Join-Path $l.Root $n
-            if (Test-Path $p) { $Drive = Join-Path $p '_Gantt'; break }
+            if (Test-Path $p) {
+                $trouves += Get-ChildItem -LiteralPath $p -Directory -Recurse -Depth 6 -Filter '_Gantt' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+            }
         }
-        if ($Drive) { break }
     }
+    $avec = @($trouves | Where-Object { Test-Path (Join-Path $_ 'etat.json') })
+    if ($avec.Count -eq 1) { $Drive = $avec[0] }
+    elseif ($avec.Count -eq 0 -and @($trouves).Count -eq 1) { $Drive = $trouves[0] }
+    elseif (@($trouves).Count -gt 1) { throw ("Plusieurs dossiers _Gantt trouvés : " + ($trouves -join ' | ') + ' : relancer avec -Drive "<le bon>".') }
 }
-if (-not $Drive) { throw 'Dossier Google Drive introuvable : relancer avec -Drive "<lecteur>:\Mon disque\_Gantt".' }
-New-Item -ItemType Directory -Force $Drive | Out-Null
+if (-not $Drive) { throw 'Dossier Google Drive _Gantt introuvable : relancer avec -Drive "<chemin du dossier _Gantt>".' }
+if (-not (Test-Path -LiteralPath $Drive)) { New-Item -ItemType Directory -Force $Drive | Out-Null }
 Write-Host "OK   Drive : $Drive"
 
 # Dossier d'état hors de AppData : lancé depuis l'app Claude (paquet Windows), AppData est redirigé vers un dossier privé
