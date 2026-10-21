@@ -1,0 +1,4 @@
+
+# Graphe de code local (scripts/graphe.sh) : sorties de mesure, jamais committées (commentaires TODO copiés, graph.html charge unpkg)
+graphify-out/
+.graphify_root
