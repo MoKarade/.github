@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { retirerEtiquette, menageFermees, ETIQUETTES_FERMEES, toucheMcp, toucheEcran, deploiementProduction, commentaireAcceptee, controlesVerts, corpsNettoye, evaluerFusion, horsPermis, prDeLaTache, suivreDepot, tachesCitees, testsSeuls } from './jules-suivi.mjs';
+import { marquerParJules, piedDeJules, retirerEtiquette, menageFermees, ETIQUETTES_FERMEES, toucheMcp, toucheEcran, deploiementProduction, commentaireAcceptee, controlesVerts, corpsNettoye, evaluerFusion, horsPermis, prDeLaTache, suivreDepot, tachesCitees, testsSeuls } from './jules-suivi.mjs';
 import { tourJulesSuivi } from './filet-pc.mjs';
 import { lireCitation, evaluer } from './preuve.mjs';
 
@@ -314,4 +314,56 @@ test('retirerEtiquette : une étiquette déjà partie (404) n’est pas une erre
   assert.deepEqual(appels, ['DELETE repos/MoKarade/CarAI/issues/50/labels/jules']);
   const gh500 = () => { throw Object.assign(new Error('Command failed'), { stderr: 'gh: Server Error (HTTP 500)' }); };
   assert.throws(() => retirerEtiquette(gh500, 'MoKarade/CarAI', 50, 'jules'), /Command failed/);
+});
+
+// ── Étiquette par-jules (tâche #426) ──
+function ghParJules({ ouvertes = [], fermees = [], commentaires = {}, sansEtiquette = true }) {
+  const appels = [];
+  const gh = (methode, chemin, charge) => {
+    appels.push(`${methode} ${chemin}`);
+    if (methode === 'GET' && chemin.includes('pulls?state=open')) return ouvertes;
+    if (methode === 'GET' && chemin.includes('pulls?state=closed')) return fermees;
+    const c = /issues\/(\d+)\/comments/.exec(chemin);
+    if (methode === 'GET' && c) return commentaires[c[1]] ?? [];
+    if (methode === 'POST' && chemin.endsWith('/labels') && charge.name) { if (!sansEtiquette) throw new Error('422'); return {}; }
+    if (methode === 'POST' && /issues\/\d+\/labels$/.test(chemin)) return {};
+    throw new Error(`appel inattendu ${methode} ${chemin}`);
+  };
+  return { gh, appels };
+}
+const PR = (n, o = {}) => ({ number: n, state: 'open', body: '', labels: [], ...o });
+const PIED = '*PR created automatically by Jules for task [123](https://jules.google.com/task/123)*';
+
+test('piedDeJules : le lien de tâche de Jules, nulle part ailleurs', () => {
+  assert.equal(piedDeJules(`corps\n\n${PIED}`), true);
+  assert.equal(piedDeJules('Tâche : #12'), false);
+  assert.equal(piedDeJules(null), false);
+});
+
+test('marquerParJules : pied de page (ouverte ou fermée) et commentaire du bot (ouverte) posent par-jules ; une PR sans trace, rien', () => {
+  const { gh, appels } = ghParJules({
+    ouvertes: [PR(1, { body: PIED }), PR(2, { body: 'effacé' }), PR(3, { body: 'robot' })],
+    fermees: [PR(4, { state: 'closed', body: PIED }), PR(5, { state: 'closed', body: 'effacé' })],
+    commentaires: { 2: [{ user: { login: 'google-labs-jules[bot]' } }], 3: [{ user: { login: 'github-actions[bot]' } }] },
+  });
+  const r = marquerParJules({ depot: 'MoKarade/CarAI', gh });
+  assert.deepEqual(r.marquees, ['CarAI#1', 'CarAI#2', 'CarAI#4']);
+  assert.ok(appels.includes('POST repos/MoKarade/CarAI/issues/2/labels'));
+  assert.ok(!appels.some((a) => a.includes('issues/5/') || a.includes('issues/3/labels')), 'ni la fermée sans pied, ni la PR sans trace');
+  assert.equal(appels.filter((a) => a === 'POST repos/MoKarade/CarAI/labels').length, 1, 'l\'étiquette est créée une seule fois');
+});
+
+test('marquerParJules : une PR déjà étiquetée n\'est pas relue ; une étiquette qui existe déjà ne fait pas échouer', () => {
+  const { gh, appels } = ghParJules({ ouvertes: [PR(1, { body: PIED, labels: [{ name: 'par-jules' }] }), PR(2, { body: PIED })], sansEtiquette: false });
+  assert.deepEqual(marquerParJules({ depot: 'MoKarade/CarAI', gh }).marquees, ['CarAI#2']);
+  assert.ok(!appels.some((a) => a.includes('issues/1/')));
+});
+
+test('marquerParJules : à blanc ne crée ni ne pose rien ; les commentaires lus sont bornés', () => {
+  const { gh, appels } = ghParJules({ ouvertes: [PR(1, { body: PIED })] });
+  assert.deepEqual(marquerParJules({ depot: 'MoKarade/CarAI', gh, aBlanc: true }).marquees, ['CarAI#1']);
+  assert.ok(!appels.some((a) => a.startsWith('POST')));
+  const beaucoup = ghParJules({ ouvertes: Array.from({ length: 30 }, (_, i) => PR(i + 1)) });
+  marquerParJules({ depot: 'MoKarade/CarAI', gh: beaucoup.gh });
+  assert.equal(beaucoup.appels.filter((a) => a.includes('/comments')).length, 20);
 });

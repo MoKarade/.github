@@ -48,7 +48,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DEPOT_BOITE, WORKFLOW_BOITE, construireMotif } from './reveil-reacteur.mjs';
 import { lierTout, ghCli } from './lier-taches.mjs';
 import { choisirPourJules, confierAJules } from './jules-auto.mjs';
-import { suivreDepot, menageFermees } from './jules-suivi.mjs';
+import { suivreDepot, menageFermees, marquerParJules } from './jules-suivi.mjs';
 import { marquerFaisables, retirerPerimees } from './jules-marquage.mjs';
 import { completerDepot } from './jules-gabarit.mjs';
 import { completerDepot as estimerFichiers, PAR_TOUR_MAX as ESTIMATIONS_PAR_TOUR } from './fichiers-touches.mjs';
@@ -533,13 +533,14 @@ export function tourJulesSuivi({ fichierEtat, executer = false, aBlanc = false, 
   try {
     const appel = gh ?? ghCli;
     const etat = lireJson(fichierEtat, {});
-    const total = { acceptees: [], nettoyees: [], holds: [], signaux: [], menage: [], completees: [], refus: [], perimees: [], marquees: [], vu: 0 };
+    const total = { acceptees: [], nettoyees: [], holds: [], signaux: [], menage: [], completees: [], refus: [], perimees: [], marquees: [], parJules: [], vu: 0 };
     const echecs = [];
     for (const depot of depots) {
       try {
         const r = suivreDepot({ depot, gh: appel, etat, maintenant, aBlanc: aBlanc || !executer });
         for (const k of ['acceptees', 'nettoyees', 'holds', 'signaux']) total[k].push(...r[k]);
         total.vu += r.vu;
+        total.parJules.push(...marquerParJules({ depot, gh: appel, aBlanc: aBlanc || !executer }).marquees);
         total.menage.push(...menageFermees({ depot, gh: appel, aBlanc: aBlanc || !executer }));
         total.perimees.push(...retirerPerimees({ depot, gh: appel, aBlanc: aBlanc || !executer })); // une étiquette périmée libère la tâche avant qu'on la complète
         const c = completerDepot({ depot, gh: appel, etat, maintenant, aBlanc: aBlanc || !executer }); // avant le marquage : une tâche complétée est réservée dans le même tour
@@ -562,7 +563,7 @@ export function tourJulesSuivi({ fichierEtat, executer = false, aBlanc = false, 
     }
     if (executer && !aBlanc) ecrireJson(fichierEtat, etat);
     const seul = !executer || aBlanc ? ' (non appliqué)' : '';
-    return `jules-suivi : ${total.vu} tâche(s) jules, ${total.acceptees.length} acceptée(s)${total.acceptees.length ? ` (${total.acceptees.join(', ')})` : ''}, ${total.nettoyees.length} PR nettoyée(s), ${total.holds.length} hold${total.menage.length ? `, ${total.menage.length} étiquette(s) retirée(s) sur tâches fermées` : ''}${total.perimees.length ? `, ${total.perimees.length} faisable-jules périmée(s) retirée(s) (${total.perimees.join(', ')})` : ''}${total.completees.length ? `, ${total.completees.length} complétée(s) au gabarit (${total.completees.join(', ')})` : ''}${total.refus.length ? `, refus : ${total.refus.slice(0, 3).map((x) => `${x.ref} ${x.raison.slice(0, 70)}`).join(' ; ')}${total.refus.length > 3 ? ` (+${total.refus.length - 3})` : ''}` : ''}${total.marquees.length ? `, ${total.marquees.length} marquée(s) faisable-jules (${total.marquees.join(', ')})` : ''}${seul}${envoi}${echecs.length ? `, ÉCHEC ${echecs.join(' ; ')}` : ''}`;
+    return `jules-suivi : ${total.vu} tâche(s) jules, ${total.acceptees.length} acceptée(s)${total.acceptees.length ? ` (${total.acceptees.join(', ')})` : ''}, ${total.nettoyees.length} PR nettoyée(s), ${total.holds.length} hold${total.menage.length ? `, ${total.menage.length} étiquette(s) retirée(s) sur tâches fermées` : ''}${total.perimees.length ? `, ${total.perimees.length} faisable-jules périmée(s) retirée(s) (${total.perimees.join(', ')})` : ''}${total.completees.length ? `, ${total.completees.length} complétée(s) au gabarit (${total.completees.join(', ')})` : ''}${total.refus.length ? `, refus : ${total.refus.slice(0, 3).map((x) => `${x.ref} ${x.raison.slice(0, 70)}`).join(' ; ')}${total.refus.length > 3 ? ` (+${total.refus.length - 3})` : ''}` : ''}${total.marquees.length ? `, ${total.marquees.length} marquée(s) faisable-jules (${total.marquees.join(', ')})` : ''}${total.parJules.length ? `, ${total.parJules.length} PR marquée(s) par-jules (${total.parJules.slice(0, 6).join(', ')}${total.parJules.length > 6 ? ', …' : ''})` : ''}${seul}${envoi}${echecs.length ? `, ÉCHEC ${echecs.join(' ; ')}` : ''}`;
   } catch (e) {
     return `jules-suivi : ÉCHEC (${String(e.message).slice(0, 160)})`;
   }
