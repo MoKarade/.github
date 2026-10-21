@@ -127,6 +127,11 @@ def releve(econome=False, quota_complet=True, drive=None):
         filet = ' · ' + (queue('.refresh-filet.log', 520) or 'filet PC : sans sortie')
     p = lire('prochaines.json')
     file = ' '.join(d['depot'] + '=' + (d['suivante']['ref'] if d.get('suivante') else d['statut']) for d in p['depots'])
+    # La mesure du quota Claude écrite par la tâche « Quota-Claude » : trop vieille, elle ne dit plus rien (le frein garde alors son palier ou,
+    # après la remise à zéro, l'ignore : .github#319). Se DIT dans etat.json, sinon une tâche arrêtée ne se voit nulle part.
+    fd = p.get('frein_detail') or {}
+    if fd.get('apres_reset'): quota += ' · quota Claude : remise à zéro passée, mesure de la semaine précédente ignorée (frein normal)'
+    elif (fd.get('age_heures') or 0) > 3: quota += f' · quota Claude : mesure vieille de {fd["age_heures"]} h (tâche Quota-Claude arrêtée ?)'
     return 0, f'OK {maintenant()} relevé {mode} {asof} · prochaines.json {p["calcule_le"]} {file} · fiabilité : {fid}{quota}{filet}{rep}'
 
 

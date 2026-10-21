@@ -323,7 +323,7 @@ const frein = (pct, precedent, mesureUtc = FRAIS) => calculerFrein({ pct, mesure
 
 test('frein : 79 normal, 80 palier 1, 89 palier 1, 90 palier 2, 91 palier 2', () => {
   assert.deepEqual([79, 80, 89, 90, 91].map((pct) => frein(pct).palier), ['normal', 1, 1, 2, 2]);
-  assert.deepEqual(FREIN, { seuil1: 80, seuil2: 90, hysteresis: 2, perimeHeures: 3 }, 'les seuils vivent à un seul endroit');
+  assert.deepEqual(FREIN, { seuil1: 80, seuil2: 90, hysteresis: 2, perimeHeures: 3, perimeMaxHeures: 36, apresResetMin: 15 }, 'les seuils vivent à un seul endroit');
 });
 
 test('frein : hystérésis de 2 points, on descend un palier à la fois', () => {
@@ -351,6 +351,59 @@ test('frein : un relevé de plus de 3 h garde le dernier palier connu et le dit 
   // Sans palier précédent, un vieux pourcentage reste la meilleure connaissance.
   assert.equal(frein(85, undefined, vieux).palier, 1);
   assert.equal(frein(85, undefined, vieux).detail.perime, true);
+});
+
+// Panne de quota du 19-21/10/2026 (.github#319) : la mesure s'est arrêtée à 100 % avec le quota, le palier 2 est resté après la remise à zéro.
+test('frein : mesure d’avant la remise à zéro, passée depuis plus de 15 min = semaine précédente, palier normal dit tel quel', () => {
+  const reset = '2026-10-21T12:00:00Z';
+  const apres = (minutes, extra = {}) => calculerFrein({ pct: 100, mesureUtc: '2026-10-19T22:04:00Z', precedent: 2, resetUtc: reset, maintenant: new Date(Date.parse(reset) + minutes * 60_000), ...extra });
+  const r = apres(16);
+  assert.equal(r.palier, 'normal');
+  assert.equal(r.detail.apres_reset, true);
+  assert.match(r.detail.raison, /remise à zéro .* passée/);
+  assert.equal(r.detail.inconnu, false);
+  assert.equal(apres(14).detail.apres_reset, false, 'pas avant 15 min : le relevé peut encore arriver');
+  const recent = calculerFrein({ pct: 100, mesureUtc: '2026-10-21T10:00:00Z', precedent: 2, resetUtc: reset, maintenant: new Date('2026-10-21T12:14:00Z') });
+  assert.equal(recent.palier, 2, 'mesure périmée de 2 h, reset passé depuis 14 min : palier gardé');
+  assert.equal(recent.detail.apres_reset, false);
+  // Même une mesure fraîche d'avant la remise à zéro (11 h 30, 95 %) ne tient plus 16 min après.
+  const fraiche = calculerFrein({ pct: 95, mesureUtc: '2026-10-21T11:30:00Z', precedent: 2, resetUtc: reset, maintenant: new Date('2026-10-21T12:16:00Z') });
+  assert.equal(fraiche.palier, 'normal');
+  assert.equal(fraiche.detail.apres_reset, true);
+});
+
+test('frein : une mesure DEPUIS la remise à zéro reprend la main (pas de faux normal)', () => {
+  const reset = '2026-10-21T12:00:00Z';
+  const r = calculerFrein({ pct: 92, mesureUtc: '2026-10-21T12:20:00Z', precedent: 'normal', resetUtc: reset, maintenant: new Date('2026-10-21T12:25:00Z') });
+  assert.equal(r.palier, 2);
+  assert.equal(r.detail.apres_reset, false);
+  // Mesure d'avant le reset mais reset inconnu ou invalide : comportement inchangé (dernier palier gardé).
+  for (const resetUtc of [undefined, null, 'bientôt']) {
+    const g = calculerFrein({ pct: 100, mesureUtc: '2026-10-21T10:00:00Z', precedent: 2, resetUtc, maintenant: new Date('2026-10-21T13:30:00Z') });
+    assert.equal(g.palier, 2, String(resetUtc));
+    assert.equal(g.detail.perime, true);
+    assert.equal(g.detail.apres_reset, false);
+  }
+});
+
+test('frein : palier 2 sans mesure depuis plus de 36 h et sans remise à zéro passée retombe au palier 1, jamais plus bas', () => {
+  const vieux = (heures, precedent, extra = {}) => calculerFrein({ pct: 100, mesureUtc: '2026-10-19T22:04:00Z', precedent, maintenant: new Date(Date.parse('2026-10-19T22:04:00Z') + heures * 3.6e6), ...extra });
+  const r = vieux(37, 2);
+  assert.equal(r.palier, 1);
+  assert.equal(r.detail.plafonne, true);
+  assert.match(r.detail.raison, /36 h sans mesure/);
+  assert.equal(vieux(36, 2).palier, 2, 'pile 36 h : encore gardé');
+  assert.equal(vieux(40, 1).palier, 1, 'le palier 1 n’est pas touché');
+  assert.equal(vieux(40, 1).detail.plafonne, false);
+  assert.equal(vieux(40, 'normal').palier, 'normal');
+  // Une remise à zéro passée prime sur le plafond : normal, pas palier 1.
+  assert.equal(vieux(40, 2, { resetUtc: '2026-10-20T12:00:00Z' }).palier, 'normal');
+});
+
+test('frein : l’alerte du script dit la remise à zéro passée', () => {
+  const f = calculerFrein({ pct: 100, mesureUtc: '2026-10-19T22:04:00Z', precedent: 2, resetUtc: '2026-10-21T12:00:00Z', maintenant: new Date('2026-10-21T12:30:00Z') });
+  assert.match(calculer(releve(sorte()), { frein: f }).frein, /normal/);
+  assert.equal(calculer(releve(sorte()), { frein: f }).frein_detail.apres_reset, true);
 });
 
 test('frein : aucun relevé exploitable = palier précédent, sinon normal MAIS marqué inconnu', () => {

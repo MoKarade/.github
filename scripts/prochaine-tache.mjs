@@ -67,8 +67,11 @@ const TIERS = {
 
 // Frein de quota : LE seul endroit où régler les seuils (en % du quota hebdomadaire). Palier 1 dès `seuil1`, palier 2 dès `seuil2` ;
 // on ne redescend d'un palier que `hysteresis` points sous son seuil (évite d'osciller autour de 80 %) ; un relevé de plus de
-// `perimeHeures` heures n'est plus une mesure : on garde le dernier palier connu.
-export const FREIN = { seuil1: 80, seuil2: 90, hysteresis: 2, perimeHeures: 3 };
+// `perimeHeures` heures n'est plus une mesure : on garde le dernier palier connu. Deux gardes empêchent qu'une mesure morte coince le frein
+// pour toujours (panne de quota du 19-21/10/2026 : la tâche « Quota-Claude » du PC s'est arrêtée avec le quota, le palier 2 est resté après
+// la remise à zéro) : `apresResetMin` minutes après le `reset_utc` de la mesure, celle-ci date de la semaine précédente et ne dit plus rien ;
+// `perimeMaxHeures` heures sans mesure, le palier 2 retombe au palier 1 (jamais plus bas sans mesure ni remise à zéro).
+export const FREIN = { seuil1: 80, seuil2: 90, hysteresis: 2, perimeHeures: 3, perimeMaxHeures: 36, apresResetMin: 15 };
 
 // Frein par rythme (MoKarade/.github#198, décision de Marc 17/10/2026 « 3b ») : un seuil fixe ne distingue pas une nuit calme (+1 point en 9 h)
 // d'une journée à +2 points/h. On projette le quota hebdomadaire jusqu'à sa remise à zéro : projection = quota + rythme des `fenetreHeures`
@@ -113,6 +116,8 @@ export function projeter({ historique, resetUtc, pct, mesure, regle = FREIN_RYTH
  *   @param basDepuis date (ISO) depuis laquelle la projection est sous `projectionBas`, lue dans le calcul précédent
  * Rend { palier: 'normal'|1|2, detail }. Jamais un faux « normal » : relevé absent ou périmé = dernier palier connu, dit tel quel ;
  * sans relevé ni palier précédent, `normal` MAIS `detail.inconnu` vaut true (ce n'est pas une mesure).
+ * Exceptions dites tel quel dans `detail` : mesure d'avant la remise à zéro (`apres_reset`, palier normal) et palier 2 sans mesure depuis
+ * plus de `perimeMaxHeures` heures (`plafonne`, palier 1).
  */
 export function calculerFrein({ pct, mesureUtc, precedent, historique, resetUtc, basDepuis, maintenant = new Date(), seuils = FREIN, regle = FREIN_RYTHME } = {}) {
   const seuilDe = (niveau) => (niveau === 2 ? seuils.seuil2 : seuils.seuil1);
@@ -122,13 +127,20 @@ export function calculerFrein({ pct, mesureUtc, precedent, historique, resetUtc,
   const ageHeures = valide ? (maintenant.getTime() - mesure) / 3.6e6 : null;
   const perime = !valide || ageHeures > seuils.perimeHeures;
   const inconnu = perime && precedent === undefined && !valide;
+  // La mesure date d'avant la remise à zéro hebdomadaire annoncée par elle-même, passée depuis `apresResetMin` minutes : c'est le quota de la
+  // semaine précédente. À la remise à zéro le quota est à zéro, donc normal ; la première mesure fraîche reprend la main.
+  const resetMs = Date.parse(resetUtc);
+  const apresReset = valide && Number.isFinite(resetMs) && mesure < resetMs && maintenant.getTime() >= resetMs + seuils.apresResetMin * 60_000;
+  const plafonne = !apresReset && perime && valide && avant === 2 && ageHeures > seuils.perimeMaxHeures;
   // Hybride (choix recommandé au 17/10/2026) : le rythme ne joue qu'à partir de `seuil1` (80 %) ; en dessous, mode normal des seuils.
   // Rejeu des mesures du 16-17/10 : la projection dépassait 95 % même à 63 % de quota, ce qui freinait plus que les seuils d'origine.
-  const proj = !perime && valide && pct >= seuils.seuil1 ? projeter({ historique, resetUtc, pct, mesure, regle }) : null;
+  const proj = !perime && !apresReset && valide && pct >= seuils.seuil1 ? projeter({ historique, resetUtc, pct, mesure, regle }) : null;
   let niveau;
   let bas = null;
   let tenue = false;
-  if (perime && precedent !== undefined) niveau = avant;
+  if (apresReset) niveau = 0;
+  else if (plafonne) niveau = 1;
+  else if (perime && precedent !== undefined) niveau = avant;
   else if (!valide) niveau = 0;
   else if (proj) {
     // Frein par rythme. Secours : au seuil 2 le palier 2 s'impose, quelle que soit la projection ; il ne se quitte que sous (seuil - hystérésis).
@@ -153,6 +165,8 @@ export function calculerFrein({ pct, mesureUtc, precedent, historique, resetUtc,
   const arrondi = (x) => Math.round(x * 10) / 10;
   const rythme = proj ? `rythme ${arrondi(proj.rythme)} point/h sur ${proj.fenetre_h} h × ${arrondi(proj.heures)} h restantes = ${Math.round(proj.projection)} % projetés à la remise à zéro` : '';
   const raison = inconnu ? 'aucun relevé de quota ni palier précédent : palier normal par défaut, ce n’est pas une mesure'
+    : apresReset ? `remise à zéro du ${resetUtc} passée : le relevé (${quota}) date de la semaine précédente, palier normal en attendant la prochaine mesure`
+    : plafonne ? `quota périmé depuis ${Math.round(ageHeures)} h (${quota}), plus de ${seuils.perimeMaxHeures} h sans mesure ni remise à zéro : palier 1 au lieu de 2 (la tâche de mesure est probablement arrêtée)`
     : perime ? `quota périmé (${quota}${valide ? `, ${Math.round(ageHeures * 10) / 10} h` : ''}) : dernier palier connu gardé`
     : proj ? (niveau === 0 ? `quota à ${pct} % : ${rythme} : rien ne change`
       : tenue ? `quota à ${pct} % : ${rythme}, sous ${regle.projectionBas} % depuis ${Math.round((maintenant.getTime() - Date.parse(bas)) / 60_000)} min sur ${regle.leveeMin} : palier ${libelleDe(niveau)} gardé`
@@ -163,7 +177,8 @@ export function calculerFrein({ pct, mesureUtc, precedent, historique, resetUtc,
     palier: libelleDe(niveau),
     detail: {
       pct: valide ? pct : null, mesure_utc: valide ? mesureUtc : null, age_heures: valide ? Math.round(ageHeures * 10) / 10 : null, perime, inconnu, precedent: libelleDe(avant),
-      seuils: { palier1: seuils.seuil1, palier2: seuils.seuil2, hysteresis: seuils.hysteresis, perime_heures: seuils.perimeHeures },
+      seuils: { palier1: seuils.seuil1, palier2: seuils.seuil2, hysteresis: seuils.hysteresis, perime_heures: seuils.perimeHeures, perime_max_heures: seuils.perimeMaxHeures, apres_reset_min: seuils.apresResetMin },
+      apres_reset: apresReset, plafonne,
       mode: proj ? 'rythme' : 'seuils',
       rythme_pt_h: proj ? arrondi(proj.rythme) : null, heures_restantes: proj ? arrondi(proj.heures) : null, projection_pct: proj ? Math.round(proj.projection) : null,
       bas_depuis: bas, raison,
