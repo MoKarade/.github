@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
-import { DEPOTS_FILET, annulerSignalements, dateQuebec, evaluerFilet, evaluerOublis, evaluerQuotidien, grouperOublis, lancerFilet, ligneOubli, motifDesOublis, motifDuFilet, reveiller, tour, tourOublis, tourQuotidien, tourLiens, LIENS_PAR_TOUR, tourJules, evaluerFile, motifDeLaFile, tourFile, versionDuCode, MODULES_VERSION } from './filet-pc.mjs';
+import { DEPOTS_FILET, annulerSignalements, dateQuebec, evaluerFilet, evaluerOublis, evaluerQuotaMort, evaluerQuotidien, grouperOublis, lancerFilet, ligneOubli, motifDesOublis, motifDuFilet, motifDuQuota, reveiller, tour, tourOublis, tourQuota, tourQuotidien, tourLiens, LIENS_PAR_TOUR, tourJules, evaluerFile, motifDeLaFile, tourFile, versionDuCode, MODULES_VERSION } from './filet-pc.mjs';
 
 const T0 = new Date('2026-10-17T18:00:00Z');
 const apres = (min, base = T0) => new Date(base.getTime() + min * 60_000);
@@ -315,6 +315,68 @@ test('oublis : le tour envoie le réveil, garde l’état ; un échec n’enregi
   writeFileSync(fichierProchaines, JSON.stringify(avecOublis(GESTE, apres(20))));
   assert.match(tourOublis({ fichierProchaines, fichierEtat, executer: true, maintenant: apres(20), lancer: () => assert.fail('pas de second réveil') }), /rien/);
   assert.equal(JSON.parse(readFileSync(fichierEtat, 'utf8')).signale['a#1'] !== undefined, true);
+});
+
+// Panne de la mesure du quota du 19-21/10/2026 (.github#337) : la tâche « Quota-Claude » s'est arrêtée 38 h sans qu'aucun réveil ne parte.
+const quotaMesure = (heures, maintenant = T0, extra = {}) => ({ calcule_le: iso(maintenant), frein: 'normal', frein_detail: { perime: heures > 3, age_heures: heures, ...extra }, depots: [] });
+
+test('quota : mesure de 7 h, un réveil au texte exact', () => {
+  const r = evaluerQuotaMort({ prochaines: quotaMesure(7), maintenant: T0 });
+  assert.deepEqual(r.reveils, [{ heures: 7 }]);
+  assert.equal(motifDuQuota(r.reveils), 'RÉACTEUR : quota Claude non mesuré depuis 7 h (tâche Quota-Claude du PC arrêtée ?)');
+  assert.equal(r.etat.signale, iso(T0));
+});
+
+test('quota : sans aucune mesure, un réveil sans durée inventée', () => {
+  const r = evaluerQuotaMort({ prochaines: quotaMesure(null, T0, { perime: true, age_heures: null }), maintenant: T0 });
+  assert.equal(r.reveils.length, 1);
+  assert.equal(motifDuQuota(r.reveils), 'RÉACTEUR : quota Claude non mesuré du tout (tâche Quota-Claude du PC arrêtée ?)');
+});
+
+test('quota : mesure de 5 h, mesure fraîche ou frein_detail absent : rien', () => {
+  for (const p of [quotaMesure(5), quotaMesure(0.5), { calcule_le: iso(T0), depots: [] }]) {
+    assert.deepEqual(evaluerQuotaMort({ prochaines: p, maintenant: T0 }).reveils, []);
+  }
+});
+
+test('quota : mort après la remise à zéro aussi (apres_reset ne dispense pas de mesurer)', () => {
+  assert.equal(evaluerQuotaMort({ prochaines: quotaMesure(38, T0, { apres_reset: true }), maintenant: T0 }).reveils.length, 1);
+});
+
+test('quota : un seul réveil par 24 h, puis un autre ; une mesure fraîche efface le signalement', () => {
+  const r1 = evaluerQuotaMort({ prochaines: quotaMesure(7), maintenant: T0 });
+  const r2 = evaluerQuotaMort({ prochaines: quotaMesure(30, apres(23 * 60), {}), etat: r1.etat, maintenant: apres(23 * 60) });
+  assert.deepEqual(r2.reveils, []);
+  assert.match(r2.raison, /moins de 24 h/);
+  const r3 = evaluerQuotaMort({ prochaines: quotaMesure(31, apres(25 * 60)), etat: r2.etat, maintenant: apres(25 * 60) });
+  assert.equal(r3.reveils.length, 1);
+  const frais = evaluerQuotaMort({ prochaines: quotaMesure(1, apres(60)), etat: r1.etat, maintenant: apres(60) });
+  assert.equal(frais.etat.signale, null);
+  assert.equal(evaluerQuotaMort({ prochaines: quotaMesure(8, apres(120)), etat: frais.etat, maintenant: apres(120) }).reveils.length, 1, 'nouvelle panne : réveil tout de suite');
+});
+
+test('quota : prochaines.json périmé ou sans date : rien, le signalement est gardé', () => {
+  const signale = iso(T0);
+  const vieux = evaluerQuotaMort({ prochaines: quotaMesure(40, T0), etat: { signale }, maintenant: apres(31) });
+  assert.deepEqual(vieux.reveils, []);
+  assert.equal(vieux.etat.signale, signale);
+  assert.deepEqual(evaluerQuotaMort({ prochaines: { frein_detail: { perime: true, age_heures: 40 } }, maintenant: T0 }).reveils, []);
+});
+
+test('quota : le tour envoie le réveil ; un échec n’enregistre rien et le tour suivant réessaie ; à blanc rien', () => {
+  const dossier = mkdtempSync(join(tmpdir(), 'quota-'));
+  const fichierProchaines = join(dossier, 'prochaines.json');
+  const fichierEtat = join(dossier, 'etat.json');
+  writeFileSync(fichierProchaines, JSON.stringify(quotaMesure(38)));
+  assert.match(tourQuota({ fichierProchaines, fichierEtat, aBlanc: true, maintenant: T0, lancer: () => assert.fail('à blanc') }), /à blanc, réveil prévu : RÉACTEUR : quota Claude non mesuré depuis 38 h/);
+  assert.match(tourQuota({ fichierProchaines, fichierEtat, executer: true, maintenant: T0, lancer: () => { throw new Error('gh KO'); } }), /ÉCHEC du réveil/);
+  const appels = [];
+  assert.match(tourQuota({ fichierProchaines, fichierEtat, executer: true, maintenant: apres(10), lancer: (cmd, args) => appels.push([cmd, args]) }), /réveil envoyé/);
+  assert.equal(appels.length, 1);
+  assert.ok(appels[0][1].some((a) => a.startsWith('texte=RÉACTEUR : quota Claude non mesuré depuis 38 h')));
+  writeFileSync(fichierProchaines, JSON.stringify(quotaMesure(38, apres(20))));
+  assert.match(tourQuota({ fichierProchaines, fichierEtat, executer: true, maintenant: apres(20), lancer: () => assert.fail('pas de second réveil') }), /rien/);
+  assert.match(tourQuota({ fichierProchaines: join(dossier, 'absent.json'), fichierEtat, maintenant: T0 }), /illisible/);
 });
 
 test('oublis : à blanc, rien n’est envoyé ni enregistré', () => {
