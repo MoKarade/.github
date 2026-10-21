@@ -1,12 +1,15 @@
 #!/usr/bin/env node
-// Capacité d'un dépôt : DEUX travaux en même temps, sur des fichiers disjoints (décision de Marc, 21/10/2026, option 2 :
-// « plusieurs fils sur un même projet en même temps »). Un travail est une tâche `en-cours` ou `jules`, ou la PR ouverte d'une tâche.
+// Capacité d'un dépôt : UN travail à la fois (décision de Marc, 21/10/2026 20:00Z, « 124 » : économiser le quota Claude). Entre 13:21Z et 20:00Z ce même
+// jour, DEUX travaux pouvaient avancer ensemble sur des fichiers disjoints (option 2 : « plusieurs fils sur un même projet en même temps ») : toute la
+// mécanique reste en place et se rouvre en changeant `PLACES_PAR_DEPOT` (les tests de parallélisme tournent à deux places, `places-deux.mjs`).
+// Un travail est une tâche `en-cours` ou `jules`, ou la PR ouverte d'une tâche.
 // Ce module ne fait que des fonctions pures, partagées par `prochaine-tache.mjs` (la file), `jules-auto.mjs` (Jules prend la 2e place)
 // et testées sans réseau : lire les fichiers qu'une tâche déclare, et dire si deux travaux peuvent avancer ensemble.
 //
 // Règle du doute : un travail dont les fichiers ne sont pas déclarés (ou illisibles) n'est compatible avec RIEN. Dans le doute, un seul.
 
-export const PLACES_PAR_DEPOT = 2;
+// `PLACES_ENV` ne sert qu'aux tests (`places-deux.mjs`) ; en production la valeur est celle de la décision de Marc.
+export const PLACES_PAR_DEPOT = Number(process.env.PLACES_ENV) || 1;
 
 // Journaux que presque chaque PR touche (la doc touchée se met à jour dans la MÊME PR) : ils ne rendent pas deux travaux incompatibles,
 // un conflit de texte s'y règle en fusionnant la base. Même sort pour les deux index que chaque tâche complète (21/10/2026, demande de JobAI : cinq tâches

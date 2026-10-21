@@ -1,3 +1,4 @@
+import './places-deux.mjs';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';

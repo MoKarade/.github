@@ -1,3 +1,4 @@
+import './places-deux.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluerJules, choisirPourJules, confierAJules, section, fichiersPermis, FICHIERS_MAX, FOIS_MAX } from './jules-auto.mjs';
