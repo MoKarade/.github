@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
-import { DEPOTS_FILET, annulerSignalements, dateQuebec, evaluerFilet, evaluerOublis, evaluerQuotaMort, evaluerQuotidien, grouperOublis, lancerFilet, ligneOubli, motifDesOublis, motifDuFilet, motifDuQuota, reveiller, tour, tourOublis, tourQuota, tourQuotidien, tourLiens, LIENS_PAR_TOUR, tourJules, evaluerFile, motifDeLaFile, tourFile, versionDuCode, MODULES_VERSION } from './filet-pc.mjs';
+import { DEPOTS_FILET, annulerSignalements, dateQuebec, evaluerFilet, evaluerOublis, evaluerQuotaMort, evaluerQuotidien, grouperOublis, lancerFilet, ligneOubli, motifDesOublis, motifDuFilet, motifDuQuota, reveiller, tour, tourOublis, tourQuota, tourQuotidien, tourLiens, LIENS_PAR_TOUR, tourJules, evaluerFile, motifDeLaFile, tourFile, versionDuCode, MODULES_VERSION, tourAcceptationMarquee } from './filet-pc.mjs';
 
 const T0 = new Date('2026-10-17T18:00:00Z');
 const apres = (min, base = T0) => new Date(base.getTime() + min * 60_000);
@@ -586,8 +586,8 @@ test('tourFile : à blanc ne touche à rien ; une erreur GitHub se dit sans fair
 
 test('versionDuCode : le sha git de chaque fichier, comme git hash-object ; un fichier absent est dit « absent »', () => {
   const ligne = versionDuCode((nom) => { if (nom === 'jules-auto') throw new Error('absent'); return Buffer.from('abc'); });
-  assert.match(ligne, /^code : filet-pc f2ba8f8, jules-suivi f2ba8f8, jules-marquage f2ba8f8, jules-gabarit f2ba8f8, jules-auto absent, fichiers-touches f2ba8f8$/);
-  assert.equal(MODULES_VERSION.length, 6);
+  assert.match(ligne, /^code : filet-pc f2ba8f8, jules-suivi f2ba8f8, jules-marquage f2ba8f8, jules-gabarit f2ba8f8, jules-auto absent, fichiers-touches f2ba8f8, acceptation-marquage f2ba8f8$/);
+  assert.equal(MODULES_VERSION.length, 7);
   // les vrais fichiers de ce dépôt sont tous lisibles
   assert.doesNotMatch(versionDuCode(), /absent/);
 });
@@ -598,4 +598,24 @@ test('deux places par dépôt : un dépôt partiel (une place libre, une tâche 
   assert.equal(r.tous.length, 1);
   assert.deepEqual(rejouer([depotPartiel('MoKarade/JobAI', undefined)].map((d) => ({ ...d, suivante: null })), 60).tous, []);
   assert.deepEqual(rejouer([depotOccupe('MoKarade/JobAI')], 60).tous, []);
+});
+
+test('tourAcceptationMarquee : écrit la ligne sur la tâche éligible, dit « non appliqué » à blanc, et une erreur GitHub se dit sans lever', () => {
+  const corps = '**Avant** : a\n\n**Après** : b\n\n**Fini quand** : `node --test scripts/x.test.mjs` est vert.\n\n**Fichiers touchés** :\n- `scripts/x.mjs`\n\n**Attend** : aucune\n';
+  const issues = [{ number: 7, title: 'Trier', body: corps, labels: [{ name: 'niveau:tâche' }], updated_at: 'u' }];
+  const patches = [];
+  const gh = (methode, chemin, charge) => {
+    if (methode === 'GET' && chemin.includes('/issues?')) return issues;
+    if (methode === 'GET') return issues[0];
+    patches.push(charge.body);
+    return {};
+  };
+  const blanc = tourAcceptationMarquee({ executer: true, aBlanc: true, gh, depots: ['MoKarade/CarAI'] });
+  assert.match(blanc, /^acceptation-marquage : 1 écrite\(s\) \(CarAI#7\) \(non appliqué\)$/);
+  assert.equal(patches.length, 0);
+  const vrai = tourAcceptationMarquee({ executer: true, gh, depots: ['MoKarade/CarAI'] });
+  assert.match(vrai, /^acceptation-marquage : 1 écrite\(s\) \(CarAI#7\)$/);
+  assert.match(patches[0], /\*\*Acceptation automatique\*\* : oui/);
+  const ko = tourAcceptationMarquee({ executer: true, gh: () => { throw new Error('réseau coupé'); }, depots: ['MoKarade/CarAI'] });
+  assert.match(ko, /^acceptation-marquage : 0 écrite\(s\), ÉCHEC CarAI \(réseau coupé\)$/);
 });
