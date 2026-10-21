@@ -13,7 +13,8 @@ name: Sécurité (workflow commun)
 #
 # Trois contrôles, trois jobs :
 #   - secrets : gitleaks sur tous les commits de la PR (ou du push) ; rouge si un secret y est.
-#   - osv     : OSV-Scanner sur le fichier de verrouillage npm ; rouge si une faille connue y est.
+#   - osv     : OSV-Scanner sur le fichier de verrouillage npm ; rouge si une faille connue y est. Dépôt public : l'action Docker ;
+#             dépôt privé : le même outil en binaire vérifié (le robot du PC n'a pas Docker).
 #             Un risque accepté s'écrit dans un `osv-scanner.toml` du dépôt (ignore + raison + date).
 #   - codeql  : analyse statique du code ; dépôt PUBLIC seulement (privé : sauté, GitHub l'exige payant).
 # Toutes les actions sont épinglées par empreinte SHA (jamais `@v4`). Les versions sont dans les
@@ -100,11 +101,27 @@ jobs:
           fi
 
       - name: Analyser les dépendances
-        if: steps.verrou.outputs.present == 'true'
+        if: steps.verrou.outputs.present == 'true' && github.event.repository.visibility == 'public'
         uses: google/osv-scanner-action/osv-scanner-action@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
         with:
           scan-args: |-
             --lockfile=${{ inputs.dossier-verrou }}/package-lock.json
+
+      # Dépôt privé : le robot du PC n'a pas Docker, or l'action ci-dessus en est une. Même outil, même version (2.7.0),
+      # en binaire dont la somme SHA-256 est vérifiée ; il rend 1 s'il trouve une faille, comme l'action.
+      - name: Analyser les dépendances (binaire, dépôt privé)
+        if: steps.verrou.outputs.present == 'true' && github.event.repository.visibility != 'public'
+        env:
+          OSV_VERSION: 2.7.0
+          OSV_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+          DOSSIER: ${{ inputs.dossier-verrou }}
+        run: |
+          set -euo pipefail
+          curl -sSfL -o "$RUNNER_TEMP/osv-scanner" \
+            "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SHA256}  $RUNNER_TEMP/osv-scanner" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+          "$RUNNER_TEMP/osv-scanner" scan source --lockfile="${DOSSIER}/package-lock.json"
 
   codeql:
     name: Analyse du code (CodeQL)
