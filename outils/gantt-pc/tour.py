@@ -42,6 +42,17 @@ def age_mesure_min():
     except (OSError, ValueError, KeyError, TypeError): return None
 def lire(f):
     with open(D + f, encoding='utf-8') as fh: return json.load(fh)
+def marque(f):
+    try:
+        with open(D + f, encoding='utf-8') as fh: return fh.read().strip() or None
+    except OSError: return None
+def plein_force(fid, deja, econome):
+    # I2 (.github#116) : la dernière mesure a vu des écarts entre le relevé et GitHub (par exemple une PR liée perdue par un relevé léger). Un relevé plein relit tout et
+    # les corrige : le prochain tour en fait un, UNE fois par mesure (`deja` = la mesure déjà traitée), sauf au tour économe (quota entamé). Rend le `calcule_le` de la mesure, ou None.
+    if econome or not isinstance(fid, dict): return None
+    ecarts = (fid.get('i2') or {}).get('ecarts')
+    calcule = fid.get('calcule_le')
+    return calcule if ecarts and calcule and calcule != deja else None
 
 
 def lancer(cmd, log, delai, ajout=False):
@@ -79,15 +90,21 @@ def releve(econome=False, quota_complet=True, drive=None):
         rep = ' · ' + (queue('.refresh-reponses.log', 240) or 'réponses : sans sortie')
     # 1. relevé GitHub
     mode = 'plein'
+    corrige = None
     try:
         recent = age_min('.dernier-plein') is not None and age_min('.dernier-plein') < 60
         if (recent or econome) and lire('backlog.json').get('v', 0) >= 10: mode = 'leger'
     except (OSError, ValueError): pass
+    try: corrige = plein_force(lire('fiabilite.json'), marque('.corrige-i2'), econome)
+    except (OSError, ValueError): pass
+    if corrige and mode == 'leger': mode = 'plein (écarts I2)'
     args = [PY, 'fetch.py', '--sans-quota'] + (['--leger'] if mode == 'leger' else [])
     if lancer(args, '.refresh-fetch.log', 900) != 0:
         if mode == 'leger' and lancer([PY, 'fetch.py', '--sans-quota'], '.refresh-fetch.log', 900) == 0: mode = 'plein (léger en échec)'
         else: return 1, f'ÉCHEC {maintenant()} relevé GitHub ({mode}) : {queue(".refresh-fetch.log")}'
     if mode.startswith('plein'): touche('.dernier-plein')
+    if corrige and mode.startswith('plein'):      # traité même si le plein était déjà prévu : la mesure suivante dira si les écarts demeurent
+        with open(D + '.corrige-i2', 'w', encoding='utf-8') as fh: fh.write(corrige)
     rapide = econome or (age_min('.dernier-quota-plein') is not None and age_min('.dernier-quota-plein') < 55)
     # un échec de quota.py ne bloque pas le relevé, mais il se DIT dans etat.json : ignoré en silence, il a laissé le Drive sans quota.json
     # (et le frein de quota sans pourcentage) sans que rien ne le montre depuis le cloud (.github#188)
