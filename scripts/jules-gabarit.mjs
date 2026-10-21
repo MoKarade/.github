@@ -16,7 +16,7 @@
 
 import { evaluerJules, section, fichiersPermis, SECTIONS_REQUISES, FICHIERS_MAX, FICHIER_ECRAN, CHEMINS_INTERDITS, exclueParDecision } from './jules-auto.mjs';
 import { tachesCitees } from './jules-suivi.mjs';
-import { ETIQUETTE, MENTION_MCP, dependanceOuverte } from './jules-marquage.mjs';
+import { ETIQUETTE, MENTION_MCP, dependanceOuverte, aLigneAttend } from './jules-marquage.mjs';
 
 const ORG = 'MoKarade';
 export const MARQUEUR = '<!-- gabarit-auto -->';
@@ -164,6 +164,7 @@ function preparer({ depot, court, tache, gh }) {
   const corps = tache.body ?? '';
   const titre = tache.title ?? '';
   if (MENTION_MCP.test(corps) || /\bmcp\b/i.test(titre)) return refus('outils MCP : réservés à Claude (décision de Marc du 19/10/2026)');
+  if (!aLigneAttend(corps)) return refus('ligne « **Attend** » absente : à écrire par le fil de la tâche (sans elle, la file l\'écarte et Jules ne la verrait jamais)');
   const fond = ['Avant', 'Après', 'Fini quand'].map((t) => section(corps, t) ?? '').join('\n');
   const base = MENTION_BASE.exec(`${titre}\n${fond}`.replace(/`[^`\n]*`/g, ' ')); // hors identifiants de code (`colonnes-pc`)
   if (base) return refus(`« ${base[0]} » : base de données, secrets et authentification restent à Claude`);

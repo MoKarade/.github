@@ -299,3 +299,11 @@ test('montée de dépendance : le préfixe de l\'app (web/ chez BatchChef) est r
   assert.match(ecritures(g.appels)[0].corps.body, /- `web\/package\.json`\n- `web\/package-lock\.json`/);
   assert.match(ecritures(g.appels)[0].corps.body, /`cd web && npm audit --omit=dev`/);
 });
+
+test('sans ligne « Attend » : refus dit, rien n\'est écrit (CarAI#50, 21/10/2026 : réservée mais écartée de la file)', () => {
+  const g = github({ issues: [tache(31, { body: CORPS().replace(/\*\*Attend\*\* : [^\n]*\n/, '') })] });
+  const r = lancer(g);
+  assert.deepEqual(r.completees, []);
+  assert.match(r.refusees[0].raison, /ligne « \*\*Attend\*\* » absente/);
+  assert.equal(ecritures(g.appels).length, 0);
+});
