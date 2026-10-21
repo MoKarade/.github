@@ -371,9 +371,9 @@ Constat (relevé du 14 au 21/10/2026, 544 PR fusionnées, rapport `commun/rappor
 
 **Ce que ça ne change pas.** Toute autre tâche suit le §10 : un fil prouve, au plus 1 h après le déploiement. Un refus de l'acceptation automatique ne coûte rien : rien n'est écrit, le Coordinateur est réveillé comme avant. Un échec de l'API est un avertissement, jamais un job rouge. Pour retirer la règle : enlever l'appel dans `decider` (`reveil-reacteur.mjs`).
 
-**Réglage par dépôt** : le `reacteur.yml` de chacun donne à son job `reveiller` les droits `issues: write` et `deployments: read` et passe `deploiement` et `workflows-deploiement` (les mêmes valeurs que son job `preuve`). Sans ces droits : avertissement, et un fil prouve.
+**Réglage par dépôt** : le `reacteur.yml` de chacun donne à son job `reveiller` les droits `issues: write`, `pull-requests: write` (le commentaire de la PR ; sans lui l'acceptation reste valable, l'échec se lit dans le journal du job) et `deployments: read` et passe `deploiement` et `workflows-deploiement` (les mêmes valeurs que son job `preuve`). Sans ces droits : avertissement, et un fil prouve.
 
-**État au 21/10/2026** : les droits sont posés dans les dix dépôts (neuf PR de la phase 2 et MoKarade/.github#399 pour ce dépôt et pour `reveil-reacteur.yml`). Premier essai réel : MoKarade/.github#402.
+**État au 21/10/2026** : les droits sont posés dans les dix dépôts (neuf PR de la phase 2 et MoKarade/.github#399 pour ce dépôt et pour `reveil-reacteur.yml`). Premier essai réel : MoKarade/.github#402, accepté seul le 21/10/2026 à la fusion de #415 (deux défauts corrigés avant : #412, #415). `pull-requests: write` (oui de Marc, 21/10/2026, carte du fil « Fusion rapide ») : MoKarade/.github#418, un appelant par dépôt (neuf PR fusionnées) puis `reveil-reacteur.yml` et le `reacteur.yml` de ce dépôt.
 
 ## 11. Retour en arrière (automatique)
 
