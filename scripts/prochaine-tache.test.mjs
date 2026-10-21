@@ -7,6 +7,20 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { calculer, choisirSuivantes, couloirsDe, fichiersAbsents, FICHIERS_OBLIGATOIRES, analyserAttentes, liensManquants, indexer, ATTENTE, ATTEND_OBLIGATOIRE, attendAbsent, calculerFrein, permiseParFrein, freinDepuisFichiers, FREIN, ECARTS_ETIQUETTE } from './prochaine-tache.mjs';
 
+test('une alerte du PC (« Entretien du PC », « sur le PC ») ne gèle pas la file : listée dans incidents_pc, la suivante reste proposée', () => {
+  for (const titre of ['Entretien du PC : rouge le 21-10', 'Gemini en panne sur le PC']) {
+    const r = calculer(releve(depot('a', [tache(1)], { incidents: [{ n: 312, t: titre, url: 'u' }] })));
+    assert.equal(etat(r).statut, 'libre', titre);
+    assert.equal(suivante(r), 'a#1', titre);
+    assert.deepEqual(etat(r).incidents, [], titre);
+    assert.deepEqual(etat(r).incidents_pc.map((i) => i.n), [312], titre);
+  }
+  // une panne de production reste bloquante, même à côté d'une alerte du PC
+  const mixte = calculer(releve(depot('a', [tache(1)], { incidents: [{ n: 312, t: 'Entretien du PC : rouge le 21-10', url: 'u' }, { n: 50, t: 'Production en panne', url: 'u' }] })));
+  assert.equal(etat(mixte).statut, 'incident');
+  assert.deepEqual(etat(mixte).incidents.map((i) => i.n), [50]);
+});
+
 // Un relevé en mémoire : données fictives, aucun réseau. Même forme que backlog.json (fetch.py).
 const tache = (n, o = {}) => ({
   n, title: `Tâche ${n}`, lvl: 'tâche', labels: ['niveau:tâche', ...(o.labels ?? [])], state: o.state ?? 'open',

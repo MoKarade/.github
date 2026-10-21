@@ -10,6 +10,7 @@
 //   I4 accord file/agents (mesuré depuis `--depuis-i4`, par défaut `--depuis` : la date où la boucle du Gantt est fiable ; un lancement sur
 //      une file de plus de 40 min est listé dans `perimes`) : une tâche lancée était-elle la `suivante` de `prochaines.json` au dernier calcul avant son
 //      lancement ? Les `suivante` de chaque calcul sont gardées dans `snapshots` (à chaque tour de 10 min par `--snapshot-seulement`, sans refaire la mesure).
+//      Une tâche NÉE après le dernier calcul, quand ce calcul n'annonçait aucune suivante, n'a écarté aucune annonce : elle est listée dans `hors_file`, ni accord ni écart.
 // L'historique n'est JAMAIS remis à zéro : `consecutifs_a_zero` compte les relevés de queue avec I1 = I2 = 0.
 // Fonctions pures d'un côté (`mesurer`, `ajouterAHistorique`), I/O de l'autre (`lireVivant`, `main` avec `gh api`).
 import { execFileSync } from 'node:child_process';
@@ -25,6 +26,9 @@ export const BORNE_RELEVE = '2026-10-15T00:00:00Z'; // fetch.py ne lit que les i
 export const SEUIL_PRISE_H = 3;
 export const TOLERANCE_PRISE_MIN = 10; // `en-cours` peut être posé jusqu'à 10 min après l'ouverture de la PR (balayage par événement, MoKarade/.github#157)
 export const CIBLE_RELEVES = 20;
+// I4 ne juge pas l'avant des règles d'aujourd'hui : file à une place, incident du PC qui gelait `.github` (28 lancements « (incident) »), tâches nées et lancées dans la
+// même minute. `--depuis-i4` ne descend jamais sous cette date (tour.py, sur le PC, passe encore 2026-10-16) ; l'historique et les anciens relevés ne sont pas touchés.
+export const DEPUIS_I4_PLANCHER = '2026-10-21T18:00:00Z';
 const FENETRE_LANCEMENT_MIN = 60;
 export const SEUIL_PERIME_MIN = 40; // au-delà, la file qui a servi au lancement était périmée (la routine l'ignore aussi)
 const BRANCHES_IGNOREES = new Set(['claude/boite-reacteur']);
@@ -162,6 +166,7 @@ function mesurerI4(releve, snapshots, depuis) {
   let nonEvaluables = 0;
   const perimes = [];
   const apresLiberations = [];
+  const horsFile = [];
   for (const depot of releve.repos) {
     const vus = (snapshots[minuscule(depot.repo)] ?? []).slice().sort((a, b) => (a.asof < b.asof ? -1 : 1));
     for (const n of Object.values(depot.nodes).filter((x) => x.lvl === 'tâche' && x.start && x.start >= depuis && x.start <= releve.asof)) {
@@ -170,13 +175,14 @@ function mesurerI4(releve, snapshots, depuis) {
       if (!avant) { nonEvaluables += 1; continue; }
       const age = Math.round(heures(n.start, avant.asof) * 60);
       if (age > SEUIL_PERIME_MIN) perimes.push({ ref: r, lance: n.start, calcul: avant.asof, age_min: age });
+      if (!avant.suivante && !(avant.suivantes ?? []).length && n.created && Date.parse(n.created) > Date.parse(avant.asof)) { horsFile.push({ ref: r, lance: n.start, calcul: avant.asof, creee: n.created }); continue; }
       if (avant.suivante === r || (avant.suivantes ?? []).includes(r)) accords += 1;
       else if (apresLiberation(avant, r, depot, n.start)) { accords += 1; apresLiberations.push({ ref: r, lance: n.start, calcul: avant.asof }); }
       else ecarts.push({ ref: r, lance: n.start, annoncee: avant.suivante ?? `(${avant.statut})`, calcul: avant.asof });
     }
   }
   const lancements = accords + ecarts.length;
-  return { lancements, accords, taux: lancements ? accords / lancements : null, ecarts, non_evaluables: nonEvaluables, perimes, accords_apres_liberation: apresLiberations };
+  return { lancements, accords, taux: lancements ? accords / lancements : null, ecarts, non_evaluables: nonEvaluables, perimes, accords_apres_liberation: apresLiberations, hors_file: horsFile };
 }
 
 /** Garde la `suivante` de ce calcul de prochaines.json, 72 h au plus, par dépôt. */
@@ -230,7 +236,7 @@ export function ajouterAHistorique(precedent, mesure, calculeLe) {
   const ligne = {
     releve: mesure.releve_asof, mesure: calculeLe, i1: mesure.i1.defauts, i2: mesure.i2.ecarts.length, i2_verifiees: mesure.i2.verifiees,
     i3_non_tracees: mesure.i3.prise.non_tracees.length, i3_sans_tache: mesure.i3.sans_tache.length, i3_branches: mesure.i3.branches_sans_tache.length,
-    i3_prises_sans_pr: mesure.i3.prises_sans_pr.length, i4_lancements: mesure.i4.lancements, i4_accords: mesure.i4.accords, a_zero: nul(mesure),
+    i3_prises_sans_pr: mesure.i3.prises_sans_pr.length, i4_lancements: mesure.i4.lancements, i4_accords: mesure.i4.accords, i4_hors_file: mesure.i4.hors_file.length, a_zero: nul(mesure),
   };
   const historique = [...(precedent?.historique ?? []).filter((l) => l.releve !== ligne.releve), ligne].sort((a, b) => (a.releve < b.releve ? -1 : 1)).slice(-2000);
   let consecutifs = 0;
@@ -330,7 +336,7 @@ function main() {
   const prochaines = o.prochaines && existsSync(o.prochaines) ? JSON.parse(readFileSync(o.prochaines, 'utf8')) : null;
   const precedent = existsSync(o.sortie) ? JSON.parse(readFileSync(o.sortie, 'utf8')) : null;
   const vivant = lireVivant(apiGh, releve.repos.map((d) => d.repo), { asof: releve.asof, depuis: o.depuis });
-  const mesure = mesurer({ releve, vivant, prochaines, snapshots: precedent?.snapshots ?? {}, depuis: o.depuis, depuisI4: o.depuisI4 ?? o.depuis, defauts: Number.isFinite(o.defauts) ? o.defauts : null, seuilPriseH: o.seuilPriseH });
+  const mesure = mesurer({ releve, vivant, prochaines, snapshots: precedent?.snapshots ?? {}, depuis: o.depuis, depuisI4: o.depuisI4 && o.depuisI4 > DEPUIS_I4_PLANCHER ? o.depuisI4 : DEPUIS_I4_PLANCHER, defauts: Number.isFinite(o.defauts) ? o.defauts : null, seuilPriseH: o.seuilPriseH });
   const fichier = ajouterAHistorique(precedent, mesure, new Date().toISOString());
   writeFileSync(`${o.sortie}.tmp`, `${JSON.stringify(fichier, null, 1)}\n`);
   renameSync(`${o.sortie}.tmp`, o.sortie);

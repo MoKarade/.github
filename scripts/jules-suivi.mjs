@@ -141,6 +141,16 @@ export function prDeLaTache(n, prs) {
   return { fusionnee: fusionnee ?? null, ouverte: ouverte ?? null };
 }
 
+/**
+ * Retire une étiquette. Déjà partie (le garde-fou de preuve les retire à la fermeture validée, en même temps que ce tour : 404 « Label does not exist ») = rien à faire.
+ * Sans cette tolérance, le 21/10/2026 15:52Z, la tâche CarAI#50 acceptée seule faisait écrire « jules-suivi : ÉCHEC CarAI » dans etat.json et le tour sautait la fermeture.
+ */
+export function retirerEtiquette(gh, depot, numero, etiquette) {
+  try { gh('DELETE', `repos/${depot}/issues/${numero}/labels/${encodeURIComponent(etiquette)}`); } catch (e) {
+    if (!/\b404\b|Not Found|does not exist/i.test(`${e?.stderr ?? ''} ${e?.message ?? ''}`)) throw e;
+  }
+}
+
 /** Étiquettes d'avancement qui n'ont plus de sens sur une tâche FERMÉE (le garde-fou de preuve retire les siennes à la fermeture validée ; une fermeture à la main ou par une PR les laisse). */
 export const ETIQUETTES_FERMEES = ['en-cours', 'jules', 'faisable-jules', 'preuve-attendue'];
 
@@ -155,7 +165,7 @@ export function menageFermees({ depot, gh, aBlanc = false }) {
   const retirees = [];
   for (const i of fermees) {
     for (const l of noms(i.labels).filter((x) => ETIQUETTES_FERMEES.includes(x))) {
-      if (!aBlanc) gh('DELETE', `repos/${depot}/issues/${i.number}/labels/${encodeURIComponent(l)}`);
+      if (!aBlanc) retirerEtiquette(gh, depot, i.number, l);
       retirees.push(`${court}#${i.number}:${l}`);
     }
   }
@@ -202,7 +212,7 @@ export function suivreDepot({ depot, gh, etat = {}, maintenant = new Date(), aBl
       if (e.ok) {
         if (!aBlanc) {
           gh('POST', `repos/${depot}/issues/${t.number}/comments`, { body: commentaireAcceptee({ pr: fusionnee, fichiers, controles: e.controles, date, deploiement, captures }) });
-          for (const l of ETIQUETTES_A_RETIRER) if (noms(t.labels).includes(l)) gh('DELETE', `repos/${depot}/issues/${t.number}/labels/${encodeURIComponent(l)}`);
+          for (const l of ETIQUETTES_A_RETIRER) if (noms(t.labels).includes(l)) retirerEtiquette(gh, depot, t.number, l);
           gh('PATCH', `repos/${depot}/issues/${t.number}`, { state: 'closed', state_reason: 'completed' });
         }
         sortie.acceptees.push(ref);
