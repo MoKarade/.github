@@ -182,12 +182,12 @@ const heuresEntre = (depuis, maintenant) => (maintenant.getTime() - Date.parse(d
 // `jules.google.com/task/`, ou le compte `google-labs-jules[bot]` a commenté la PR.
 export const ETIQUETTE_PAR_JULES = 'par-jules';
 export const COULEUR_PAR_JULES = '9b7be0';
-export const PIED_JULES = 'jules.google.com/task/';
+export const PIED_JULES = /jules\.google\.com\/task\/\d/; // avec le numéro : le critère écrit en toutes lettres (sans numéro) dans le corps d'une PR de Claude n'en est pas un
 export const BOT_JULES = 'google-labs-jules[bot]';
 export const COMMENTAIRES_MAX = 20; // PR ouvertes dont on lit les commentaires par dépôt et par tour
 
 /** Le corps d'une PR porte-t-il le pied de page de Jules ? (Le commentaire du bot se lit à part, par `marquerParJules`.) */
-export const piedDeJules = (corps) => String(corps ?? '').includes(PIED_JULES);
+export const piedDeJules = (corps) => PIED_JULES.test(String(corps ?? ''));
 
 /**
  * Pose `par-jules` sur les PR de Jules d'un dépôt : les ouvertes et les trente dernières fermées. Le corps suffit pour toutes ; le commentaire du bot

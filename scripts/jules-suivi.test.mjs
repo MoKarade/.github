@@ -337,6 +337,7 @@ const PIED = '*PR created automatically by Jules for task [123](https://jules.go
 test('piedDeJules : le lien de tâche de Jules, nulle part ailleurs', () => {
   assert.equal(piedDeJules(`corps\n\n${PIED}`), true);
   assert.equal(piedDeJules('Tâche : #12'), false);
+  assert.equal(piedDeJules('critère : le corps porte `jules.google.com/task/`, ou le bot a commenté'), false, 'le critère cité sans numéro de tâche (PR de Claude .github#425, #434)');
   assert.equal(piedDeJules(null), false);
 });
 
