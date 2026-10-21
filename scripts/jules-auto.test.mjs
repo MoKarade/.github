@@ -197,3 +197,59 @@ test('confierAJules attend une PR ouverte, sauf celles des robots et la boîte d
   assert.equal(confierAJules({ repo: 'app-template', n: 7 }, boite.gh).statut, 'confiee');
   assert.match(confierAJules({ repo: 'CarAI', n: 7 }, ghFactice({ prs: [{ number: 58, user: { login: 'MoKarade', type: 'User' } }] }).gh).raison, /PR #58/, 'la boîte n’est exclue que dans app-template');
 });
+
+// ---- Deux places par dépôt (décision de Marc, 21/10/2026) --------------------------------------------------------------------------------
+
+test('choisirPourJules prend la 2e place d’un dépôt dont l’unique travail déclare des fichiers disjoints', () => {
+  const lire = (repo, n) => ({ state: 'open', labels: ['faisable-jules'], body: corps(n, repo) }); // fichiers : lib/format.test.ts
+  const occupe = (fichiers, motif = 'en-cours') => ({ occupe_par: [{ ref: 'carai#2', motif, fichiers }] });
+  const r = (extra) => choisirPourJules(prochaines(depot('carai', [{ ref: 'carai#7', n: 7 }], extra)), lire);
+  assert.deepEqual(r(occupe(['app/page.tsx'])).choix.map((c) => c.ref), ['carai#7']);
+  assert.deepEqual(r(occupe(['app/page.tsx'], 'pr-ouverte')).choix.map((c) => c.ref), ['carai#7']);
+  const commun = r(occupe(['lib/']));
+  assert.deepEqual(commun.choix, []);
+  assert.match(commun.pasPretes[0].raisons[0], /place partagée refusée : fichier-commun:lib\/ ~ lib\/format\.test\.ts avec carai#2/);
+  assert.deepEqual(r(occupe(null)).choix, [], 'fichiers du travail inconnus : un seul');
+  assert.deepEqual(r(occupe([])).choix, []);
+});
+
+test('choisirPourJules : deux travaux en cours ou un incident gardent le dépôt, même à fichiers disjoints', () => {
+  const lire = () => { throw new Error('ne doit pas être lu'); };
+  const deux = [{ ref: 'carai#2', motif: 'en-cours', fichiers: ['a/x.ts'] }, { ref: 'carai#3', motif: 'jules', fichiers: ['b/y.ts'] }];
+  assert.deepEqual(choisirPourJules(prochaines(depot('carai', [{ ref: 'carai#7', n: 7 }], { occupe_par: deux })), lire).choix, []);
+  assert.deepEqual(choisirPourJules(prochaines(depot('carai', [{ ref: 'carai#7', n: 7 }], { occupe_par: [deux[0]], incidents: [{ n: 9 }] })), lire).choix, []);
+});
+
+test('choisirPourJules : la 2e place compte dans le plafond des trois Jules', () => {
+  const lire = (repo, n) => ({ state: 'open', labels: ['faisable-jules'], body: corps(n, repo) });
+  const jules = (x) => depot(x, [{ ref: `${x}#9`, n: 9 }], { occupe_par: [{ ref: `${x}#1`, motif: 'en-cours', fichiers: ['z/z.ts'] }] });
+  const r = choisirPourJules(prochaines(jules('a'), jules('b'), jules('c'), jules('d')), lire);
+  assert.equal(r.choix.length, 3);
+});
+
+test('confierAJules prend la 2e place si l’autre travail déclare des fichiers disjoints, rien sinon', () => {
+  const travail = (corpsIssue, extra = {}) => ({ number: 3, body: corpsIssue, ...extra });
+  const issue = { state: 'open', labels: [], body: corps(7, 'carai') }; // lib/format.test.ts
+  const disjoint = ghFactice({ issue, ouvertes: { 'en-cours': [travail('**Fichiers touchés** :\n- `app/page.tsx`')] } });
+  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, disjoint.gh).statut, 'confiee');
+  assert.equal(disjoint.appels.some(([m]) => m === 'POST'), true);
+  const commun = ghFactice({ issue, ouvertes: { 'en-cours': [travail('**Fichiers permis** :\n- `lib/format.test.ts`')] } });
+  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, commun.gh).raison, /dépôt occupé \(issue #3 en cours : fichier-commun:lib\/format\.test\.ts\)/);
+  const inconnu = ghFactice({ issue, ouvertes: { jules: [travail('sans gabarit')] } });
+  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, inconnu.gh).raison, /fichiers-inconnus/);
+  assert.equal(inconnu.appels.some(([m]) => m === 'POST'), false);
+});
+
+test('confierAJules : deux travaux = dépôt occupé ; une tâche et sa PR comptent pour un ; une PR seule a des fichiers inconnus', () => {
+  const issue = { state: 'open', labels: [], body: corps(7, 'carai') };
+  const a = { number: 3, body: '**Fichiers touchés** :\n- `app/a.ts`' };
+  const b = { number: 4, body: '**Fichiers touchés** :\n- `app/b.ts`' };
+  const deux = ghFactice({ issue, ouvertes: { 'en-cours': [a], jules: [b] } });
+  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, deux.gh).raison, /2 travaux sur 2 places/);
+  const prDeA = { number: 20, user: { login: 'MoKarade', type: 'User' }, body: 'Tâche : #3' };
+  const une = ghFactice({ issue, ouvertes: { 'en-cours': [a] }, prs: [prDeA] });
+  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, une.gh).statut, 'confiee', 'la PR de #3 ne compte pas en plus');
+  const prSeule = { number: 21, user: { login: 'MoKarade', type: 'User' }, body: 'sans tâche' };
+  const avecPr = ghFactice({ issue, ouvertes: { 'en-cours': [a] }, prs: [prDeA, prSeule] });
+  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, avecPr.gh).raison, /2 travaux sur 2 places/);
+});
