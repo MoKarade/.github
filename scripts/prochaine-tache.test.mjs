@@ -5,13 +5,13 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { calculer, choisirSuivantes, couloirsDe, analyserAttentes, liensManquants, indexer, ATTENTE, ATTEND_OBLIGATOIRE, attendAbsent, calculerFrein, permiseParFrein, freinDepuisFichiers, FREIN, ECARTS_ETIQUETTE } from './prochaine-tache.mjs';
+import { calculer, choisirSuivantes, couloirsDe, fichiersAbsents, FICHIERS_OBLIGATOIRES, analyserAttentes, liensManquants, indexer, ATTENTE, ATTEND_OBLIGATOIRE, attendAbsent, calculerFrein, permiseParFrein, freinDepuisFichiers, FREIN, ECARTS_ETIQUETTE } from './prochaine-tache.mjs';
 
 // Un relevé en mémoire : données fictives, aucun réseau. Même forme que backlog.json (fetch.py).
 const tache = (n, o = {}) => ({
   n, title: `Tâche ${n}`, lvl: 'tâche', labels: ['niveau:tâche', ...(o.labels ?? [])], state: o.state ?? 'open',
   url: `https://github.com/exemple/depot/issues/${n}`, kids: [], start: o.start ?? null, closed: o.closed ?? null,
-  pr: o.pr ?? null, deps: o.deps ?? [], ...(o.fpl ? { fpl: o.fpl } : {}), ...('attend_ligne' in o ? { attend_ligne: o.attend_ligne } : {}), ...(o.created ? { created: o.created } : {}), fq: 'fq' in o ? o.fq : 'une commande de test passe',
+  pr: o.pr ?? null, deps: o.deps ?? [], ...(o.fpl ? { fpl: o.fpl } : {}), ...('attend_ligne' in o ? { attend_ligne: o.attend_ligne } : {}), ...('ft_ligne' in o ? { ft_ligne: o.ft_ligne } : {}), ...(o.created ? { created: o.created } : {}), fq: 'fq' in o ? o.fq : 'une commande de test passe',
 });
 const mission = (n, kids, labels = []) => ({ n, title: `Mission ${n}`, lvl: 'mission', labels: ['niveau:mission', ...labels], state: 'open', kids, deps: [] });
 const chantier = (n, kids, labels = []) => ({ n, title: `Chantier ${n}`, lvl: 'chantier', labels: ['niveau:chantier', ...labels], state: 'open', kids, deps: [] });
@@ -1050,4 +1050,61 @@ test('capacité : une PR fusionnée ou fermée ne fournit pas de fichiers au tra
     tache(2, { fpl: ['y/b.ts'] }),
   ]))));
   assert.equal(d.occupe_par[0].fichiers, null);
+});
+
+// --- Ligne « Fichiers touchés » obligatoire (tâche #360) ---
+const NEUVE = '2026-10-22T10:00:00Z';
+const apresGrace = (creee, h) => new Date(Date.parse(creee) + h * 3_600_000);
+const releveFichiers = (o) => releve(depot('a', [mission(1, [2]), tache(2, o)]));
+
+test('fichiers-absents : sans le champ ft_ligne (ancien relevé du PC), aucune règle', () => {
+  const r = calculer(releveFichiers({ created: NEUVE }), { maintenant: new Date('2026-10-22T20:00:00Z') });
+  assert.equal(suivante(r), 'a#2');
+  assert.deepEqual(r.fichiers_absents, []);
+});
+
+test('fichiers-absents : une tâche neuve a 3 h pour que le filet écrive sa ligne, puis elle est invalide et réveille comme un oubli', () => {
+  const o = { ft_ligne: false, attend_ligne: true, created: NEUVE };
+  const tot = calculer(releveFichiers(o), { maintenant: apresGrace(NEUVE, 2) });
+  assert.equal(suivante(tot), 'a#2', 'pendant la grâce la tâche reste prenable');
+  assert.deepEqual(tot.fichiers_absents, [{ ref: 'a#2', applique: false }]);
+  const tard = calculer(releveFichiers(o), { maintenant: apresGrace(NEUVE, 3) });
+  assert.equal(suivante(tard), null);
+  assert.equal(etat(tard).exclues['a#2'].code, 'fichiers-absents');
+  assert.equal(tard.etats['a#2'].etat, 'invalide');
+  assert.equal(tard.etats['a#2'].cause, 'fichiers-absents');
+  assert.deepEqual(tard.oubliees.map((x) => [x.ref, x.cause]), [['a#2', 'fichiers-absents']]);
+  assert.deepEqual(tard.fichiers_absents, [{ ref: 'a#2', applique: true }]);
+});
+
+test('fichiers-absents : une tâche plus ancienne que l’activation a 48 h, quel que soit son âge', () => {
+  const o = { ft_ligne: false, attend_ligne: true, created: '2026-10-10T12:00:00Z' };
+  const avant = calculer(releveFichiers(o), { maintenant: new Date(Date.parse(FICHIERS_OBLIGATOIRES.DES_TOUTES) - 60_000) });
+  assert.equal(suivante(avant), 'a#2');
+  assert.deepEqual(avant.fichiers_absents, [{ ref: 'a#2', applique: false }]);
+  const apres = calculer(releveFichiers(o), { maintenant: new Date(FICHIERS_OBLIGATOIRES.DES_TOUTES) });
+  assert.equal(suivante(apres), null);
+  assert.equal(apres.etats['a#2'].cause, 'fichiers-absents');
+});
+
+test('fichiers-absents : la ligne écrite (estimée, déclarée ou « non déterminés ») suffit', () => {
+  const tard = new Date(FICHIERS_OBLIGATOIRES.DES_TOUTES);
+  assert.equal(fichiersAbsents({ lvl: 'tâche', ft_ligne: true, created: NEUVE }, tard), false);
+  assert.equal(fichiersAbsents({ lvl: 'tâche', ft_ligne: false, created: NEUVE }, tard), true);
+});
+
+test('fichiers-absents : exemptés — geste de Marc, preuve attendue, travail commencé, PR ouverte ; ni mission ni tâche fermée listées', () => {
+  const tard = new Date(FICHIERS_OBLIGATOIRES.DES_TOUTES);
+  const sans = { lvl: 'tâche', ft_ligne: false, created: NEUVE, labels: [] };
+  for (const e of ['qui:marc', 'preuve-attendue', 'en-cours', 'jules']) assert.equal(fichiersAbsents({ ...sans, labels: [e] }, tard), false, e);
+  assert.equal(fichiersAbsents({ ...sans, pr: { n: 9, state: 'open' } }, tard), false);
+  assert.equal(fichiersAbsents({ ...sans, pr: { n: 9, state: 'closed' } }, tard), true);
+  assert.equal(fichiersAbsents({ ...sans, lvl: 'mission' }, tard), false);
+  const r = calculer(releve(depot('a', [
+    { ...mission(1, [2, 3, 4]), ft_ligne: false },
+    tache(2, { ft_ligne: false, created: NEUVE }),
+    tache(3, { ft_ligne: false, created: NEUVE, state: 'closed', closed: '2026-10-22T11:00:00Z' }),
+    tache(4, { ft_ligne: false, created: NEUVE, labels: ['qui:marc'] }),
+  ])), { maintenant: tard });
+  assert.deepEqual(r.fichiers_absents.map((x) => x.ref), ['a#2']);
 });
