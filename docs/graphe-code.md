@@ -35,6 +35,7 @@
 - Workflow commun `.github/workflows/graphe.yml` (`workflow_call`, entrées `runner` et `depot`) : coche le dépôt appelant, `scripts/graphe.sh update`, `graphe-page.py` de CE dépôt, puis téléverse l'artefact Actions `graphe` (retention 90 jours) à chaque push sur la branche par défaut. L'appel est un job séparé, jamais un check requis ; exemple en tête du fichier.
 - Contenu : `graph.html` (page filtrée, moins de 1 Mo, vérifié par le job) et `meta.json` : `{depot, sha, genereLe, noeuds, aretes, filtre}`, `filtre` = `fichiers-v1;max400` (changer `VERSION_FILTRE` quand les règles de tri changent). Aucun commentaire de code, TODO ni contenu : seulement des chemins de fichiers et des dossiers.
 - Zéro coût : dépôt privé = robot du PC (`[self-hosted, pc-marc]`), jamais `ubuntu-latest`. `graph.html` charge `vis-network@9.1.6` depuis unpkg ; Hubperso le remplace par sa copie auto-hébergée.
+- Appelants (tâche .github#327, 21/10/2026) : chaque dépôt a un `.github/workflows/graphe.yml` (`.github/workflows/graphe-publier.yml` ici) qui appelle le workflow commun à chaque push sur sa branche par défaut. Le script de tri est récupéré APRÈS `graphe.sh update`, pour que ses fichiers n'entrent pas dans le graphe du dépôt appelant. Première preuve : app-template, run 39649987473, artefact de 8 835 octets (20 fichiers, 20 liens).
 
 ## Retour arrière
 Supprimer `.claude/settings.json` (ou ses trois blocs), `.mcp.json`, `scripts/graphe.sh`, `.graphifyignore`, les deux lignes de `.gitignore` et la ligne de `CLAUDE.md`. Rien d'autre n'a été modifié.
