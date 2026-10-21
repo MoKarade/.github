@@ -31,6 +31,11 @@
 - Rendu vérifié en Chromium sans tête à 1280 et 390 px (JobAI, CarAI) ; le panneau passe sous le graphe à moins de 700 px. Le moteur `.gs` de DriveAI n'est pas dans cette page (second graphe, `graphe.sh moteur`).
 - `graph.html` charge `vis-network` depuis unpkg : une page publiée doit le servir ou l'accepter. Les requêtes (`query`, `affected`) gardent le graphe complet.
 
+## Artefact `graphe` pour Hubperso (tâche MoKarade/.github#374, 21/10/2026)
+- Workflow commun `.github/workflows/graphe.yml` (`workflow_call`, entrées `runner` et `depot`) : coche le dépôt appelant, `scripts/graphe.sh update`, `graphe-page.py` de CE dépôt, puis téléverse l'artefact Actions `graphe` (retention 90 jours) à chaque push sur la branche par défaut. L'appel est un job séparé, jamais un check requis ; exemple en tête du fichier.
+- Contenu : `graph.html` (page filtrée, moins de 1 Mo, vérifié par le job) et `meta.json` : `{depot, sha, genereLe, noeuds, aretes, filtre}`, `filtre` = `fichiers-v1;max400` (changer `VERSION_FILTRE` quand les règles de tri changent). Aucun commentaire de code, TODO ni contenu : seulement des chemins de fichiers et des dossiers.
+- Zéro coût : dépôt privé = robot du PC (`[self-hosted, pc-marc]`), jamais `ubuntu-latest`. `graph.html` charge `vis-network@9.1.6` depuis unpkg ; Hubperso le remplace par sa copie auto-hébergée.
+
 ## Retour arrière
 Supprimer `.claude/settings.json` (ou ses trois blocs), `.mcp.json`, `scripts/graphe.sh`, `.graphifyignore`, les deux lignes de `.gitignore` et la ligne de `CLAUDE.md`. Rien d'autre n'a été modifié.
 

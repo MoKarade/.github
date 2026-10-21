@@ -6,10 +6,12 @@ symboles par fichier (un lien = au moins un appel ou import entre deux fichiers)
 Local, 0 jeton, 0 réseau. Les requêtes (query, affected) restent sur le graphe complet.
 
 Usage : graphe-page.py GRAPH_JSON SORTIE_HTML [--max-noeuds 400] [--titre "Graphe du dépôt"]
+        [--meta SORTIE_JSON --depot MoKarade/nom --sha SHA]   (meta.json lu par Hubperso, voir docs/graphe-code.md)
 Interprète : celui du venv de graphe.sh (networkx et graphify y sont installés).
 """
 import argparse
 import collections
+import datetime
 import json
 import re
 import sys
@@ -22,6 +24,7 @@ ECARTES = re.compile(
 )
 # Dossiers à deux niveaux : un seul niveau les noierait dans un bloc unique.
 RACINES_LARGES = {"app", "lib", "components", "src", "services", "utils", "hooks", "store", "web", "api", "mcp"}
+VERSION_FILTRE = "fichiers-v1"  # à changer quand les règles de tri changent : Hubperso l'affiche
 MOBILE = (
     "<style>html, body { height: 100%; }"
     "@media (max-width: 700px) { body { flex-direction: column; } #graph { min-height: 0; }"
@@ -40,6 +43,18 @@ def dossier(chemin):
 def etiquette(chemin):
     parties = chemin.split("/")
     return "/".join(parties[-2:]) if len(parties) > 1 else chemin
+
+
+def meta(depot, sha, genere_le, noeuds, aretes, max_noeuds):
+    """Contenu de meta.json, ce que Hubperso lit à côté de graph.html."""
+    return {
+        "depot": depot,
+        "sha": sha,
+        "genereLe": genere_le,
+        "noeuds": noeuds,
+        "aretes": aretes,
+        "filtre": f"{VERSION_FILTRE};max{max_noeuds}",
+    }
 
 
 def reduire(g, max_noeuds=400):
@@ -81,6 +96,9 @@ def main():
     ap.add_argument("sortie")
     ap.add_argument("--max-noeuds", type=int, default=400)
     ap.add_argument("--titre", default="Graphe du dépôt")
+    ap.add_argument("--meta", help="écrit meta.json à cet endroit")
+    ap.add_argument("--depot", default="")
+    ap.add_argument("--sha", default="")
     a = ap.parse_args()
 
     import networkx as nx
@@ -105,6 +123,10 @@ def main():
     html = re.sub(r"<title>.*?</title>", f"<title>{a.titre}</title>", html, count=1, flags=re.S)
     html = html.replace("</head>", MOBILE + "</head>", 1)
     open(a.sortie, "w", encoding="utf-8").write(html)
+    if a.meta:
+        maintenant = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        m = meta(a.depot, a.sha, maintenant, len(gardes), len(liens), a.max_noeuds)
+        open(a.meta, "w", encoding="utf-8").write(json.dumps(m, ensure_ascii=False, indent=2) + "\n")
     print(f"{a.sortie} : {len(gardes)} fichiers, {len(liens)} liens, {len(groupes)} dossiers"
           f" ({total - len(gardes)} fichiers hors page : isolés ou au-delà de {a.max_noeuds})")
     return 0
