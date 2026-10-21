@@ -543,3 +543,33 @@ test('signeLibre : libre, une place libre, rien', () => {
   assert.equal(signeLibre('D', 2), '');
   assert.equal(signeLibre('D', 3), '');
 });
+
+test('PR fusionnée : une tâche acceptée seule le dit dans le réveil et n’a plus de « preuve à poser »', async () => {
+  const { api } = faux({
+    '/repos/MoKarade/JobAI/pulls/7': { body: 'Avant…\nTâche : #115', user: humain },
+    '/repos/MoKarade/JobAI/issues/115': tache({ state: 'closed' }),
+  });
+  const appels = [];
+  const accepter = async (arg) => {
+    appels.push(arg);
+    return { statut: 'acceptee', motifs: [], tache: 115 };
+  };
+  const d = await decider({ api, evt: { type: 'pr_fusionnee', depot: 'MoKarade/JobAI', pr: '7', deploiement: 'aucun', workflows: 'deploy.yml, b.yml' }, accepter });
+  assert.equal(d.motif, 'RÉACTEUR : MoKarade/JobAI libre ; PR #7 fusionnée ; tâche MoKarade/JobAI#115 acceptée seule');
+  assert.equal(d.acceptation.statut, 'acceptee');
+  assert.deepEqual(appels, [{ api, depot: 'MoKarade/JobAI', numeroPr: 7, config: { deploiement: 'aucun', workflows: ['deploy.yml', 'b.yml'] } }]);
+});
+
+test('PR fusionnée : l’acceptation automatique qui échoue ne retarde ni n’empêche le réveil', async () => {
+  const { api } = faux({
+    '/repos/MoKarade/JobAI/pulls/7': { body: 'Avant…\nTâche : #115', user: humain },
+    '/repos/MoKarade/JobAI/issues/115': tache(),
+    '/repos/MoKarade/JobAI/issues/115/comments': [],
+  });
+  const d = await decider({ api, evt: { type: 'pr_fusionnee', depot: 'MoKarade/JobAI', pr: '7' }, accepter: async () => { throw new Error('HTTP 403 sur POST'); } });
+  assert.equal(d.motif, 'RÉACTEUR : MoKarade/JobAI libre ; PR #7 fusionnée ; preuve à poser sur MoKarade/JobAI#115');
+  assert.deepEqual(d.acceptation, { statut: 'erreur', motifs: ['HTTP 403 sur POST'] });
+  // un refus ordinaire (« ignoree ») ne sort pas de la décision
+  const e = await decider({ api, evt: { type: 'pr_fusionnee', depot: 'MoKarade/JobAI', pr: '7' }, accepter: async () => ({ statut: 'ignoree', motifs: ['x'] }) });
+  assert.equal('acceptation' in e, false);
+});
