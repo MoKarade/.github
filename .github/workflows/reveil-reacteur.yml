@@ -8,7 +8,7 @@ name: Réveil du Coordinateur (workflow commun)
 #   reveiller:
 #     needs: preuve
 #     if: <PR fusionnée, CI rouge d'un humain, ou tâche prouvée>
-#     permissions: { contents: read, pull-requests: read, issues: write, checks: read, actions: write, deployments: read }
+#     permissions: { contents: read, pull-requests: write, issues: write, checks: read, actions: write, deployments: read }
 #     uses: MoKarade/.github/.github/workflows/reveil-reacteur.yml@main
 #     secrets: inherit
 #     with:
@@ -17,8 +17,9 @@ name: Réveil du Coordinateur (workflow commun)
 #       ...
 #
 # `pr_fusionnee` tente d'abord l'acceptation automatique de la tâche citée (scripts/acceptation-auto.mjs, cycle de vie §10 ter) : elle
-# écrit sur l'issue et sur la PR et lit les déploiements, donc le `reacteur.yml` appelant doit donner `issues: write` et
-# `deployments: read` (sans eux : un avertissement, jamais un échec, et un fil prouve la tâche comme avant).
+# écrit sur l'issue et sur la PR et lit les déploiements, donc le `reacteur.yml` appelant doit donner `issues: write`,
+# `pull-requests: write` (le commentaire « Fusionnée et acceptée automatiquement » de la PR) et `deployments: read` (sans les
+# deux premiers : un avertissement, jamais un échec, et un fil prouve la tâche comme avant ; MoKarade/.github#418).
 #
 # `pr_ouverte` (PR ouverte, rouverte, sortie du brouillon ou dont le corps change) ne réveille personne : elle lance seulement le
 # commentaire tâche liée, qui marque la tâche citée `en-cours` (MoKarade/.github#157).
@@ -104,7 +105,7 @@ jobs:
     runs-on: ${{ fromJSON(inputs.runner) }}
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: write
       issues: write
       checks: read
       actions: write
