@@ -182,13 +182,12 @@ test('une dépendance ouverte (écrite ou native) ou illisible : pas de complét
   }
 });
 
-test('ne touche pas : déjà complétée (marqueur), déjà réservée, prio:3, en-cours/jules/qui:marc/bloqué, PR ouverte qui la cite, corps déjà complet', () => {
+test('ne touche pas : déjà complétée (marqueur), déjà réservée, en-cours/jules/qui:marc/bloqué, PR ouverte qui la cite, corps déjà complet', () => {
   const complet = CORPS(`${MARQUEUR}\n**Fichiers permis**...`);
   const g = github({
     issues: [
       tache(1, { body: complet }),
       tache(2, { labels: ['niveau:tâche', 'faisable-jules'] }),
-      tache(3, { labels: ['niveau:tâche', 'prio:3'] }),
       tache(4, { labels: ['niveau:tâche', 'en-cours'] }),
       tache(5, { labels: ['niveau:tâche', 'qui:marc'] }),
       tache(6, { labels: ['niveau:tâche', 'bloqué'] }),
@@ -244,4 +243,14 @@ test('écran dans une app privée : refus « écran sans captures possibles », 
   assert.deepEqual(r.completees, []);
   assert.match(r.refusees[0].raison, /écran sans captures possibles/);
   assert.equal(ecritures(g.appels).length, 0);
+});
+
+test('prio:3 est complétée au gabarit (réponse de Marc du 21/10/2026), Hubperso#247 jamais', () => {
+  const g = github({ issues: [tache(3, { labels: ['niveau:tâche', 'prio:3'] })] });
+  assert.deepEqual(lancer(g).completees, ['FinanceAI#3']);
+  const h = github({ issues: [tache(247, { labels: ['niveau:tâche', 'prio:3'] })] });
+  const r = completerDepot({ depot: 'MoKarade/Hubperso', gh: h.gh, etat: {}, maintenant: new Date('2026-10-19T20:00:00Z') });
+  assert.deepEqual(r.completees, []);
+  assert.deepEqual(r.refusees, []);
+  assert.equal(ecritures(h.appels).length, 0);
 });

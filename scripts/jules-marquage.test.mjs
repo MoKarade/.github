@@ -59,12 +59,11 @@ test('une tâche au gabarit complet, libre de dépendances, reçoit faisable-jul
   assert.match(w[1].corps.body, /Réservée à Jules automatiquement/);
 });
 
-test('refus : pas au gabarit, étiquette qui écarte, prio:3, déjà marquée, PR ouverte qui la cite', () => {
+test('refus : pas au gabarit, étiquette qui écarte, déjà marquée, PR ouverte qui la cite', () => {
   const issues = [
     tache(1, [], '**Avant** : x\n'),
     tache(2, ['qui:marc']),
     tache(3, ['bloqué']),
-    tache(4, ['prio:3']),
     tache(5, ['preuve-attendue']),
     tache(6, ['sécurité']),
     tache(8),
@@ -72,7 +71,7 @@ test('refus : pas au gabarit, étiquette qui écarte, prio:3, déjà marquée, P
   const g = github({ issues, prs: [{ number: 50, title: 'test', body: 'Tâche : #8' }] });
   const r = marquerFaisables({ depot: 'MoKarade/JobAI', gh: g.gh });
   assert.deepEqual(r.marquees, []);
-  assert.equal(r.refusees, 6); // `prio:3` n'est même pas évaluée
+  assert.equal(r.refusees, 6);
   assert.equal(ecritures(g.appels).length, 0);
 });
 
@@ -158,4 +157,22 @@ test('retirerPerimees : une tâche déjà confiée (jules, en-cours) ou à dépe
   const g2 = github({ issues: [tache(198, ['faisable-jules'], '**Avant** : x.')] });
   assert.deepEqual(retirerPerimees({ depot: 'MoKarade/JobAI', gh: g2.gh, aBlanc: true }), ['JobAI#198']);
   assert.equal(ecritures(g2.appels).length, 0);
+});
+
+test('prio:3 n’écarte plus le marquage (réponse de Marc du 21/10/2026), sauf Hubperso#247 nommée', () => {
+  const g = github({ issues: [tache(195, ['prio:3'])] });
+  assert.deepEqual(marquerFaisables({ depot: 'MoKarade/JobAI', gh: g.gh }).marquees, ['JobAI#195']);
+  const h = github({ issues: [tache(247, ['prio:3']), tache(248, ['prio:3'])] });
+  const r = marquerFaisables({ depot: 'MoKarade/Hubperso', gh: h.gh });
+  assert.deepEqual(r.marquees, ['Hubperso#248']);
+  assert.equal(r.refusees, 0, 'la tâche exclue par décision n’est pas évaluée, donc pas comptée comme refus');
+  assert.equal(ecritures(h.appels).some((a) => /issues\/247\//.test(a.chemin)), false);
+  // une tâche #247 d’un autre dépôt n’est pas concernée
+  assert.deepEqual(marquerFaisables({ depot: 'MoKarade/JobAI', gh: github({ issues: [tache(247)] }).gh }).marquees, ['JobAI#247']);
+});
+
+test('retirerPerimees retire faisable-jules de Hubperso#247 (exclue par décision), pas des autres', () => {
+  const g = github({ issues: [tache(247, ['faisable-jules', 'prio:3']), tache(248, ['faisable-jules', 'prio:3'])] });
+  const r = retirerPerimees({ depot: 'MoKarade/Hubperso', gh: g.gh });
+  assert.deepEqual(r, ['Hubperso#247']);
 });
