@@ -81,6 +81,9 @@ export function retirerPerimees({ depot, gh, aBlanc = false }) {
  * @param gh     (methode, chemin, corps) -> JSON ou lève
  * @returns {{ marquees: string[], refusees: number, reserve: number }}
  */
+/** La tâche porte-t-elle sa ligne `**Attend**` ? Sans elle, `prochaine-tache.mjs` la sort de la file (« attend-absent ») : la réserver à Jules serait une impasse. */
+export const aLigneAttend = (corps) => String(corps ?? '').split('\n').some((l) => l.startsWith('**Attend**'));
+
 export function marquerFaisables({ depot, gh, aBlanc = false }) {
   const court = depot.replace(`${ORG}/`, '');
   const sortie = { marquees: [], refusees: 0, reserve: 0 };
@@ -98,6 +101,7 @@ export function marquerFaisables({ depot, gh, aBlanc = false }) {
   for (const t of candidates) {
     if (place <= 0) break;
     const verdict = evaluerJules({ repo: court, n: t.number, labels: [...noms(t.labels), ETIQUETTE], body: t.body ?? '' });
+    if (!aLigneAttend(t.body)) { sortie.refusees += 1; continue; } // la ligne s'écrit à la main : rien n'est deviné
     if (!verdict.ok || citees.has(t.number) || MENTION_MCP.test(t.body ?? '') || /\bmcp\b/i.test(t.title ?? '')) { sortie.refusees += 1; continue; }
     if (dependanceOuverte({ depot, court, tache: t, gh }) !== false) { sortie.refusees += 1; continue; } // ouverte ou illisible : rien n'est deviné
     if (!aBlanc) {

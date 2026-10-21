@@ -16,7 +16,7 @@
 
 import { evaluerJules, section, fichiersPermis, SECTIONS_REQUISES, FICHIERS_MAX, FICHIER_ECRAN, CHEMINS_INTERDITS, exclueParDecision } from './jules-auto.mjs';
 import { tachesCitees } from './jules-suivi.mjs';
-import { ETIQUETTE, MENTION_MCP, dependanceOuverte } from './jules-marquage.mjs';
+import { ETIQUETTE, MENTION_MCP, dependanceOuverte, aLigneAttend } from './jules-marquage.mjs';
 
 const ORG = 'MoKarade';
 export const MARQUEUR = '<!-- gabarit-auto -->';
@@ -32,6 +32,11 @@ const FICHIER_TEST = /\.(test|spec)\.[a-z]+$|(^|\/)(tests?|__tests__)\//;
 const MENTION_BASE = /migration|sch[ée]ma|base de donn[ée]es|\bdrizzle\b|\bsql\b|\bsentry\b|\bsecrets?\b|jetons?\b|authentification/i;
 // Du dessin sur une toile publiée n'est pas un changement de fichier : Jules n'a rien à livrer dans le dépôt.
 const MENTION_TOILE = /artifact|\btoile\b|maquette/i;
+// Ce qu'un script peut contrôler dans « Fini quand » : un test, ou `npm audit` (0 vulnérabilité se lit sans jugement).
+const CONTROLE_MECANIQUE = /test|npm audit/i;
+// Une montée de dépendance (alerte Dependabot, `npm audit`) ne cite aucun chemin : ses fichiers sont toujours `package.json` et son lockfile.
+const MONTEE_DEPENDANCE = /mise\s+à\s+jour|mettre\s+à\s+jour|\bmonter\b|montée/i;
+const FICHIERS_DEPENDANCES = ['package.json', 'package-lock.json'];
 const noms = (labels) => (labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
 
 /** Un refus : `memoriser` dit s'il tient tant que le corps de la tâche ne change pas (faux : il dépend de l'extérieur, on relit au prochain tour). */
@@ -106,6 +111,7 @@ export function composerBloc({ n, titre, depot, fichiers, nouveaux = [], manquan
   const test = fichiers.find((f) => FICHIER_TEST.test(f));
   const ecran = fichiers.some((f) => FICHIER_ECRAN.test(f));
   const md = fichiers.some((f) => /\.md$/i.test(f));
+  const dependances = fichiers.some((f) => /(^|\/)package(-lock)?\.json$/.test(f));
   const filtre = test ? (/\/([^/]+)\.(test|spec)\.[a-z]+$/.exec(test)?.[1] ?? '') : '';
   const lancer = (cmd) => (prefixe === 'web/' ? `cd web && ${cmd}` : cmd);
   const type = typeDeCommit(fichiers, titre);
@@ -119,6 +125,7 @@ export function composerBloc({ n, titre, depot, fichiers, nouveaux = [], manquan
       'Modifie seulement les fichiers permis, pour obtenir exactement l\'« Après » et rien d\'autre.',
       test ? `Écris ou complète \`${test}\` pour verrouiller ce que « Fini quand » demande, avec des données fictives seulement.` : null,
       ecran ? 'Prends des captures avant/après avec des données fictives et joins-les à la PR (workflow de captures du dépôt).' : null,
+      dependances ? 'Monte la dépendance visée par une mise à jour mineure ou un correctif (patch) seulement, jamais `npm audit fix --force` ; `npm install` met le lockfile à jour.' : null,
       md ? 'Écris en français, avec tous les accents ; ne touche à aucun mot français existant hors des lignes visées.' : null,
       'Lance les commandes de « Vérifier » et montre leur sortie dans la PR.',
     ].filter(Boolean).map((l, i) => `${i + 1}. ${l}`).join('\n')}`,
@@ -133,6 +140,7 @@ export function composerBloc({ n, titre, depot, fichiers, nouveaux = [], manquan
       filtre ? `\`${lancer(`npm run test -- ${filtre}`)}\`, puis ` : '',
       `\`${lancer('npm run typecheck && npm run test && npm run lint && npm run build')}\``,
       ecran ? `. Lance aussi \`${lancer('npm run test -- tests/theme.test.ts')}\` (couleurs en variables, cibles de 44 px)` : '',
+      dependances ? `. Lance aussi \`${lancer('npm audit --omit=dev')}\` : il doit rendre 0 vulnérabilité` : '',
       '. Montre la sortie dans la PR.',
     ].join('')}`,
     'À citer dans la PR': `**À citer dans la PR** : une ligne \`Tâche : #${n}\` dans le CORPS de la PR, titre \`${type}: ${sujet}\` (préfixe permis : \`${type}:\`).${hubperso ? ' Chaque commit commence par `HORS-BACKLOG:`.' : ''} Corps : Avant / Après / Comment.`,
@@ -156,12 +164,14 @@ function preparer({ depot, court, tache, gh }) {
   const corps = tache.body ?? '';
   const titre = tache.title ?? '';
   if (MENTION_MCP.test(corps) || /\bmcp\b/i.test(titre)) return refus('outils MCP : réservés à Claude (décision de Marc du 19/10/2026)');
+  if (!aLigneAttend(corps)) return refus('ligne « **Attend** » absente : à écrire par le fil de la tâche (sans elle, la file l\'écarte et Jules ne la verrait jamais)');
   const fond = ['Avant', 'Après', 'Fini quand'].map((t) => section(corps, t) ?? '').join('\n');
   const base = MENTION_BASE.exec(`${titre}\n${fond}`.replace(/`[^`\n]*`/g, ' ')); // hors identifiants de code (`colonnes-pc`)
   if (base) return refus(`« ${base[0]} » : base de données, secrets et authentification restent à Claude`);
   const toile = MENTION_TOILE.exec(`${titre}\n${fond}`);
   if (toile) return refus(`« ${toile[0]} » : travail sur une page publiée, pas sur des fichiers du dépôt`);
-  if (!/test/i.test(section(corps, 'Fini quand') ?? '')) return refus('« Fini quand » ne cite aucun test : rien qu\'un script puisse contrôler');
+  if (!CONTROLE_MECANIQUE.test(section(corps, 'Fini quand') ?? '')) return refus('« Fini quand » ne cite aucun test : rien qu\'un script puisse contrôler');
+  const montee = /npm audit/i.test(section(corps, 'Fini quand') ?? '') && MONTEE_DEPENDANCE.test(`${titre}\n${fond}`);
   const manquantes = SECTIONS_REQUISES.filter((t) => (section(corps, t) ?? '').length < 3);
   const absentesDeFond = manquantes.filter((t) => !SECTIONS_DU_BLOC.includes(t));
   if (absentesDeFond.length) return refus(`section de fond à écrire par Claude : ${absentesDeFond.join(', ')}`);
@@ -182,6 +192,10 @@ function preparer({ depot, court, tache, gh }) {
     for (const c of candidats) {
       if (existe(gh, depot, c)) permis.push(c);
       else if (cites.forts.includes(c)) return refus(`${c} cité mais introuvable dans le dépôt`);
+    }
+    if (!permis.length && montee) {
+      permis = FICHIERS_DEPENDANCES.map((f) => `${prefixe}${f}`).filter((f) => existe(gh, depot, f));
+      if (!permis.includes(`${prefixe}package.json`)) return refus(`${prefixe}package.json introuvable : montée de dépendance impossible à cadrer`);
     }
     if (!permis.length) return refus('aucun chemin de fichier existant cité (Avant, Après, Fini quand, Source)');
     if (!permis.some((f) => !FICHIER_TEST.test(f))) return refus('aucun fichier à modifier cité (seulement des tests) : les fichiers de la tâche ne se déduisent pas');
