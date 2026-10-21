@@ -9,6 +9,7 @@
 // - « Fichiers permis » = les chemins en `backticks` cités dans Avant, Après, Fini quand (et Source, sauf les .md) qui EXISTENT dans le dépôt,
 //   plus le fichier de test dérivé du premier fichier de code ;
 // - les autres sections viennent du gabarit (`docs/jules-gabarit-issue.md`), avec les preuves que `evaluerJules` exige pour un écran ou un .md.
+// Sans test dans « Fini quand » (décision de Marc du 21/10/2026, « oui » : le test est écrit par Jules lui-même) : l'étape « écris D'ABORD le test » est ajoutée à « À faire » et le test dérivé du premier fichier de code cité entre dans « Fichiers permis » (un seul test nouveau).
 // Refus : chemin cité introuvable, motif de fichiers (`*`), chemin réservé à Claude cité dans Avant/Après/Fini quand, plus de cinq fichiers,
 // outils MCP, dépendance ouverte ou illisible, section de fond (Avant, Après, Fini quand) absente, ou `evaluerJules` qui dit encore non.
 //
@@ -107,7 +108,7 @@ function typeDeCommit(fichiers, titre) {
  * Le bloc à ajouter au corps : seulement les sections qui manquent (`manquantes`), dans l'ordre du gabarit.
  * @param fichiers  tous les fichiers permis (existants et test dérivé) ; `nouveaux` : ceux qui n'existent pas encore
  */
-export function composerBloc({ n, titre, depot, fichiers, nouveaux = [], manquantes, prefixe = '' }) {
+export function composerBloc({ n, titre, depot, fichiers, nouveaux = [], manquantes, prefixe = '', sansTest = false }) {
   const test = fichiers.find((f) => FICHIER_TEST.test(f));
   const ecran = fichiers.some((f) => FICHIER_ECRAN.test(f));
   const md = fichiers.some((f) => /\.md$/i.test(f));
@@ -123,7 +124,8 @@ export function composerBloc({ n, titre, depot, fichiers, nouveaux = [], manquan
     'À faire': `**À faire** (dans cet ordre) :\n${[
       'Relis « Avant », « Après » et « Fini quand » ci-dessus : ils sont la consigne.',
       'Modifie seulement les fichiers permis, pour obtenir exactement l\'« Après » et rien d\'autre.',
-      test ? `Écris ou complète \`${test}\` pour verrouiller ce que « Fini quand » demande, avec des données fictives seulement.` : null,
+      test && sansTest ? `Écris D'ABORD le test \`${test}\` qui prouve le « Fini quand » (« Fini quand » ne cite aucun test : c'est toi qui l'écris), avec des données fictives seulement ; il doit échouer avant ton changement, puis fais-le passer.` : null,
+      test && !sansTest ? `Écris ou complète \`${test}\` pour verrouiller ce que « Fini quand » demande, avec des données fictives seulement.` : null,
       ecran ? 'Prends des captures avant/après avec des données fictives et joins-les à la PR (workflow de captures du dépôt).' : null,
       dependances ? 'Monte la dépendance visée par une mise à jour mineure ou un correctif (patch) seulement, jamais `npm audit fix --force` ; `npm install` met le lockfile à jour.' : null,
       md ? 'Écris en français, avec tous les accents ; ne touche à aucun mot français existant hors des lignes visées.' : null,
@@ -160,7 +162,7 @@ export function existe(gh, depot, chemin, { dossier = false } = {}) {
 }
 
 /** Décide, pour une tâche, du corps complété ou du refus. Ne modifie rien ; lit le dépôt (existence des fichiers) et les dépendances. */
-function preparer({ depot, court, tache, gh }) {
+export function preparer({ depot, court, tache, gh }) {
   const corps = tache.body ?? '';
   const titre = tache.title ?? '';
   if (MENTION_MCP.test(corps) || /\bmcp\b/i.test(titre)) return refus('outils MCP : réservés à Claude (décision de Marc du 19/10/2026)');
@@ -170,7 +172,8 @@ function preparer({ depot, court, tache, gh }) {
   if (base) return refus(`« ${base[0]} » : base de données, secrets et authentification restent à Claude`);
   const toile = MENTION_TOILE.exec(`${titre}\n${fond}`);
   if (toile) return refus(`« ${toile[0]} » : travail sur une page publiée, pas sur des fichiers du dépôt`);
-  if (!CONTROLE_MECANIQUE.test(section(corps, 'Fini quand') ?? '')) return refus('« Fini quand » ne cite aucun test : rien qu\'un script puisse contrôler');
+  // Décision de Marc du 21/10/2026 (« oui », relayé par le fil Jules) : sans test vérifiable dans « Fini quand », Jules écrit d'abord le test (gratuit).
+  const sansTest = !CONTROLE_MECANIQUE.test(section(corps, 'Fini quand') ?? '');
   const montee = /npm audit/i.test(section(corps, 'Fini quand') ?? '') && MONTEE_DEPENDANCE.test(`${titre}\n${fond}`);
   const manquantes = SECTIONS_REQUISES.filter((t) => (section(corps, t) ?? '').length < 3);
   const absentesDeFond = manquantes.filter((t) => !SECTIONS_DU_BLOC.includes(t));
@@ -182,6 +185,7 @@ function preparer({ depot, court, tache, gh }) {
   const prefixe = PREFIXE_TESTS[court.toLowerCase()] ?? '';
   let permis;
   let nouveaux = [];
+  if (sansTest && !manquantes.includes('Fichiers permis')) return refus('« Fini quand » ne cite aucun test et « Fichiers permis » est déjà écrit : le fil de la tâche y ajoute le test à écrire d\'abord');
   if (manquantes.includes('Fichiers permis')) {
     for (const c of cites.forts) {
       const motif = CHEMINS_INTERDITS.find(([m]) => m.test(c));
@@ -200,6 +204,8 @@ function preparer({ depot, court, tache, gh }) {
     if (!permis.length) return refus('aucun chemin de fichier existant cité (Avant, Après, Fini quand, Source)');
     if (!permis.some((f) => !FICHIER_TEST.test(f))) return refus('aucun fichier à modifier cité (seulement des tests) : les fichiers de la tâche ne se déduisent pas');
     const premierCode = permis.find((f) => FICHIER_CODE.test(f) && !FICHIER_TEST.test(f));
+    if (sansTest && !premierCode) return refus('« Fini quand » ne cite aucun test et aucun fichier de code n\'est cité : le test à écrire ne se dérive pas');
+    if (sansTest && permis.some((f) => FICHIER_TEST.test(f))) return refus('« Fini quand » ne cite aucun test alors qu\'un fichier de test est cité : à clarifier par le fil de la tâche');
     if (premierCode && !permis.some((f) => FICHIER_TEST.test(f))) {
       const test = deriverTest(premierCode, prefixe);
       if (test) {
@@ -213,7 +219,7 @@ function preparer({ depot, court, tache, gh }) {
     permis = fichiersPermis(corps);
   }
 
-  const bloc = composerBloc({ n: tache.number, titre, depot: court, fichiers: permis, nouveaux, manquantes, prefixe });
+  const bloc = composerBloc({ n: tache.number, titre, depot: court, fichiers: permis, nouveaux, manquantes, prefixe, sansTest });
   const nouveauCorps = `${corps.replace(/\s+$/, '')}\n\n${bloc}`;
   const verdict = evaluerJules({ repo: court, n: tache.number, labels: [...noms(tache.labels), ETIQUETTE], body: nouveauCorps });
   if (!verdict.ok) return refus(verdict.raisons.join(' ; '));
