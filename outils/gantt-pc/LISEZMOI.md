@@ -32,8 +32,8 @@ le PC, le relevé tourne sans Claude.
 ## Installer
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File installer.ps1            # trouve seul <lecteur>:\Mon disque\_Gantt
-powershell -ExecutionPolicy Bypass -File installer.ps1 -Drive "G:\Mon disque\_Gantt"
+powershell -ExecutionPolicy Bypass -File installer.ps1            # trouve seul le dossier _Gantt existant sous Mon disque / My Drive (à toute profondeur)
+powershell -ExecutionPolicy Bypass -File installer.ps1 -Drive "<chemin du dossier _Gantt>"
 ```
 
 Il faut Python 3, Node, `gh` connecté au compte de Marc (accès aux dépôts privés) et Git. L'installateur vérifie chacun en le

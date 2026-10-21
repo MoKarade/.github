@@ -86,6 +86,9 @@ def par_jour(evts, jours):
     j = {d: 0 for d in jours}
     for d, _ in evts: j[jour_de(d)] = j.get(jour_de(d), 0) + 1
     return {d: j.get(d, 0) for d in jours}
+# Fenêtre longue (21/10) : la page montre 24 h, 7 j, 1 mois ou 3 mois au choix de Marc, et qui a consommé (dépôt, workflow, tâche).
+# Chaque jauge publie donc ses événements datés sur 92 jours (`evts`, `runs`) ; ce qui manque avant le début des traces n'est pas inventé.
+LONG = 92
 def fenetre24(evts, duree=24):
     """Événements des 24 dernières heures, et les instants où chacun sortira de la fenêtre (une place se libère)."""
     vifs = sorted(d for d, _ in evts if NOW - d <= duree * H)
@@ -135,7 +138,7 @@ def actions():
             mult = 10 if any('macos' in l for l in lab) else 2 if any('windows' in l for l in lab) else 1
             m = math.ceil(sec / 60) * mult
             mins += m; d = jour_de(t(j['started_at'])); par_j[d] = par_j.get(d, 0) + m
-        return key, run['status'], {'r': r, 'm': mins, 'j': par_j, 'c': run['created_at']}
+        return key, run['status'], {'r': r, 'm': mins, 'j': par_j, 'c': run['created_at'], 'w': run.get('name')}
     with ThreadPoolExecutor(8) as ex:
         for key, st, v in ex.map(mesure, todo):
             if st == 'completed': cache['runs'][key] = v          # une exécution en cours est recomptée au relevé suivant, une fois finie
@@ -158,6 +161,8 @@ def actions():
     return {'nom': 'Minutes GitHub Actions', 'unite': 'min', 'periode': 'mois', 'limite': 2000, 'utilise': tot,
             'en_cours': {'runs': len(en_cours), 'min': ec_min},
             'par_jour': {d: par_j.get(d, 0) for d in out['jours']}, 'par_depot': par_depot, 'depots': privees,
+            # chaque exécution mesurée : [début, dépôt, workflow (null si mesurée avant le 21/10), minutes]
+            'runs': sorted([[v['c'], v['r'], v.get('w'), v['m']] for v in cache['runs'].values() if v['m'] and v['c'] >= iso(NOW - LONG * 24 * H)]),
             # tout le mois, jour par jour : la courbe cumulée de la page s'appuie dessus (un jour sans trace = 0 mesuré)
             'par_jour_mois': {jour_de(mois0 + datetime.timedelta(days=i, hours=12)): par_j.get(jour_de(mois0 + datetime.timedelta(days=i, hours=12)), 0)
                               for i in range(0, (min(NOW, mois1) - mois0).days + 1)},
@@ -214,7 +219,7 @@ def vercel():
         if v: cv['commits'].setdefault(r, {})[sha] = v
     for r in lus: cv['derniers'][r] = iso(NOW)
     # oublie ce qui a plus de 8 jours
-    garde = iso(NOW - datetime.timedelta(days=8))
+    garde = iso(NOW - datetime.timedelta(days=LONG))
     for r in list(cv['commits']):
         cv['commits'][r] = {s: v for s, v in cv['commits'][r].items() if v[1] >= garde}
     evts = [(t(v[1]), v[0]) for r in REPOS_VERCEL for v in cv['commits'].get(r, {}).values() if t(v[1]) >= debut and v[0] != 'pending' or (v[0] == 'pending' and t(v[1]) >= debut)]
@@ -230,6 +235,8 @@ def vercel():
     return {'nom': 'Déploiements Vercel', 'unite': 'déploiements', 'periode': 'jour', 'limite': LIMITE_VERCEL_JOUR, 'limite_heure': LIMITE_VERCEL_HEURE,
             'utilise': n24, 'utilise_heure': n1h, 'par_classe': par_classe, 'par_depot': par_depot,
             'par_jour': par_jour(evts, out['jours']), 'par_heure': serie_heures(evts, ('construit', 'ignore', 'annule', 'echec')),
+            # chaque déploiement vu : [instant, dépôt, classe] (historique gardé depuis le 21/10, 48 h avant)
+            'evts': sorted([v[1], r, 'construit' if v[0] == 'pending' else v[0]] for r in REPOS_VERCEL for v in cv['commits'].get(r, {}).values()),
             'mesure': 'mesuré' if not nonlus else 'partiel', 'depots': lus, 'non_lus': nonlus,
             'alerte': f'Au-dessus de {LIMITE_VERCEL_JOUR // 1000} 000 par jour (plafond du plan Pro) alors que Vercel déploie toujours : le plan est peut-être autre. À vérifier dans Vercel > Settings > Billing.' if n24 > LIMITE_VERCEL_JOUR else None,
             'note': 'Chaque déploiement laisse un statut « Vercel » sur son commit : on les lit tous, dépôts publics et privés, file de fusion comprise. « Construit » = build lancé ; « ignoré » = build sauté par l\'étape d\'ignorance (docs, tests). Les branches claude/* ne déploient pas. Recoupé avec la liste de Vercel le 16/10 : 36 déploiements des deux côtés, projet par projet.' + (' Non lus : ' + ', '.join(nonlus) + '.' if nonlus else ''),
@@ -251,10 +258,11 @@ def jules():
     for r in b['repos']:
         for n in r['nodes'].values():
             for a in n.get('jules_at') or ([n['start']] if n.get('jules') and n.get('start') else []):
-                if a and t(a) >= NOW - 8 * 24 * H: evts.append((t(a), r['repo'] + '#' + str(n['n'])))
+                if a and t(a) >= NOW - LONG * 24 * H: evts.append((t(a), r['repo'] + '#' + str(n['n'])))
     n24, libere = fenetre24(evts)
     g = {'nom': 'Jules', 'unite': 'tâches', 'periode': 'jour', 'limite': 100, 'utilise': n24, 'par_jour': par_jour(evts, out['jours']),
          'par_heure': serie_heures(evts), 'libere_a': libere[:20], 'concurrence': 15, 'source_asof': b['asof'],
+         'evts': sorted([iso(d), ref] for d, ref in evts),
          'mesure': 'mesuré',
          'note': 'Heure exacte où l\'étiquette `jules` est posée sur une issue, 24 h glissantes. Une tâche lancée depuis l\'interface de Jules ne laisse aucune trace dans GitHub et n\'est pas comptée : le vrai compteur est dans l\'interface de Jules.',
          'source': 'Google AI Pro : 100 tâches/jour, 15 en parallèle (jules.google/docs/usage-limits)'}
@@ -266,7 +274,7 @@ def jules():
 PUBLICS_GEMINI = None
 def gemini():
     cg = cache.setdefault('gemini', {})
-    debut = NOW - 8 * 24 * H
+    debut = NOW - LONG * 24 * H
     publics = [r for r in REPOS if not prive(r)]        # « rien de privé » : Gemini ne lit que les dépôts publics
     def lister(rl):
         r, lab = rl
@@ -290,12 +298,12 @@ def gemini():
         poses = sorted(e['created_at'] for e in ev if e['event'] == 'labeled' and (e.get('label') or {}).get('name') in ('gemini:fait', 'gemini:echec'))
         return k, {'u': i['updated_at'], 't': poses[-1] if poses else None, 'pr': 'pull_request' in i}
     with ThreadPoolExecutor(8) as ex: evs = list(ex.map(lambda k: _essai(evenements, k), list(termines)))
-    evts, nb_pr = [], 0
+    evts, nb_pr, refs = [], 0, []
     for k, res in zip(termines, evs):
         if isinstance(res, Exception): nonlus.append(k); continue
         k, c = res
         cache['gemini'][k] = c
-        if c['t'] and t(c['t']) >= debut: evts.append((t(c['t']), 'pr' if c['pr'] else 'demande'))
+        if c['t'] and t(c['t']) >= debut: evts.append((t(c['t']), 'pr' if c['pr'] else 'demande')); refs.append([c['t'], k, 'pr' if c['pr'] else 'demande'])
     for k in list(cache['gemini']):
         if k not in termines: del cache['gemini'][k]
     n24, libere = fenetre24(evts)
@@ -303,7 +311,7 @@ def gemini():
         if NOW - d <= 24 * H and c == 'pr': nb_pr += 1
     return {'nom': 'Gemini', 'unite': 'demandes', 'periode': 'jour', 'limite': 15, 'utilise': n24, 'par_jour': par_jour(evts, out['jours']),
             'par_heure': serie_heures(evts), 'libere_a': libere[:20], 'dont_pr': nb_pr, 'dont_demandes': n24 - nb_pr, 'en_attente': len(attente),
-            'reserve_demandes': 5, 'plafond_auto': 10, 'limite_google': 1500, 'non_lus': nonlus,
+            'reserve_demandes': 5, 'plafond_auto': 10, 'limite_google': 1500, 'non_lus': nonlus, 'evts': sorted(refs),
             'mesure': 'mesuré' if not nonlus else 'partiel',
             'note': 'Heure exacte où le script du PC pose `gemini:fait` ou `gemini:echec`, 24 h glissantes, dépôts publics. Plafond maison 15 par 24 h dont 5 gardées aux demandes étiquetées (10 au plus en relecture automatique) ; Google en permet 1 500 par jour à un abonné AI Pro. « En attente » = étiquette `gemini` posée, pas encore traitée. Les jetons consommés ne se lisent pas ici.',
             'source': 'Plafond maison (plans/2026-10-15_integration-gemini.md) ; Google : 1 500/jour, 120/min (developers.google.com/gemini-code-assist/resources/quotas)'}
@@ -329,11 +337,13 @@ def claude():
     pts = h.get('claude', [])
     if d.get('mesure_utc') and not any(p['t'] == d['mesure_utc'] for p in pts):
         pts.append({'t': d['mesure_utc'], 'pct': d['pct'], 'session': (d.get('session') or {}).get('pct')})
-    garde = (NOW - datetime.timedelta(days=21)).strftime('%Y-%m-%dT%H:%MZ')
+    garde = (NOW - datetime.timedelta(days=LONG + 8)).strftime('%Y-%m-%dT%H:%MZ')
     h['claude'] = sorted([p for p in pts if p['t'] >= garde], key=lambda p: p['t'])
     json.dump(h, open(f + '.tmp', 'w'), ensure_ascii=False); os.replace(f + '.tmp', f)
     fin = t(d['reset_utc'])
     g['historique'] = [p for p in h['claude'] if fin - datetime.timedelta(days=7) < t(p['t']) <= fin]
+    # toutes les mesures gardées (plusieurs semaines) : la page montre 1 mois ou 3 mois, remises à zéro comprises
+    g['historique_long'] = [p for p in h['claude'] if t(p['t']) >= NOW - LONG * 24 * H]
     return g
 
 def api():

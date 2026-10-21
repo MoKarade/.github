@@ -23,7 +23,7 @@
 // Fonctions pures d'un côté (`ecran`, `evaluerEligibilite`, `corpsAcceptee`), I/O de l'autre (`accepterApresFusion`, avec `api` injecté :
 // les tests n'ont besoin ni de réseau ni de jeton). Jamais une exception qui ferait rougir le job : l'appelant la rattrape.
 import { evaluer, MARQUEUR_AUTO, servi, traiter as traiterPreuve, verifierDeploiement } from './preuve.mjs';
-import { defautDeLaTache, extraireTaches } from './tache-liee.mjs';
+import { defautDeLaTache, extraireTachesCompletes } from './tache-liee.mjs';
 
 export { MARQUEUR_AUTO };
 // « **Acceptation automatique** : oui — raison » (même grammaire que `**Attend**` et `**Fichiers touchés**`).
@@ -60,9 +60,25 @@ export function evaluerEligibilite({ issue, numeroTache, pr, fichiers, controles
   if (fichiers.length === 0) motifs.push('aucun fichier lu sur la PR');
   const rouges = controles.filter((c) => ROUGES.has(c.conclusion));
   if (rouges.length) motifs.push(`un contrôle est rouge sur la tête de la PR (${rouges.map((c) => c.name).slice(0, 3).join(', ')})`);
-  const encore = autresPr.filter((p) => extraireTaches(p.body, depot).some((t) => t.depot === depot && t.numero === numeroTache));
+  const encore = autresPr.filter((p) => extraireTachesCompletes(p.body, depot).some((t) => t.depot === depot && t.numero === numeroTache));
   if (encore.length) motifs.push(`une autre PR ouverte cite la tâche (${encore.map((p) => `#${p.number}`).join(', ')})`);
   return { ok: motifs.length === 0, motifs };
+}
+
+/**
+ * Un même contrôle peut avoir plusieurs exécutions sur la même tête (relance, annulation par la concurrence d'un workflow) :
+ * seule la dernière exécution terminée de chaque nom compte (21/10/2026 : un « Garde-fou » annulé, remplacé par un autre réussi,
+ * suffisait à refuser l'acceptation de MoKarade/.github#402).
+ */
+export function derniersParNom(controles) {
+  const dernier = new Map();
+  controles.forEach((c, i) => {
+    const vu = dernier.get(c.name);
+    const rang = (x, j) => [Number(x.id ?? 0), j];
+    const [id, j] = rang(c, i);
+    if (!vu || id > vu.id || (id === vu.id && j > vu.j)) dernier.set(c.name, { c, id, j });
+  });
+  return [...dernier.values()].map((v) => v.c);
 }
 
 const court = (sha) => String(sha ?? '').slice(0, 7);
@@ -99,7 +115,7 @@ export async function accepterApresFusion({ api, depot, numeroPr, config = {}, m
   const ignoree = (...motifs) => ({ statut: 'ignoree', motifs });
   const pr = await api('GET', `/repos/${depot}/pulls/${numeroPr}`);
   if (!pr?.merged) return ignoree('la PR n’est pas fusionnée');
-  const taches = extraireTaches(pr.body, depot);
+  const taches = extraireTachesCompletes(pr.body, depot);
   if (taches.length !== 1 || taches[0].depot !== depot) return ignoree('la PR ne cite pas exactement une tâche de ce dépôt');
   const numero = taches[0].numero;
   const issue = await api('GET', `/repos/${depot}/issues/${numero}`);
@@ -107,7 +123,7 @@ export async function accepterApresFusion({ api, depot, numeroPr, config = {}, m
   if (!issue || !veutAuto(issue)) return ignoree('la tâche ne demande pas l’acceptation automatique');
 
   const fichiers = (await pages(api, `/repos/${depot}/pulls/${numeroPr}/files`)).map((f) => f.filename);
-  const controles = ((await api('GET', `/repos/${depot}/commits/${pr.head?.sha}/check-runs?per_page=100`))?.check_runs ?? []).filter((c) => c.status === 'completed');
+  const controles = derniersParNom(((await api('GET', `/repos/${depot}/commits/${pr.head?.sha}/check-runs?per_page=100`))?.check_runs ?? []).filter((c) => c.status === 'completed'));
   const ouvertes = ((await api('GET', `/repos/${depot}/pulls?state=open&per_page=30`)) ?? []).filter((p) => p.number !== numeroPr);
   const verdict = evaluerEligibilite({ issue, numeroTache: numero, pr, fichiers, controles, autresPr: ouvertes, depot });
   if (!verdict.ok) return ignoree(...verdict.motifs);
@@ -151,6 +167,6 @@ export async function accepterApresFusion({ api, depot, numeroPr, config = {}, m
   // Le signal pour Marc, sur la PR : fusionnée, en ligne (ou rien à déployer) et tâche fermée. Un échec ici ne défait rien.
   await api('POST', `/repos/${depot}/issues/${numeroPr}/comments`, {
     body: `Fusionnée et acceptée automatiquement : tâche #${numero} fermée avec sa preuve (${deploiement.ok ? `déploiement READY, ${deploiement.detail}` : 'rien à déployer'}).`,
-  }).catch(() => {});
+  }).catch((erreur) => console.warn(`Réacteur : commentaire « Fusionnée et acceptée » non posté sur la PR #${numeroPr} (la tâche est bien acceptée). ${erreur.message}`));
   return { statut: 'acceptee', motifs: [], tache: numero };
 }

@@ -58,7 +58,7 @@ Titre : un verbe et un objet, en mots simples. Le corps suit toujours ces gabari
 **Fichiers touchés** (OBLIGATOIRE, comme `**Attend**` : liste à puces (« - » ou « * » suivi d'une espace : une ligne en gras comme `**Attend**` n'est pas une puce) de chemins entre `backticks`, ou `non déterminés` avec la raison) : ce que la tâche modifie ; sans eux, ou sans « Fichiers permis » du gabarit Jules, la tâche ne va jamais en parallèle d'une autre (§6, capacité). Qui crée la tâche l'écrit. Si elle manque, le filet du PC en écrit une **estimation** à la fin du corps (§6, capacité) et le fil qui prend la tâche la corrige ; passé le délai, une tâche sans cette ligne est invalide (§5 ter).
 **Attend** : aucune — OU — #n — raison (OBLIGATOIRE : la ligne existe toujours ; une dépendance n'est écrite que si elle est prouvée).
 **Preuve attendue** : AAAA-MM-JJ HH:MM (heure du Québec) — événement (seulement si la preuve dépend d'un événement, voir §10).
-**Acceptation automatique** : oui — raison (facultatif ; seulement si le « Fini quand » est un contrôle CI ou un déploiement, jamais une lecture de la production : voir §10 ter).
+**Acceptation automatique** : oui — raison (à écrire par celui qui crée la tâche DÈS que le « Fini quand » est un contrôle CI ou un déploiement et que la tâche ne touche aucun écran ; jamais pour une lecture de la production, une donnée ou un écran : voir §10 ter. Sans cette ligne un fil prouve, donc une tâche qui y a droit et ne l'écrit pas attend pour rien).
 ```
 
 Un « Fini quand » non vérifiable (« c'est mieux ») est refusé. Un « Fini quand » qui dépend d'un événement lent (un cron, une échéance) est refusé tel quel : on le réécrit pour qu'il soit prouvable dans l'heure, ou on applique la règle du §10. On le réécrit avant de prendre la tâche.
@@ -369,6 +369,8 @@ Constat (relevé du 14 au 21/10/2026, 544 PR fusionnées, rapport `commun/rappor
 
 **Réglage par dépôt** : le `reacteur.yml` de chacun donne à son job `reveiller` les droits `issues: write` et `deployments: read` et passe `deploiement` et `workflows-deploiement` (les mêmes valeurs que son job `preuve`). Sans ces droits : avertissement, et un fil prouve.
 
+**État au 21/10/2026** : les droits sont posés dans les dix dépôts (neuf PR de la phase 2 et MoKarade/.github#399 pour ce dépôt et pour `reveil-reacteur.yml`). Premier essai réel : MoKarade/.github#402.
+
 ## 11. Retour en arrière (automatique)
 
 Le workflow commun `fumee` tourne après chaque déploiement de production. Il contrôle `/api/sante`, le summary du hub et la page de connexion.
@@ -441,13 +443,14 @@ Le Gantt montre l'état réel du travail. Il ne contient **rien de tapé à la m
   - une PR de tâche de plus de 400 lignes (hors tests).
 - **Autres** :
   - un incident ouvert ;
-  - un dépôt qui a plus de fils en cours que de places (deux depuis le 21/10/2026, §6 capacité ; le contrôle garde son ancien nom « plus d'un fil »).
+  - un dépôt qui a plus de fils en cours que de places (deux depuis le 21/10/2026, §6 capacité ; le contrôle garde son ancien nom « plus d'un fil ») ;
+  - des « fichiers touchés » qui n'en sont pas (`fichiers illisibles` : une ligne en gras prise pour une puce, un libellé à deux-points ; un motif comme `docs/*.md` reste permis).
 
 Le fil « Vue personnalisée du projet » possède les outils du Gantt. Cette section est leur cahier des charges.
 
 **Source de vérité** (mission MoKarade/.github#116, 16/10/2026) : GitHub est la source, le Gantt en est la vue. Chaque relevé écrit trois fichiers dans `commun/outils/gantt/` : `backlog.json` (le relevé), `prochaines.json` (la file, §5) et `fiabilite.json` (`scripts/verif-fidelite.mjs`). Ce dernier relit GitHub directement et mesure :
 - **I1 cohérence** : les défauts de la pastille ;
-- **I2 fidélité** : les écarts entre le relevé et GitHub (état, étiquettes, PR liée, **dates** de création et de fermeture des tâches et d'ouverture et de fusion de leur PR, **journal des fusions** `prlog` : dates, fusions fantômes ou oubliées), hors ce qui change après le relevé ; les délais de la page (ouvert → fermé, ouvert → fusionné) ne valent que si ces dates le sont (essai du 21/10/2026 sur un relevé plein : 563 fusions du journal et 139 tâches, aucun écart)
+- **I2 fidélité** : les écarts entre le relevé et GitHub (état, étiquettes, PR liée, **dates** de création et de fermeture des tâches et d'ouverture et de fusion de leur PR, **journal des fusions** `prlog` : dates, fusions fantômes ou oubliées), hors ce qui change après le relevé ; les délais de la page (ouvert → fermé, ouvert → fusionné) ne valent que si ces dates le sont (essai du 21/10/2026 sur un relevé plein : 563 fusions du journal et 139 tâches, aucun écart); un écart se corrige seul : `tour.py` fait un relevé plein au tour qui suit une mesure à écarts (une fois par mesure, jamais au tour économe), car un relevé léger peut perdre le lien d'une PR ancienne ;
 - **I3 prise tracée** : `en-cours` posé au plus 10 minutes après l'ouverture de la PR (le balayage le pose, §8) ; aucune PR fusionnée sans tâche (robots exclus) ; aucune branche `claude/*` sans tâche ; aucun `en-cours` sans PR depuis plus de 3 h ;
 - **I4 accord file/agents** : la tâche lancée était la `suivante` du dernier calcul ; la `suivante` de chaque calcul de `prochaines.json` (toutes les 10 minutes) est gardée par `verif-fidelite.mjs --snapshot-seulement`, et un lancement sur une file de plus de 40 minutes est listé (`perimes`).
   Dépôt `occupe` au calcul : `prochaines.json` garde aussi `si_libre` (la tête de file) et le snapshot les occupants (`occupe_par`) ; la tête de file prise dès que chaque occupant est fermé est un accord, compté à part dans `accords_apres_liberation`. Un occupant encore ouvert, un fil actif sans référence ou une autre tâche que la tête de file restent des écarts (deux travaux à la fois).

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ECRAN, MARQUEUR_AUTO, accepterApresFusion, ecran, evaluerEligibilite, veutAuto } from './acceptation-auto.mjs';
+import { ECRAN, MARQUEUR_AUTO, accepterApresFusion, derniersParNom, ecran, evaluerEligibilite, veutAuto } from './acceptation-auto.mjs';
 import { ENTETE_ABANDON, evaluer, trouverPreuve } from './preuve.mjs';
 
 const DEPOT = 'MoKarade/JobAI';
@@ -10,7 +10,7 @@ const FUSION = '2026-10-21T14:00:00Z';
 const AUTO = '**Acceptation automatique** : oui — le « Fini quand » est un contrôle CI.';
 
 /** Une fausse API GitHub avec état : fermer l'issue la ferme pour de bon, un commentaire s'ajoute à la liste. */
-function faux({ corps = `Tâche : #115`, issueBody = `**Avant** : x\n${AUTO}\n**Attend** : aucune`, labels = ['niveau:tâche', 'en-cours'], fichiers = ['docs/cycle-de-vie-tache.md'], controles = [{ name: 'Gate', status: 'completed', conclusion: 'success' }], ouvertes = [], deploiements = [], merged = true } = {}) {
+function faux({ corps = `Tâche : #115`, issueBody = `**Avant** : x\n${AUTO}\n**Attend** : aucune`, labels = ['niveau:tâche', 'en-cours'], fichiers = ['docs/cycle-de-vie-tache.md'], controles = [{ name: 'Gate', status: 'completed', conclusion: 'success' }], ouvertes = [], deploiements = [], merged = true, refusPr = false } = {}) {
   const etat = { issue: { number: 115, state: 'open', state_reason: null, body: issueBody, labels: labels.map((name) => ({ name })) }, commentaires: [], ecritures: [] };
   const api = async (methode, chemin, body) => {
     const ligne = `${methode} ${chemin.split('?')[0]}`;
@@ -37,7 +37,10 @@ function faux({ corps = `Tâche : #115`, issueBody = `**Avant** : x\n${AUTO}\n**
       etat.issue.labels = etat.issue.labels.filter((l) => l.name !== nom);
       return null;
     }
-    if (ligne === `POST /repos/${DEPOT}/issues/7/comments`) return {};
+    if (ligne === `POST /repos/${DEPOT}/issues/7/comments`) {
+      if (refusPr) throw new Error('HTTP 403 Resource not accessible by integration');
+      return {};
+    }
     return null;
   };
   return { api, etat };
@@ -105,6 +108,22 @@ test('code servi : sans déploiement READY dans le délai la tâche reste ouvert
   assert.match(ok.etat.commentaires[0].body, /déploiement READY \(déploiement 42 sur ea239e9\)/);
 });
 
+test('le commentaire de la PR refusé (403) ne défait pas l\'acceptation, et le dit dans le journal', async () => {
+  const f = faux({ refusPr: true });
+  const avertissements = [];
+  const avertir = console.warn;
+  console.warn = (m) => avertissements.push(String(m));
+  try {
+    const r = await lancer(f);
+    assert.equal(r.statut, 'acceptee');
+  } finally {
+    console.warn = avertir;
+  }
+  assert.equal(f.etat.issue.state, 'closed');
+  assert.equal(avertissements.length, 1);
+  assert.match(avertissements[0], /non posté sur la PR #7.*403/);
+});
+
 test('le commentaire posé passe toujours le garde-fou de preuve (jamais de réouverture après coup)', async () => {
   const f = faux();
   await lancer(f);
@@ -141,4 +160,24 @@ test('éligibilité : une tâche fermée ou sans l’étiquette niveau:tâche n�
   assert.match(evaluerEligibilite({ ...base, issue: issue({ state: 'closed' }) }).motifs[0], /fermée/);
   assert.match(evaluerEligibilite({ ...base, issue: issue({ labels: [] }) }).motifs[0], /niveau:tâche/);
   assert.equal(evaluerEligibilite({ ...base, issue: issue(), fichiers: [] }).ok, false);
+});
+
+test('la tâche citée avec son dépôt (« Tâche : MoKarade/JobAI#115 ») est reconnue comme celle du dépôt', async () => {
+  const f = faux({ corps: 'Tâche : MoKarade/JobAI#115' });
+  const r = await lancer(f);
+  assert.equal(r.statut, 'acceptee');
+  const autre = faux({ corps: 'Tâche : MoKarade/CarAI#115' });
+  assert.equal((await lancer(autre)).statut, 'ignoree');
+  assert.deepEqual(autre.etat.ecritures, []);
+});
+
+test('un contrôle annulé puis relancé avec succès ne bloque pas ; la dernière exécution rouge, si', async () => {
+  const gate = { name: 'Gate', status: 'completed', conclusion: 'success', id: 5 };
+  const f = faux({ controles: [{ name: 'Garde-fou', status: 'completed', conclusion: 'cancelled', id: 1 }, { name: 'Garde-fou', status: 'completed', conclusion: 'success', id: 2 }, gate] });
+  assert.equal((await lancer(f)).statut, 'acceptee');
+  const rouge = faux({ controles: [{ name: 'Garde-fou', status: 'completed', conclusion: 'success', id: 1 }, { name: 'Garde-fou', status: 'completed', conclusion: 'failure', id: 2 }, gate] });
+  const r = await lancer(rouge);
+  assert.equal(r.statut, 'ignoree');
+  assert.match(r.motifs[0], /rouge/);
+  assert.deepEqual(derniersParNom([{ name: 'a', id: 2, conclusion: 'success' }, { name: 'a', id: 1, conclusion: 'failure' }]).map((c) => c.conclusion), ['success']);
 });
