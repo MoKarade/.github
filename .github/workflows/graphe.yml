@@ -41,13 +41,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Le script de tri vient de ce dépôt (public), jamais du code de l'appelant.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: MoKarade/.github
-          ref: main
-          path: .outils-graphe
-          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
@@ -56,6 +49,14 @@ jobs:
           set -euo pipefail
           test -f scripts/graphe.sh || { echo "::error::scripts/graphe.sh absent : le graphe de code n'est pas posé dans ce dépôt."; exit 1; }
           bash scripts/graphe.sh update
+      # Le script de tri vient de ce dépôt (public), jamais du code de l'appelant. Récupéré APRÈS la construction du graphe,
+      # pour que ses propres fichiers n'entrent pas dans le graphe du dépôt appelant.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: MoKarade/.github
+          ref: main
+          path: .outils-graphe
+          persist-credentials: false
       - name: Réduire à la page lisible
         env:
           DEPOT: ${{ inputs.depot }}
