@@ -40,6 +40,16 @@ export function extraireTaches(corps, depotCourant) {
   return taches;
 }
 
+/**
+ * Comme `extraireTaches`, mais le dépôt de chaque tâche est toujours « propriétaire/dépôt » : `depotComplet` est le dépôt de la PR
+ * (« MoKarade/.github »), et « MoKarade/.github#402 » cité dans le corps ne rend plus « .github » tout court, qui ne se compare à
+ * aucun nom complet (21/10/2026 : l'acceptation automatique ignorait ainsi toute PR qui citait sa tâche avec le dépôt, MoKarade/.github#402).
+ */
+export function extraireTachesCompletes(corps, depotComplet) {
+  const proprietaire = String(depotComplet).split('/')[0];
+  return extraireTaches(corps, depotComplet).map((t) => ({ ...t, depot: t.depot.includes('/') ? t.depot : `${proprietaire}/${t.depot}` }));
+}
+
 /** Pourquoi cette PR n'a pas besoin de tâche (robot, boîte du Réacteur, copie de la file de Mergify), ou null. */
 export function dispense(pr) {
   const login = pr?.user?.login ?? '';

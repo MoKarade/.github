@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ECRAN, MARQUEUR_AUTO, accepterApresFusion, ecran, evaluerEligibilite, veutAuto } from './acceptation-auto.mjs';
+import { ECRAN, MARQUEUR_AUTO, accepterApresFusion, derniersParNom, ecran, evaluerEligibilite, veutAuto } from './acceptation-auto.mjs';
 import { ENTETE_ABANDON, evaluer, trouverPreuve } from './preuve.mjs';
 
 const DEPOT = 'MoKarade/JobAI';
@@ -141,4 +141,24 @@ test('éligibilité : une tâche fermée ou sans l’étiquette niveau:tâche n�
   assert.match(evaluerEligibilite({ ...base, issue: issue({ state: 'closed' }) }).motifs[0], /fermée/);
   assert.match(evaluerEligibilite({ ...base, issue: issue({ labels: [] }) }).motifs[0], /niveau:tâche/);
   assert.equal(evaluerEligibilite({ ...base, issue: issue(), fichiers: [] }).ok, false);
+});
+
+test('la tâche citée avec son dépôt (« Tâche : MoKarade/JobAI#115 ») est reconnue comme celle du dépôt', async () => {
+  const f = faux({ corps: 'Tâche : MoKarade/JobAI#115' });
+  const r = await lancer(f);
+  assert.equal(r.statut, 'acceptee');
+  const autre = faux({ corps: 'Tâche : MoKarade/CarAI#115' });
+  assert.equal((await lancer(autre)).statut, 'ignoree');
+  assert.deepEqual(autre.etat.ecritures, []);
+});
+
+test('un contrôle annulé puis relancé avec succès ne bloque pas ; la dernière exécution rouge, si', async () => {
+  const gate = { name: 'Gate', status: 'completed', conclusion: 'success', id: 5 };
+  const f = faux({ controles: [{ name: 'Garde-fou', status: 'completed', conclusion: 'cancelled', id: 1 }, { name: 'Garde-fou', status: 'completed', conclusion: 'success', id: 2 }, gate] });
+  assert.equal((await lancer(f)).statut, 'acceptee');
+  const rouge = faux({ controles: [{ name: 'Garde-fou', status: 'completed', conclusion: 'success', id: 1 }, { name: 'Garde-fou', status: 'completed', conclusion: 'failure', id: 2 }, gate] });
+  const r = await lancer(rouge);
+  assert.equal(r.statut, 'ignoree');
+  assert.match(r.motifs[0], /rouge/);
+  assert.deepEqual(derniersParNom([{ name: 'a', id: 2, conclusion: 'success' }, { name: 'a', id: 1, conclusion: 'failure' }]).map((c) => c.conclusion), ['success']);
 });
