@@ -16,6 +16,10 @@ name: Réveil du Coordinateur (workflow commun)
 #       type: ${{ github.event_name == 'pull_request' && 'pr_fusionnee' || github.event_name == 'issues' && 'tache_fermee' || github.event_name == 'workflow_run' && 'ci_rouge' || 'filet' }}
 #       ...
 #
+# `pr_fusionnee` tente d'abord l'acceptation automatique de la tâche citée (scripts/acceptation-auto.mjs, cycle de vie §10 ter) : elle
+# écrit sur l'issue et sur la PR et lit les déploiements, donc le `reacteur.yml` appelant doit donner `issues: write` et
+# `deployments: read` (sans eux : un avertissement, jamais un échec, et un fil prouve la tâche comme avant).
+#
 # `pr_ouverte` (PR ouverte, rouverte, sortie du brouillon ou dont le corps change) ne réveille personne : elle lance seulement le
 # commentaire tâche liée, qui marque la tâche citée `en-cours` (MoKarade/.github#157).
 #
@@ -76,6 +80,14 @@ on:
         description: 'true : le filet reposte le réveil même si le même signal est déjà sur la boîte depuis moins de 6 h (lancement manuel, essais).'
         type: string
         default: ''
+      deploiement:
+        description: 'Comme le garde-fou de preuve : vercel (défaut, une PR qui change du servi attend son déploiement) ou aucun (dépôt qui ne se déploie pas). Sert à l’acceptation automatique d’une PR fusionnée.'
+        type: string
+        default: vercel
+      workflows-deploiement:
+        description: 'Workflows qui déploient hors Vercel (ex. deploy.yml), séparés par des virgules. Sert à l’acceptation automatique.'
+        type: string
+        default: ''
     secrets:
       REVEIL_TOKEN:
         description: 'Jeton fin limité à app-template (Actions : lecture et écriture).'
@@ -86,8 +98,9 @@ permissions: {}
 jobs:
   reveiller:
     name: Réveiller le Coordinateur
-    # Plafond : un job figé ne doit pas tourner six heures. Dure quelques secondes.
-    timeout-minutes: 3
+    # Plafond : un job figé ne doit pas tourner six heures. Quelques secondes ; jusqu'à ~3 min quand une PR fusionnée change du code
+    # servi et que l'acceptation automatique attend son déploiement (4 essais, 45 s entre, scripts/acceptation-auto.mjs).
+    timeout-minutes: 8
     runs-on: ${{ fromJSON(inputs.runner) }}
     permissions:
       contents: read
@@ -124,4 +137,6 @@ jobs:
           REVEIL_BRANCHE_RUN: ${{ inputs.branche-run }}
           REVEIL_BRANCHE_DEFAUT: ${{ inputs.branche-defaut }}
           REVEIL_FORCER: ${{ inputs.forcer }}
+          REVEIL_DEPLOIEMENT: ${{ inputs.deploiement }}
+          REVEIL_WORKFLOWS: ${{ inputs.workflows-deploiement }}
         run: node .reveil/scripts/reveil-reacteur.mjs
