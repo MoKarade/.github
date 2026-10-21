@@ -204,7 +204,9 @@ def listes(rk):
 with ThreadPoolExecutor(5) as ex:
     LISTES = dict(zip([r[0] for r in REPOS], ex.map(listes, REPOS)))
 
-def par_jules(p): return 'jules.google.com/task/' in (p.get('body') or '') or any(l.get('name') == 'par-jules' for l in p.get('labels') or [])
+# le pied de page de Jules porte un numéro de tâche : une PR qui cite seulement le critère (« jules.google.com/task/ ») n'est pas de Jules (#425, 21/10)
+PIED_JULES = re.compile(r'jules\.google\.com/task/\d')
+def par_jules(p): return bool(PIED_JULES.search(p.get('body') or '')) or any(l.get('name') == 'par-jules' for l in p.get('labels') or [])
 LIEN = {}
 PRLOG = []
 for repo, key, name in REPOS:
