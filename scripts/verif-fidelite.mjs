@@ -98,6 +98,16 @@ function mesurerI2(releve, vivant, parTache) {
       const attendu = p ? `PR ${p.number} ${etatPr(p)}` : 'aucune PR';
       const lu = n.pr ? `PR ${n.pr.n} ${n.pr.state === 'open' ? 'ouverte' : n.pr.merged ? 'fusionnée' : 'fermée'}` : 'aucune PR';
       if (attendu !== lu) ecarts.push({ ref: r, champ: 'PR liée', releve: lu, vivant: attendu });
+      // Les DATES qui fondent les délais (ouvert → fermé d'une tâche, ouvert → fusionné de sa PR) : un délai n'est juste que si ses deux bouts le sont.
+      // Seulement quand le relevé les porte (`created`) et que la PR liée est la même des deux côtés ; l'état ayant déjà été comparé, on ne compare la fermeture que fermée des deux côtés.
+      if (n.created) {
+        if (n.created !== i.created_at) ecarts.push({ ref: r, champ: 'date de création', releve: n.created, vivant: i.created_at });
+        if (n.state === 'closed' && i.state === 'closed' && n.closed !== i.closed_at) ecarts.push({ ref: r, champ: 'date de fermeture', releve: n.closed, vivant: i.closed_at });
+        if (p && n.pr && n.pr.n === p.number && (p.updated_at ?? '') <= asof) {
+          if (n.pr.created !== p.created_at) ecarts.push({ ref: r, champ: 'date d’ouverture de la PR', releve: n.pr.created, vivant: p.created_at });
+          if ((n.pr.merged ?? null) !== (p.merged_at ?? null)) ecarts.push({ ref: r, champ: 'date de fusion de la PR', releve: n.pr.merged ?? null, vivant: p.merged_at ?? null });
+        }
+      }
     }
     // Une tâche vivante que le relevé ne montre pas du tout.
     for (const i of live.values()) {
@@ -108,6 +118,43 @@ function mesurerI2(releve, vivant, parTache) {
     }
   }
   return { verifiees, ecarts, posterieurs };
+}
+
+/**
+ * Le journal des fusions du relevé (`prlog` : dépôt, numéro, ouverture, fusion) contre GitHub : il nourrit les courbes de fusions par heure, le cumul et le délai
+ * ouvert → fusionné de la page. Trois écarts : une fusion du journal que GitHub ne connaît pas (ou pas fusionnée), des dates différentes, une fusion de GitHub absente du journal.
+ * Ne juge que ce que la relecture vivante couvre (ses PR fermées remontent jusqu'à `limite`, ou jusqu'à la plus ancienne qu'elle a lue si elle a été tronquée) et le journal de 8 jours.
+ */
+function mesurerJournal(releve, vivant, limite) {
+  const journal = releve.prlog;
+  if (!Array.isArray(journal)) return { verifiees: 0, ecarts: [] };
+  const asof = releve.asof;
+  const huitJours = new Date(Date.parse(asof) - 8 * 86400000).toISOString().replace('.000Z', 'Z');
+  const ecarts = [];
+  let verifiees = 0;
+  for (const depot of releve.repos) {
+    const pulls = vivant[depot.repo]?.pulls ?? [];
+    const plusAncienne = pulls.filter((p) => p.state === 'closed').reduce((a, p) => (p.updated_at < a ? p.updated_at : a), asof);
+    const borne = [limite, plusAncienne, huitJours].reduce((a, b) => (a > b ? a : b));
+    const parNumero = new Map(pulls.map((p) => [p.number, p]));
+    const dansJournal = new Set();
+    for (const e of journal.filter((x) => x.r === depot.key)) {
+      dansJournal.add(e.n);
+      if (e.m < borne) continue;
+      const r = ref(depot.repo, e.n);
+      const p = parNumero.get(e.n);
+      verifiees += 1;
+      if (!p || !p.merged_at) { ecarts.push({ ref: r, champ: 'journal des fusions', releve: `fusionnée ${e.m}`, vivant: p ? etatPr(p) : 'absente de GitHub' }); continue; }
+      if (p.merged_at !== e.m) ecarts.push({ ref: r, champ: 'date de fusion (journal)', releve: e.m, vivant: p.merged_at });
+      if (p.created_at !== e.c) ecarts.push({ ref: r, champ: 'date d’ouverture (journal)', releve: e.c, vivant: p.created_at });
+    }
+    for (const p of pulls) {
+      if (!p.merged_at || p.merged_at < borne || p.merged_at > asof || dansJournal.has(p.number)) continue;
+      verifiees += 1;
+      ecarts.push({ ref: ref(depot.repo, p.number), champ: 'journal des fusions', releve: 'absente du journal', vivant: `fusionnée ${p.merged_at}` });
+    }
+  }
+  return { verifiees, ecarts };
 }
 
 /** I3 : la prise est tracée avant la PR, et aucune PR ni branche n'échappe au backlog. */
@@ -210,6 +257,10 @@ function majSnapshots(anciens, prochaines) {
 export function mesurer({ releve, vivant, prochaines = null, snapshots = {}, depuis = DEPUIS_DEFAUT, defauts = null, seuilPriseH = SEUIL_PRISE_H, depuisI4 = depuis }) {
   const { parTache, toutes } = indexerPulls(vivant);
   const i2 = mesurerI2(releve, vivant, parTache);
+  const journal = mesurerJournal(releve, vivant, [depuis, debutFenetre(releve.asof), BORNE_RELEVE].reduce((a, b) => (a < b ? a : b)));
+  i2.verifiees += journal.verifiees;
+  i2.ecarts.push(...journal.ecarts);
+  i2.journal_verifiees = journal.verifiees;
   const i3 = mesurerI3(releve, vivant, toutes, depuis, seuilPriseH);
   const i4 = mesurerI4(releve, snapshots, depuisI4);
   const alertes = [];

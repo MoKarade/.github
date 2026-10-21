@@ -58,6 +58,42 @@ test('I2 : une tâche fermée il y a plus de 48 h n’entre pas dans le périmè
   assert.equal(mesure(r, vivant()).i2.verifiees, 0);
 });
 
+test('I2 : les dates qui fondent les délais (création, fermeture, PR) sont comparées à GitHub', () => {
+  const pr = { n: 5, state: 'closed', merged: '2026-10-16T11:00:00Z', created: '2026-10-16T09:00:00Z' };
+  const bon = noeud(1, { state: 'closed', created: '2026-10-16T08:00:00Z', closed: '2026-10-16T11:05:00Z', pr });
+  const fusionnee = pull(5, { body: 'Tâche : #1', state: 'closed', merged_at: '2026-10-16T11:00:00Z', updated_at: '2026-10-16T11:01:00Z' });
+  const fermee = (extra = {}) => issue(1, { state: 'closed', closed_at: '2026-10-16T11:05:00Z', updated_at: '2026-10-16T11:05:00Z', ...extra });
+  assert.deepEqual(mesure(releve([bon]), vivant([fermee()], [fusionnee])).i2.ecarts, []);
+  const faux = noeud(1, { state: 'closed', created: '2026-10-16T07:00:00Z', closed: '2026-10-16T11:00:00Z', pr: { ...pr, created: '2026-10-16T09:10:00Z', merged: '2026-10-16T11:02:00Z' } });
+  const champs = mesure(releve([faux]), vivant([fermee()], [fusionnee])).i2.ecarts.map((e) => e.champ).sort();
+  assert.deepEqual(champs, ['date de création', 'date de fermeture', 'date de fusion de la PR', 'date d’ouverture de la PR']);
+});
+
+test('I2 : un relevé sans dates (ancienne forme) ne déclenche aucune comparaison de dates', () => {
+  assert.deepEqual(mesure(releve([noeud(1)]), vivant([issue(1)])).i2.ecarts, []);
+});
+
+test('Journal des fusions : fidèle à GitHub, aucun écart ; dates fausses, fusion fantôme et fusion oubliée sont signalées', () => {
+  const merged = (n, c, m) => pull(n, { body: 'sans tâche', state: 'closed', created_at: c, merged_at: m, updated_at: m });
+  const r = { ...releve([]), prlog: [
+    { r: 'hub', n: 10, c: '2026-10-16T08:00:00Z', m: '2026-10-16T09:00:00Z', k: 'tache' },
+    { r: 'hub', n: 11, c: '2026-10-16T08:00:00Z', m: '2026-10-16T09:30:00Z', k: 'tache' },
+    { r: 'hub', n: 12, c: '2026-10-16T08:00:00Z', m: '2026-10-16T10:00:00Z', k: 'tache' },
+  ] };
+  const juste = vivant([], [merged(10, '2026-10-16T08:00:00Z', '2026-10-16T09:00:00Z'), merged(11, '2026-10-16T08:00:00Z', '2026-10-16T09:30:00Z'), merged(12, '2026-10-16T08:00:00Z', '2026-10-16T10:00:00Z')]);
+  assert.deepEqual(mesure(r, juste).i2.ecarts, []);
+  assert.equal(mesure(r, juste).i2.journal_verifiees, 3);
+  const faux = vivant([], [merged(10, '2026-10-16T08:05:00Z', '2026-10-16T09:00:00Z'), merged(11, '2026-10-16T08:00:00Z', '2026-10-16T09:31:00Z'), merged(13, '2026-10-16T08:00:00Z', '2026-10-16T10:30:00Z')]);
+  const champs = mesure(r, faux).i2.ecarts.map((e) => `${e.ref} ${e.champ}`).sort();
+  assert.deepEqual(champs, ['hubperso#10 date d’ouverture (journal)', 'hubperso#11 date de fusion (journal)', 'hubperso#12 journal des fusions', 'hubperso#13 journal des fusions']);
+});
+
+test('Journal des fusions : une fusion hors de ce que la relecture couvre, ou un relevé sans journal, ne compte pas', () => {
+  const r = { ...releve([]), prlog: [{ r: 'hub', n: 1, c: '2026-10-10T08:00:00Z', m: '2026-10-10T09:00:00Z', k: 'tache' }] };
+  assert.deepEqual(mesure(r, vivant()).i2.ecarts, []);
+  assert.deepEqual(mesure(releve([]), vivant([], [pull(2, { state: 'closed', merged_at: '2026-10-16T09:00:00Z', updated_at: '2026-10-16T09:00:00Z' })])).i2.ecarts.map((e) => e.champ), []);
+});
+
 test('I3 : une PR ouverte alors que l’issue n’était pas en-cours est non tracée', () => {
   const pr = (c) => ({ n: 5, state: 'open', merged: null, created: c });
   const r = releve([
