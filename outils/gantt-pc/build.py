@@ -99,6 +99,10 @@ CTRL = ['niveau:plan à retirer', 'tâche orpheline', 'corps hors gabarit', 'dé
         'jules sans PR depuis 24 h', 'bloquée depuis plus de 7 jours', 'PR de plus de 400 lignes', 'incident ouvert',
         "plus d'un fil en cours sur un dépôt", 'ménage en retard']
 
+# Le contrôle « plus d'un fil » (nom gardé : la page le connaît) ne signale qu'AU-DELÀ des places du dépôt : deux travaux à la fois depuis le 21/10/2026
+# (scripts/capacite.mjs, PLACES_PAR_DEPOT). Avant ce changement, 7 des 25 défauts du 21/10 n'étaient que des dépôts à deux fils, permis par la règle.
+PLACES_PAR_DEPOT = 2
+
 def sante(gh):
     REF = {f"{r['repo'].lower()}#{n['n']}": n for r in gh['repos'] for n in r['nodes'].values()}
     pb = []
@@ -153,9 +157,9 @@ def sante(gh):
             for d in n.get('deps', []):
                 if d not in REF:
                     add('dépendance inconnue', r, n, d)
-        if len(fils) > 1:
+        if len(fils) > PLACES_PAR_DEPOT:
             for n in fils:
-                add("plus d'un fil en cours sur un dépôt", r, n, f"{len(fils)} tâches en cours dans {r['name']}")
+                add("plus d'un fil en cours sur un dépôt", r, n, f"{len(fils)} tâches en cours dans {r['name']} (limite : {PLACES_PAR_DEPOT})")
     G = {k: [d for d in n.get('deps', []) if d in REF and REF[d]['state'] == 'open'] for k, n in REF.items() if n['state'] == 'open'}
     color, seen_cyc = {}, set()
     def dfs(u, path):

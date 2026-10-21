@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { menageFermees, ETIQUETTES_FERMEES, toucheMcp, toucheEcran, deploiementProduction, commentaireAcceptee, controlesVerts, corpsNettoye, evaluerFusion, horsPermis, prDeLaTache, suivreDepot, tachesCitees, testsSeuls } from './jules-suivi.mjs';
+import { retirerEtiquette, menageFermees, ETIQUETTES_FERMEES, toucheMcp, toucheEcran, deploiementProduction, commentaireAcceptee, controlesVerts, corpsNettoye, evaluerFusion, horsPermis, prDeLaTache, suivreDepot, tachesCitees, testsSeuls } from './jules-suivi.mjs';
 import { tourJulesSuivi } from './filet-pc.mjs';
 import { lireCitation, evaluer } from './preuve.mjs';
 
@@ -305,4 +305,13 @@ test('docs seules (aucun fichier servi) : Acceptée « sans déploiement : docs,
   const r = suivreDepot({ depot: 'MoKarade/JobAI', gh: g.gh, maintenant: MAINTENANT });
   assert.deepEqual(r.acceptees, ['JobAI#196']);
   assert.match(g.appels.find((a) => a.methode === 'POST').corps.body, /sans déploiement : docs, tests ou CI, aucun fichier servi/);
+});
+
+test('retirerEtiquette : une étiquette déjà partie (404) n’est pas une erreur, une autre panne remonte', () => {
+  const appels = [];
+  const gh404 = (m, c) => { appels.push(`${m} ${c}`); throw Object.assign(new Error('Command failed: gh api -X DELETE'), { stderr: 'gh: Label does not exist (HTTP 404)' }); };
+  retirerEtiquette(gh404, 'MoKarade/CarAI', 50, 'jules');
+  assert.deepEqual(appels, ['DELETE repos/MoKarade/CarAI/issues/50/labels/jules']);
+  const gh500 = () => { throw Object.assign(new Error('Command failed'), { stderr: 'gh: Server Error (HTTP 500)' }); };
+  assert.throws(() => retirerEtiquette(gh500, 'MoKarade/CarAI', 50, 'jules'), /Command failed/);
 });
