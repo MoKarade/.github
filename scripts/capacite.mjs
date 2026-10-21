@@ -13,8 +13,9 @@ export const PLACES_PAR_DEPOT = 2;
 const JOURNAUX = /(^|\/)(HANDOVER|CHANGELOG)\.md$/i;
 
 // « **Fichiers permis** (aucun autre) : » (gabarit Jules, docs/jules-gabarit-issue.md) ou « **Fichiers touchés** : » (tâche écrite pour Claude),
-// suivi d'une liste à puces. Même grammaire que `fichiers_declares` de outils/gantt-pc/fetch.py.
-const SECTION = /^\s*\*\*\s*Fichiers (?:permis|touchés)\s*\*\*[^\n]*\n((?:[ \t]*[-*][^\n]*(?:\n|$))+)/im;
+// suivi d'une liste à puces. Même grammaire que `fichiers_declares` de outils/gantt-pc/fetch.py. Un corps peut porter les deux (une estimation
+// automatique de `fichiers-touches.mjs`, puis le « Fichiers permis » exact du gabarit Jules) : « permis » d'abord, « touchés » à défaut.
+const SECTION = /^\s*\*\*\s*Fichiers (permis|touchés)\s*\*\*[^\n]*\n((?:[ \t]*[-*][^\n]*(?:\n|$))+)/gim;
 
 const nettoyer = (c) => String(c).trim().replace(/^\.\//, '').replace(/[`,;:.]+$/g, '').replace(/\\/g, '/');
 
@@ -23,18 +24,20 @@ const nettoyer = (c) => String(c).trim().replace(/^\.\//, '').replace(/[`,;:.]+$
  * Un chemin est ce qui est entre `backticks` sur chaque puce, à défaut le premier mot de la puce.
  */
 export function fichiersDeclares(body) {
-  const m = SECTION.exec(String(body ?? ''));
-  if (!m) return null;
-  const chemins = [];
-  for (const ligne of m[1].split('\n')) {
-    if (!/^[ \t]*[-*]/.test(ligne)) continue;
-    const texte = ligne.replace(/^[ \t]*[-*]\s*/, '');
-    const cites = [...texte.matchAll(/`([^`]+)`/g)].map((x) => x[1]);
-    const c = (cites.length ? cites : [texte.split(/\s+/)[0]]).map(nettoyer).filter((x) => x && !/^(aucun|rien|n\/a)$/i.test(x));
-    chemins.push(...c);
+  const sections = [...String(body ?? '').matchAll(SECTION)].sort((a, b) => Number(/touch/i.test(a[1])) - Number(/touch/i.test(b[1])));
+  for (const m of sections) {
+    const chemins = [];
+    for (const ligne of m[2].split('\n')) {
+      if (!/^[ \t]*[-*]/.test(ligne)) continue;
+      const texte = ligne.replace(/^[ \t]*[-*]\s*/, '');
+      const cites = [...texte.matchAll(/`([^`]+)`/g)].map((x) => x[1]);
+      const c = (cites.length ? cites : [texte.split(/\s+/)[0]]).map(nettoyer).filter((x) => x && !/^(aucun|rien|n\/a)$/i.test(x));
+      chemins.push(...c);
+    }
+    const utiles = [...new Set(chemins)].filter((c) => !JOURNAUX.test(c));
+    if (utiles.length) return utiles;
   }
-  const utiles = [...new Set(chemins)].filter((c) => !JOURNAUX.test(c));
-  return utiles.length ? utiles : null;
+  return null;
 }
 
 /** Un chemin devient soit un fichier exact, soit un préfixe (dossier `a/b/` ou motif `a/b/*.ts` : tout ce qui précède l'étoile). */
