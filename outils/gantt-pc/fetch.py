@@ -326,6 +326,12 @@ def calculer(repo, rl, i, pr):
             n['pa'], n['pa_u'] = pa, pa_u
     return n
 
+def pr_gardee(pr, ancien):
+    # léger : une PR fusionnée ou fermée sortie de la 1re page des fermées garde son lien (relevé précédent). Sans cela, la tâche qui change (un commentaire
+    # de preuve suffit) était recalculée « aucune PR » : trois écarts I2 le 21/10/2026 (.github#122, #174, #196), jusqu'au prochain relevé plein.
+    if LEGER and pr is None and ancien and ancien.get('pr') and ancien['pr'].get('state') != 'open' and ancien['pr'].get('kind') != 'corps': return ancien['pr']
+    return pr
+
 ATTEND_MARC = re.compile(r'^Garde-fou : la PR #(\d+) attend un geste de Marc$')
 def traiter(rk):
     repo, key, name = rk
@@ -340,8 +346,9 @@ def traiter(rk):
     nodes, reutilises = {}, 0
     for i in issues:
         pr = pr_de(f'{rl}#{i["number"]}')
-        sig = signature(i, pr, i.get('body') or '')
         ancien = PREV.get((repo, i['number']))
+        pr = pr_gardee(pr, ancien)
+        sig = signature(i, pr, i.get('body') or '')
         pr_a = ancien.get('pr') if ancien else None
         if LEGER and ancien and sig is not None and ancien.get('sig') == sig and 'fpl' in ancien and 'ft_ligne' in ancien and not (pr_a and pr_a.get('state') == 'open' and 'ff' not in pr_a):   # 'fpl', 'ft_ligne' ou 'ff' absent = relevé d'avant les deux places : recalculé
             # non-tâche : ses sous-issues ont-elles changé ? (les enfants disent qui est leur parent)
