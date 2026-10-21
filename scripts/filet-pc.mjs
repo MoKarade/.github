@@ -574,17 +574,20 @@ export function tourFichiersTouches({ executer = false, aBlanc = false, gh = nul
     const appel = gh ?? ghCli;
     const budget = { restant: parTour };
     const ecrites = [];
+    const recalculees = [];
     const echecs = [];
     for (const depot of depots) {
       try {
-        ecrites.push(...estimerFichiers({ depot, gh: appel, budget, aBlanc: aBlanc || !executer }).ecrites);
+        const r = estimerFichiers({ depot, gh: appel, budget, aBlanc: aBlanc || !executer });
+        ecrites.push(...r.ecrites);
+        recalculees.push(...r.recalculees);
       } catch (e) {
         echecs.push(`${depot.replace('MoKarade/', '')} (${String(e.message).replace(/\s+/g, ' ').slice(0, 60)})`);
       }
     }
     const seul = !executer || aBlanc ? ' (non appliqué)' : '';
     const connus = ecrites.filter((x) => x.fichiers.length).length;
-    return `fichiers-touches : ${ecrites.length} écrite(s)${ecrites.length ? ` (${connus} estimée(s), ${ecrites.length - connus} non déterminée(s) : ${ecrites.slice(0, 6).map((x) => x.ref).join(', ')}${ecrites.length > 6 ? ', …' : ''})` : ''}${seul}${echecs.length ? `, ÉCHEC ${echecs.join(' ; ')}` : ''}`;
+    return `fichiers-touches : ${ecrites.length} écrite(s)${ecrites.length ? ` (${connus} estimée(s), ${ecrites.length - connus} non déterminée(s) : ${ecrites.slice(0, 6).map((x) => x.ref).join(', ')}${ecrites.length > 6 ? ', …' : ''})` : ''}${recalculees.length ? `, ${recalculees.length} non déterminée(s) devenue(s) estimée(s) (${recalculees.slice(0, 4).map((x) => x.ref).join(', ')})` : ''}${seul}${echecs.length ? `, ÉCHEC ${echecs.join(' ; ')}` : ''}`;
   } catch (e) {
     return `fichiers-touches : ÉCHEC (${String(e.message).slice(0, 160)})`;
   }

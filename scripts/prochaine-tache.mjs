@@ -275,10 +275,10 @@ export function attendAbsent(n, maintenant = new Date()) {
 // Même mécanique que `**Attend**` : une tâche créée à partir de `DES_NOUVELLES` la porte `GRACE_NOUVELLE_H` heures après sa création au plus (le temps que le filet du
 // PC, toutes les 10 minutes, en écrive une estimation si son fil ne l'a pas fait : `fichiers-touches.mjs`, qui peut aussi la déclarer « non déterminés ») ; les plus anciennes
 // ont jusqu'à `DES_TOUTES` pour la recevoir. `ft_ligne` vient de `fetch.py` ; absent (relevé d'une
-// ancienne version du PC) : aucune règle, on ne devine pas. Exemptées : un geste de Marc (aucun fichier), une preuve attendue (déjà livrée), un travail commencé
+// ancienne version du PC) : aucune règle, on ne devine pas. Exemptées : un geste de Marc (aucun fichier), une preuve attendue ou manquante (déjà livrée), un travail commencé
 // (`en-cours`, `jules`) et une tâche dont la PR est ouverte (ses fichiers viennent de la PR).
 export const FICHIERS_OBLIGATOIRES = { DES_NOUVELLES: '2026-10-21T16:00:00Z', DES_TOUTES: '2026-10-23T16:00:00Z', GRACE_NOUVELLE_H: 3 };
-const EXEMPTEES_DE_FICHIERS = ['qui:marc', 'preuve-attendue', 'en-cours', 'jules'];
+const EXEMPTEES_DE_FICHIERS = ['qui:marc', 'preuve-attendue', 'preuve-manquante', 'en-cours', 'jules'];
 
 /** Vrai si la tâche n'a pas la ligne « Fichiers touchés » ET que la règle s'applique déjà à elle. */
 export function fichiersAbsents(n, maintenant = new Date()) {

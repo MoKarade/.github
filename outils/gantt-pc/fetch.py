@@ -96,7 +96,7 @@ def fichiers_permis(body):
 # Un corps peut porter les deux (estimation automatique de scripts/fichiers-touches.mjs, puis « Fichiers permis » exact du gabarit Jules) : « permis » d'abord.
 FD = re.compile(r'^\s*\*\*\s*Fichiers (permis|touchés)\s*\*\*[^\n]*\n((?:[ \t]*[-*][^\n]*(?:\n|$))+)', re.I | re.M)
 # La ligne existe-t-elle (même « non déterminés ») ? prochaine-tache.mjs l'exige sur toute tâche (#360), comme `**Attend**`.
-FT_LIGNE = re.compile(r'\*\*\s*Fichiers (?:permis|touchés)\s*\*\*', re.I)
+FT_LIGNE = re.compile(r'^\s*\*\*\s*Fichiers (?:permis|touchés)\s*\*\*', re.I | re.M)
 JOURNAUX = re.compile(r'(^|/)(HANDOVER|CHANGELOG)\.md$', re.I)
 def fichiers_declares(body):
     for m in sorted(FD.finditer(body or ''), key=lambda x: bool(re.match('touch', x.group(1), re.I))):
