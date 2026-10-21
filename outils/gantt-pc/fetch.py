@@ -14,9 +14,10 @@
 #   `et` = la suite des étapes d'une tâche lue dans ses événements (en cours, attend Marc, bloquée, preuve attendue, correction, faite) ;
 #   `pr.au` = l'auteur de la PR ; `pr.jf` = sa portée (nombre de fichiers, lignes, premier chemin protégé) ; `fp` = nombre de « Fichiers permis » (gabarit Jules).
 # Usage : python3 fetch.py [--leger] [--sans-quota] [--prev=fichier.json] [--depots=a,b] [sortie.json]
-import json, subprocess, sys, datetime, re, os, time, threading, base64, hashlib
+import json, subprocess, sys, datetime, re, os, time, threading, base64, hashlib, urllib.parse
 from reponses import options as reponses_options     # réponses préfaites d'une question (section « Réponses » de l'issue)
 from concurrent.futures import ThreadPoolExecutor
+from ci import resume_ci     # fin de CI et CI rouge d'une PR fusionnée (onglet Rythme)
 ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
 OPT = {a.split('=', 1)[0]: (a.split('=', 1) + [''])[1] for a in sys.argv[1:] if a.startswith('--')}
 LEGER = '--leger' in OPT
@@ -203,14 +204,17 @@ def listes(rk):
 with ThreadPoolExecutor(5) as ex:
     LISTES = dict(zip([r[0] for r in REPOS], ex.map(listes, REPOS)))
 
+def par_jules(p): return 'jules.google.com/task/' in (p.get('body') or '') or any(l.get('name') == 'par-jules' for l in p.get('labels') or [])
 LIEN = {}
 PRLOG = []
 for repo, key, name in REPOS:
     ouvertes, fermees, fus, _, _ = LISTES[repo]
-    # au, b : auteur et branche de la PR. Jules ouvre ses PR au nom de Marc : la page le reconnaît à l'étiquette `jules` de la tâche
-    # liée, jamais au nom de la branche (« claude/jules-suivi » est une PR d'un fil Claude SUR Jules). `b` dit seulement « fil Claude » (claude/*)
+    # au, b : auteur et branche de la PR. Jules ouvre ses PR au nom de Marc, et ni l'auteur, ni la branche, ni l'étiquette `jules` de la tâche ne le prouvent
+    # (Hubperso#195 : branche claude/, PR de Jules). j = 1 : critère du fil Jules (21/10/2026, jules/2026-10-21_pr-de-jules-30-jours.md) : le corps cite
+    # jules.google.com/task/, ou la PR porte l'étiquette `par-jules` (posée là où le pied de page a été effacé, CarAI#24). `b` dit seulement « fil Claude »
     nouveaux = [{'r': key, 'n': p['number'], 'c': p['created_at'], 'm': p['merged_at'], 'au': (p.get('user') or {}).get('login'), 'b': (p.get('head') or {}).get('ref'),
-                 'k': 'tache' if liens(p.get('body'), repo) else 'robot' if (p.get('user') or {}).get('type') == 'Bot' else 'autre'} for p in fus]
+                 'k': 'tache' if liens(p.get('body'), repo) else 'robot' if (p.get('user') or {}).get('type') == 'Bot' else 'autre',
+                 **({'j': 1} if par_jules(p) else {})} for p in fus]
     if LEGER:
         vus = {x['n'] for x in nouveaux}
         nouveaux += [x for x in PREV_PRLOG if x['r'] == key and x['n'] not in vus and x['m'] >= CUTOFF]
@@ -371,7 +375,35 @@ def traiter(rk):
 with ThreadPoolExecutor(5) as ex:
     sorties = list(ex.map(traiter, REPOS))
 res['repos'] = [s[0] for s in sorties]
+# CI de chaque PR fusionnée (Marc, 21/10/2026) : `ci` = fin de la CI sur le dernier commit, `cr` = 1 si un run a échoué avant la fusion.
+# Une PR fusionnée ne change plus : mémorisée dans ci_cache.json, au plus CI_PAR_RELEVE nouvelles par relevé (les plus récentes d'abord).
+# Les branches claude/project-thread-* servent à plusieurs PR : les runs sont bornés à la vie de la PR (created=c..m), jamais à la branche seule.
+CI_PAR_RELEVE = 80
+CI_CACHE = D + 'ci_cache.json'
+try: CI = json.load(open(CI_CACHE, encoding='utf-8'))
+except Exception: CI = {}
+NOM = {key: repo for repo, key, _ in REPOS}
+SHA = {(key, p['number']): (p.get('head') or {}).get('sha') for repo, key, _ in REPOS for p in LISTES[repo][2]}
+def ci_de(x):
+    runs = (_un(f"repos/MoKarade/{NOM[x['r']]}/actions/runs?branch={urllib.parse.quote(x['b'], safe='')}"
+                f"&created={urllib.parse.quote(x['c'] + '..' + x['m'], safe='')}&per_page=100") or {}).get('workflow_runs') or []
+    return f"{x['r']}#{x['n']}", resume_ci(runs, SHA.get((x['r'], x['n'])))
+def ci_ou_rien(x):
+    try: return ci_de(x)
+    except RuntimeError as e:     # panne passagère : rien n'est mémorisé, le relevé suivant réessaie
+        print('CI', x['r'], x['n'], e, file=sys.stderr); return None
+a_lire = sorted((x for x in PRLOG if f"{x['r']}#{x['n']}" not in CI and x.get('b') and (x['r'], x['n']) in SHA), key=lambda x: x['m'], reverse=True)[:CI_PAR_RELEVE]
+with ThreadPoolExecutor(5) as ex:
+    for r in ex.map(ci_ou_rien, a_lire):
+        if r: CI[r[0]] = r[1]
+CI = {k: v for k, v in CI.items() if k in {f"{x['r']}#{x['n']}" for x in PRLOG}}
+open(CI_CACHE + '.tmp', 'w', encoding='utf-8').write(json.dumps(CI)); os.replace(CI_CACHE + '.tmp', CI_CACHE)
+for x in PRLOG:
+    for k, v in (CI.get(f"{x['r']}#{x['n']}") or {}).items():
+        if v is not None: x[k] = v
+print(f'CI : {len(a_lire)} PR lues, {len(CI)} mémorisées', file=sys.stderr)
 res['prlog'] = sorted(PRLOG, key=lambda x: x['m'])
+res['prlog_j'] = 1     # chaque entrée porte j = 1 quand la PR est de Jules (par_jules) : sans ce repère, la page ne sait pas si l'absence de j est mesurée
 CPT = ghcache.compteurs()
 # appels = requêtes comptées par GitHub (hors 304) ; reqs = toutes les requêtes ; n304 = celles qui n'ont rien coûté
 res['appels'], res['reqs'], res['n304'] = CPT['comptees'], CPT['req'], CPT['n304']
