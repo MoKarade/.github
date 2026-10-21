@@ -87,4 +87,7 @@ jobs:
       run: ${{ format('{0}', github.event.workflow_run.id) }}
       branche-run: ${{ github.event.workflow_run.head_branch }}
       branche-defaut: ${{ github.event.repository.default_branch }}
+      # .github ne se déploie nulle part (comme son garde-fou de preuve ci-dessus) : sans cela l'acceptation automatique attend
+      # un déploiement Vercel qui n'existera jamais et laisse la tâche à un fil (essai réel du 21/10/2026, .github#402).
+      deploiement: aucun
       forcer: ${{ github.event_name == 'workflow_dispatch' && 'true' || '' }}
