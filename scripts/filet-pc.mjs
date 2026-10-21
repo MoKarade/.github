@@ -35,6 +35,8 @@
 // (« **Acceptée** » au format du garde-fou, étiquettes retirées, tâche fermée) la PR de TESTS SEULS fusionnée.
 // Septième ajout au même tour (tâche MoKarade/.github#296) : poser seul `faisable-jules` sur les tâches que `evaluerJules` accepte (`scripts/jules-marquage.mjs`, au plus deux réservées par dépôt).
 // Huitième ajout (tâche MoKarade/.github#303) : compléter seul le corps des tâches pour Jules (`scripts/jules-gabarit.mjs`), 20 par 24 h au plus.
+// Neuvième ajout (tâche MoKarade/.github#358) : écrire seul la ligne « Fichiers touchés » des tâches qui n'en ont pas (`scripts/fichiers-touches.mjs`), 8 par tour au plus :
+// sans fichiers connus, la deuxième place d'un dépôt ne sert jamais.
 // Un échec du réveil ne fait JAMAIS échouer le tour (il se dit sur la ligne imprimée) et n'enregistre pas le signalement :
 // le tour suivant réessaie.
 import { execFileSync } from 'node:child_process';
@@ -47,8 +49,9 @@ import { choisirPourJules, confierAJules } from './jules-auto.mjs';
 import { suivreDepot, menageFermees } from './jules-suivi.mjs';
 import { marquerFaisables, retirerPerimees } from './jules-marquage.mjs';
 import { completerDepot } from './jules-gabarit.mjs';
+import { completerDepot as estimerFichiers, PAR_TOUR_MAX as ESTIMATIONS_PAR_TOUR } from './fichiers-touches.mjs';
 
-export const MODULES_VERSION = ['filet-pc', 'jules-suivi', 'jules-marquage', 'jules-gabarit', 'jules-auto'];
+export const MODULES_VERSION = ['filet-pc', 'jules-suivi', 'jules-marquage', 'jules-gabarit', 'jules-auto', 'fichiers-touches'];
 
 /**
  * La version du code que ce tour exécute : le sha git (7 caractères) de chaque fichier, calculé comme `git hash-object` (le PC n'a pas de dépôt,
@@ -562,6 +565,31 @@ export function tourJulesSuivi({ fichierEtat, executer = false, aBlanc = false, 
   }
 }
 
+/**
+ * Un tour de l'estimation des fichiers touchés : voir `scripts/fichiers-touches.mjs`. Rend la ligne à afficher ; ne lève jamais (un dépôt illisible est dit, les autres passent).
+ * @param gh (methode, chemin, corps) -> objet JSON ; par défaut `gh api` du PC
+ */
+export function tourFichiersTouches({ executer = false, aBlanc = false, gh = null, depots = DEPOTS_FILET, parTour = ESTIMATIONS_PAR_TOUR }) {
+  try {
+    const appel = gh ?? ghCli;
+    const budget = { restant: parTour };
+    const ecrites = [];
+    const echecs = [];
+    for (const depot of depots) {
+      try {
+        ecrites.push(...estimerFichiers({ depot, gh: appel, budget, aBlanc: aBlanc || !executer }).ecrites);
+      } catch (e) {
+        echecs.push(`${depot.replace('MoKarade/', '')} (${String(e.message).replace(/\s+/g, ' ').slice(0, 60)})`);
+      }
+    }
+    const seul = !executer || aBlanc ? ' (non appliqué)' : '';
+    const connus = ecrites.filter((x) => x.fichiers.length).length;
+    return `fichiers-touches : ${ecrites.length} écrite(s)${ecrites.length ? ` (${connus} estimée(s), ${ecrites.length - connus} non déterminée(s) : ${ecrites.slice(0, 6).map((x) => x.ref).join(', ')}${ecrites.length > 6 ? ', …' : ''})` : ''}${seul}${echecs.length ? `, ÉCHEC ${echecs.join(' ; ')}` : ''}`;
+  } catch (e) {
+    return `fichiers-touches : ÉCHEC (${String(e.message).slice(0, 160)})`;
+  }
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const arg = (nom) => { const i = process.argv.indexOf(nom); return i > 0 ? process.argv[i + 1] : null; };
   const fichierProchaines = process.argv[2];
@@ -579,6 +607,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const jules = tourJules({ fichierProchaines, fichierEtat: fichierEtat.replace(/(\.json)?$/, '-jules.json'), ...options });
     const file = tourFile({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-file.json'), ...options });
     const suivi = tourJulesSuivi({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-jules-suivi.json'), ...options });
-    console.log(`${reveil} · ${quotidien} · ${oublis} · ${quota} · ${liens} · ${jules} · ${file} · ${suivi} · ${versionDuCode()}`);
+    const fichiers = tourFichiersTouches(options);
+    console.log(`${reveil} · ${quotidien} · ${oublis} · ${quota} · ${liens} · ${jules} · ${file} · ${suivi} · ${fichiers} · ${versionDuCode()}`);
   }
 }

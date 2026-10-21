@@ -586,8 +586,8 @@ test('tourFile : à blanc ne touche à rien ; une erreur GitHub se dit sans fair
 
 test('versionDuCode : le sha git de chaque fichier, comme git hash-object ; un fichier absent est dit « absent »', () => {
   const ligne = versionDuCode((nom) => { if (nom === 'jules-auto') throw new Error('absent'); return Buffer.from('abc'); });
-  assert.match(ligne, /^code : filet-pc f2ba8f8, jules-suivi f2ba8f8, jules-marquage f2ba8f8, jules-gabarit f2ba8f8, jules-auto absent$/);
-  assert.equal(MODULES_VERSION.length, 5);
+  assert.match(ligne, /^code : filet-pc f2ba8f8, jules-suivi f2ba8f8, jules-marquage f2ba8f8, jules-gabarit f2ba8f8, jules-auto absent, fichiers-touches f2ba8f8$/);
+  assert.equal(MODULES_VERSION.length, 6);
   // les vrais fichiers de ce dépôt sont tous lisibles
   assert.doesNotMatch(versionDuCode(), /absent/);
 });

@@ -38,22 +38,34 @@ const noms = (labels) => (labels ?? []).map((l) => (typeof l === 'string' ? l : 
 const refus = (raison, memoriser = true) => ({ ok: false, raison, memoriser });
 
 /**
- * Les chemins de fichiers cités entre `backticks`. `forts` : cités dans Avant, Après ou Fini quand (la tâche les touche) ; `source` : cités dans
- * Source seulement (de quoi lire, souvent) ; `motifs` : chemins avec `*` (une liste fermée est requise).
+ * Les chemins de fichiers cités entre `backticks` dans un texte, et les motifs (`*`) à part.
  * Un jeton sans `/` (un nom de fonction, `BACKLOG.md:L381`) ou qui commence par `/` (une URL de l'app) n'est pas un chemin de fichier.
+ */
+export function jetonsChemins(texte) {
+  const chemins = [];
+  const motifs = [];
+  for (const m of String(texte ?? '').matchAll(/`([^`\n]+)`/g)) {
+    const jeton = m[1].trim().replace(/:L?\d+(?:-L?\d+)?$/, '');
+    if (!jeton.includes('/') || jeton.startsWith('/') || /^https?:/.test(jeton) || /\s/.test(jeton)) continue;
+    if (jeton.includes('*')) { motifs.push(jeton); continue; }
+    if (!/^[\w@.\-/[\]()]+\.\w{1,6}$/.test(jeton)) continue;
+    if (!chemins.includes(jeton)) chemins.push(jeton);
+  }
+  return { chemins, motifs };
+}
+
+/**
+ * `forts` : chemins cités dans Avant, Après ou Fini quand (la tâche les touche) ; `source` : cités dans Source seulement (de quoi lire, souvent) ;
+ * `motifs` : chemins avec `*` (une liste fermée est requise).
  */
 export function cheminsCites(corps) {
   const lire = (titres) => {
     const sortie = [];
     const motifs = [];
     for (const titre of titres) {
-      for (const m of (section(corps, titre) ?? '').matchAll(/`([^`\n]+)`/g)) {
-        const jeton = m[1].trim().replace(/:L?\d+(?:-L?\d+)?$/, '');
-        if (!jeton.includes('/') || jeton.startsWith('/') || /^https?:/.test(jeton) || /\s/.test(jeton)) continue;
-        if (jeton.includes('*')) { motifs.push(jeton); continue; }
-        if (!/^[\w@.\-/[\]()]+\.\w{1,6}$/.test(jeton)) continue;
-        if (!sortie.includes(jeton)) sortie.push(jeton);
-      }
+      const lu = jetonsChemins(section(corps, titre) ?? '');
+      for (const c of lu.chemins) if (!sortie.includes(c)) sortie.push(c);
+      motifs.push(...lu.motifs);
     }
     return { chemins: sortie, motifs };
   };
@@ -129,7 +141,7 @@ export function composerBloc({ n, titre, depot, fichiers, nouveaux = [], manquan
 }
 
 /** Le chemin existe-t-il comme FICHIER à la racine par défaut du dépôt ? Une erreur autre que « introuvable » remonte (rien n'est deviné). */
-function existe(gh, depot, chemin, { dossier = false } = {}) {
+export function existe(gh, depot, chemin, { dossier = false } = {}) {
   try {
     const r = gh('GET', `repos/${depot}/contents/${chemin.split('/').map(encodeURIComponent).join('/')}`);
     return dossier ? Array.isArray(r) : !Array.isArray(r);

@@ -93,21 +93,22 @@ def fichiers_permis(body):
 
 # Fichiers qu'une tâche déclare toucher (deux places par dépôt, 21/10/2026) : même grammaire que `fichiersDeclares` de scripts/capacite.mjs
 # (« Fichiers permis » ou « Fichiers touchés », chemins entre backticks, journaux HANDOVER/CHANGELOG ignorés). None = rien de lisible : pas de parallèle.
-FD = re.compile(r'^\s*\*\*\s*Fichiers (?:permis|touchés)\s*\*\*[^\n]*\n((?:[ \t]*[-*][^\n]*(?:\n|$))+)', re.I | re.M)
+# Un corps peut porter les deux (estimation automatique de scripts/fichiers-touches.mjs, puis « Fichiers permis » exact du gabarit Jules) : « permis » d'abord.
+FD = re.compile(r'^\s*\*\*\s*Fichiers (permis|touchés)\s*\*\*[^\n]*\n((?:[ \t]*[-*][^\n]*(?:\n|$))+)', re.I | re.M)
 JOURNAUX = re.compile(r'(^|/)(HANDOVER|CHANGELOG)\.md$', re.I)
 def fichiers_declares(body):
-    m = FD.search(body or '')
-    if not m: return None
-    chemins = []
-    for ligne in m.group(1).split('\n'):
-        if not re.match(r'^[ \t]*[-*]', ligne): continue
-        texte = re.sub(r'^[ \t]*[-*]\s*', '', ligne)
-        cites = re.findall(r'`([^`]+)`', texte)
-        for c in (cites or texte.split()[:1]):
-            c = re.sub(r'[`,;:.]+$', '', re.sub(r'^\./', '', c.strip())).replace('\\', '/')
-            if c and not re.fullmatch(r'(aucun|rien|n/a)', c, re.I) and c not in chemins: chemins.append(c)
-    utiles = [c for c in chemins if not JOURNAUX.search(c)]
-    return utiles or None
+    for m in sorted(FD.finditer(body or ''), key=lambda x: bool(re.match('touch', x.group(1), re.I))):
+        chemins = []
+        for ligne in m.group(2).split('\n'):
+            if not re.match(r'^[ \t]*[-*]', ligne): continue
+            texte = re.sub(r'^[ \t]*[-*]\s*', '', ligne)
+            cites = re.findall(r'`([^`]+)`', texte)
+            for c in (cites or texte.split()[:1]):
+                c = re.sub(r'[`,;:.]+$', '', re.sub(r'^\./', '', c.strip())).replace('\\', '/')
+                if c and not re.fullmatch(r'(aucun|rien|n/a)', c, re.I) and c not in chemins: chemins.append(c)
+        utiles = [c for c in chemins if not JOURNAUX.search(c)]
+        if utiles: return utiles
+    return None
 
 # Étapes d'une tâche (demande de Marc, 19/10) : à chaque événement, l'étape est celle de l'étiquette d'état la plus forte.
 # Sortie : [[étape, début ISO], ...] ; une étape court jusqu'au début de la suivante, la dernière jusqu'au relevé (la page le calcule).

@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { PLACES_PAR_DEPOT, fichiersDeclares, seRecouvrent, compatibles, raisonIncompatible } from './capacite.mjs';
 
 test('deux places par dépôt', () => assert.equal(PLACES_PAR_DEPOT, 2));
@@ -48,4 +50,24 @@ test('compatibles : fichiers inconnus ou vides = jamais ; disjoints = oui ; comm
   assert.equal(raisonIncompatible(['x/a.ts'], ['x/']), 'fichier-commun:x/a.ts ~ x/');
   assert.equal(raisonIncompatible(null, ['a']), 'fichiers-inconnus');
   assert.equal(raisonIncompatible(['a'], ['b']), null);
+});
+
+test('fetch.py lit les fichiers déclarés comme capacite.mjs (même grammaire, même préférence pour « permis »)', () => {
+  const corps = [
+    '**Fichiers touchés** :\n- `lib/a.ts`\n- `HANDOVER.md`\n',
+    '<!-- fichiers-auto -->\n**Fichiers touchés** (estimation automatique) :\n- `lib/large.ts`\n\n**Fichiers permis** (aucun autre) :\n- `./lib/exact.ts` (nouveau)\n- `tests/exact.test.ts`\n',
+    '**Fichiers permis** (aucun autre) :\n- `lib/exact.ts`\n\n**Fichiers touchés** :\n- `lib/large.ts`\n',
+    '**Fichiers touchés** : non déterminés (aucun chemin).\n',
+    '**Fichiers touchés** :\n- `CHANGELOG.md`\n',
+    'rien de tel',
+    '',
+  ];
+  const source = readFileSync(new URL('../outils/gantt-pc/fetch.py', import.meta.url), 'utf8');
+  const debut = source.indexOf('FD = re.compile(');
+  const fin = source.indexOf("# Étapes d'une tâche");
+  assert.ok(debut > 0 && fin > debut, 'bloc fichiers_declares introuvable dans fetch.py');
+  const programme = `import re, json, sys\n${source.slice(debut, fin)}\nprint(json.dumps([fichiers_declares(c) for c in json.load(sys.stdin)]))\n`;
+  const r = spawnSync('python3', ['-I', '-c', programme], { input: JSON.stringify(corps), encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout), corps.map((c) => fichiersDeclares(c)));
 });
