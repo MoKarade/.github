@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { LABEL_ATTEND_MARC, TITRE_ATTEND_MARC, prAttendantMarc } from './attend-marc.mjs';
-import { DEPOT_BOITE, DEPOT_GITHUB, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, WORKFLOWS_BALAYAGE, WORKFLOWS_PR_OUVERTE, construireMotif, decider, estPanneRunner, heureQuebec, occupations, preuveAPoser, rougeDepuis, traiter } from './reveil-reacteur.mjs';
+import { DEPOT_BOITE, DEPOT_GITHUB, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, WORKFLOWS_BALAYAGE, WORKFLOWS_PR_OUVERTE, construireMotif, decider, estPanneRunner, heureQuebec, occupations, travaux, signeLibre, preuveAPoser, rougeDepuis, traiter } from './reveil-reacteur.mjs';
 
 // Fausse API GitHub en mémoire : les lectures viennent de `donnees`, les écritures sont gardées.
 function faux(donnees = {}) {
@@ -145,18 +145,21 @@ test('tâche fermée : le dépôt dont la seule PR attend Marc est « libre » p
   const d = await decider({ api, evt: { type: 'tache_fermee', depot: DEPOT, issue: '90' } });
   assert.equal(d.motif, `RÉACTEUR : ${DEPOT} libre ; tâche ${DEPOT}#90 fermée`);
   const rouge = faux({ [`/repos/${DEPOT}/issues`]: issuesEnCours([12]), [`/repos/${DEPOT}/pulls`]: [prOuverte(30, 'Tâche : #12')], [GESTES]: [] }).api;
-  assert.equal((await decider({ api: rouge, evt: { type: 'tache_fermee', depot: DEPOT, issue: '90' } })).action, 'rien');
+  // PR sans geste de Marc : elle occupe une place sur deux, le dépôt n'est plus « libre » mais a une place libre
+  assert.equal((await decider({ api: rouge, evt: { type: 'tache_fermee', depot: DEPOT, issue: '90' } })).motif, `RÉACTEUR : ${DEPOT} : une place libre ; tâche ${DEPOT}#90 fermée`);
 });
 
 test('occupations : une lecture qui échoue rend « libre » (un réveil de trop plutôt qu’un dépôt libre tu)', async () => {
   assert.deepEqual(await occupations({ api: faux({ [`/repos/${DEPOT}/pulls`]: new Error('HTTP 403') }).api, depot: DEPOT }), []);
 });
 
-test('tâche fermée : dépôt occupé = aucun réveil ; libre = « libre » ; abandon réveille toujours, sans « libre » si occupé', async () => {
-  const occupe = faux({ [`/repos/${DEPOT}/issues`]: issuesEnCours([20]) });
+test('tâche fermée : deux places prises = aucun réveil ; libre = « libre » ; une place = « une place libre » ; abandon réveille toujours, sans « libre » si occupé', async () => {
+  const occupe = faux({ [`/repos/${DEPOT}/issues`]: issuesEnCours([20, 21]) });
   const evt = { type: 'tache_fermee', depot: DEPOT, issue: '90', raison: 'completed' };
   assert.deepEqual(await decider({ api: occupe.api, evt }), { action: 'rien', raison: 'dépôt encore occupé' });
   assert.equal((await decider({ api: faux().api, evt })).motif, `RÉACTEUR : ${DEPOT} libre ; tâche ${DEPOT}#90 fermée`);
+  const une = await decider({ api: faux({ [`/repos/${DEPOT}/issues`]: issuesEnCours([20]) }).api, evt });
+  assert.equal(une.motif, `RÉACTEUR : ${DEPOT} : une place libre ; tâche ${DEPOT}#90 fermée`);
   const abandon = await decider({ api: occupe.api, evt: { ...evt, raison: 'not_planned' } });
   assert.equal(abandon.motif, `RÉACTEUR : tâche ${DEPOT}#90 fermée (abandonnée : vérifier la raison)`);
 });
@@ -166,10 +169,13 @@ test('PR fusionnée : dépôt occupé par une autre tâche = aucun réveil ; la 
   const evt = { type: 'pr_fusionnee', depot: DEPOT, pr: '7' };
   // seule la tâche #12 de la PR est encore étiquetée en-cours : le dépôt est libre
   assert.equal((await decider({ api: faux({ ...base, [`/repos/${DEPOT}/issues`]: issuesEnCours([12]) }).api, evt })).motif, `RÉACTEUR : ${DEPOT} libre ; PR #7 fusionnée`);
-  // une autre tâche est en cours : rien
-  assert.deepEqual(await decider({ api: faux({ ...base, [`/repos/${DEPOT}/issues`]: issuesEnCours([12, 21]) }).api, evt }), { action: 'rien', raison: 'dépôt encore occupé' });
-  // une autre PR de tâche est ouverte : rien
-  assert.equal((await decider({ api: faux({ ...base, [`/repos/${DEPOT}/pulls`]: [prOuverte(41, 'Tâche : #21')] }).api, evt })).action, 'rien');
+  // une autre tâche est en cours : une place reste libre (deux places par dépôt, 21/10/2026)
+  assert.equal((await decider({ api: faux({ ...base, [`/repos/${DEPOT}/issues`]: issuesEnCours([12, 21]) }).api, evt })).motif, `RÉACTEUR : ${DEPOT} : une place libre ; PR #7 fusionnée`);
+  // deux autres tâches en cours : rien
+  assert.deepEqual(await decider({ api: faux({ ...base, [`/repos/${DEPOT}/issues`]: issuesEnCours([12, 21, 22]) }).api, evt }), { action: 'rien', raison: 'dépôt encore occupé' });
+  // une autre PR de tâche est ouverte : une place libre ; deux autres PR : rien
+  assert.equal((await decider({ api: faux({ ...base, [`/repos/${DEPOT}/pulls`]: [prOuverte(41, 'Tâche : #21')] }).api, evt })).motif, `RÉACTEUR : ${DEPOT} : une place libre ; PR #7 fusionnée`);
+  assert.equal((await decider({ api: faux({ ...base, [`/repos/${DEPOT}/pulls`]: [prOuverte(41, 'Tâche : #21'), prOuverte(42, 'Tâche : #22')] }).api, evt })).action, 'rien');
 });
 
 test('PR fusionnée : dépôt occupé mais preuve à poser = réveil, sans la ligne « libre »', async () => {
@@ -177,7 +183,7 @@ test('PR fusionnée : dépôt occupé mais preuve à poser = réveil, sans la li
     [`/repos/${DEPOT}/pulls/7`]: { body: 'Tâche : #115', user: humain },
     [`/repos/${DEPOT}/issues/115`]: tache(),
     [`/repos/${DEPOT}/issues/115/comments`]: [],
-    [`/repos/${DEPOT}/issues`]: issuesEnCours([21]),
+    [`/repos/${DEPOT}/issues`]: issuesEnCours([21, 22]),
   });
   const d = await decider({ api, evt: { type: 'pr_fusionnee', depot: DEPOT, pr: '7' } });
   assert.equal(d.motif, `RÉACTEUR : PR #7 fusionnée ; preuve à poser sur ${DEPOT}#115`);
@@ -520,4 +526,20 @@ test('attend-marc : le relevé du Gantt (fetch.py) lit le même titre que le Ré
   assert.ok(m, 'ATTEND_MARC introuvable dans fetch.py');
   assert.equal(m[1], TITRE_ATTEND_MARC.source);
   assert.match(py, /l\['name'\] == 'qui:marc'/);
+});
+
+test('travaux : une tâche en-cours et sa PR ouverte comptent pour un, une PR sans tâche occupée pour un de plus', async () => {
+  const n = (donnees) => travaux({ api: faux(donnees).api, depot: DEPOT });
+  assert.equal(await n({}), 0);
+  assert.equal(await n({ [`/repos/${DEPOT}/issues`]: issuesEnCours([12]), [`/repos/${DEPOT}/pulls`]: [prOuverte(30, 'Tâche : #12')] }), 1);
+  assert.equal(await n({ [`/repos/${DEPOT}/issues`]: issuesEnCours([12]), [`/repos/${DEPOT}/pulls`]: [prOuverte(30, 'Tâche : #12'), prOuverte(31, 'Tâche : #13')] }), 2);
+  assert.equal(await n({ [`/repos/${DEPOT}/issues`]: issuesEnCours([12, 13]) }), 2);
+  assert.equal(await travaux({ api: faux({ [`/repos/${DEPOT}/pulls`]: new Error('HTTP 403') }).api, depot: DEPOT }), 0, 'lecture ratée : libre');
+});
+
+test('signeLibre : libre, une place libre, rien', () => {
+  assert.equal(signeLibre('D', 0), 'D libre');
+  assert.equal(signeLibre('D', 1), 'D : une place libre');
+  assert.equal(signeLibre('D', 2), '');
+  assert.equal(signeLibre('D', 3), '');
 });

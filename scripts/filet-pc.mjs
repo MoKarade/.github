@@ -11,7 +11,7 @@
 // Le workflow commente app-template#58 en `github-actions[bot]`, ce qui réveille.
 //
 // Règles (fonctions pures, voir les tests) :
-//   - un dépôt compte s'il est `libre` avec une suivante dans `prochaines.json`, depuis plus de 30 min d'observations continues ;
+//   - un dépôt compte s'il est `libre` ou `partiel` (une place libre et une tâche compatible) avec une suivante dans `prochaines.json`, depuis plus de 30 min d'observations continues ;
 //   - un seul réveil par couple (dépôt, tâche) et par 2 h, et un seul message par tour pour tous les dépôts ;
 //   - `prochaines.json` périmé (plus de 30 min) = rien. Le frein de quota n'a pas besoin d'un test à part : `suivante` ne contient que les tâches
 //     qu'il laisse passer (un dépôt dont tout est retenu est `frein`, pas `libre`) ; décision du Coordinateur, 17/10/2026 17:58 UTC ;
@@ -96,7 +96,8 @@ export function evaluerFilet({ prochaines, etat = {}, maintenant = new Date() })
   const reveils = [];
   for (const d of prochaines.depots ?? []) {
     const depot = d.repo;
-    const ref = d.statut === 'libre' ? d.suivante?.ref : null;
+    // `partiel` : une place est libre et une tâche compatible attend (deux places par dépôt, 21/10/2026) ; `libre` : les deux places le sont.
+    const ref = d.statut === 'libre' || d.statut === 'partiel' ? d.suivante?.ref : null;
     if (!depot || !ref) continue; // occupé, incident, frein, rien : le compte de ce dépôt repart de zéro
     const avant = etat?.[depot] ?? {};
     const continu = avant.libre_depuis && avant.vu && minutesEntre(avant.vu, maintenant) <= CONTINUITE_MAX_MIN;
