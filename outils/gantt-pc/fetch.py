@@ -95,6 +95,8 @@ def fichiers_permis(body):
 # (« Fichiers permis » ou « Fichiers touchés », chemins entre backticks, journaux HANDOVER/CHANGELOG ignorés). None = rien de lisible : pas de parallèle.
 # Un corps peut porter les deux (estimation automatique de scripts/fichiers-touches.mjs, puis « Fichiers permis » exact du gabarit Jules) : « permis » d'abord.
 FD = re.compile(r'^\s*\*\*\s*Fichiers (permis|touchés)\s*\*\*[^\n]*\n((?:[ \t]*[-*][^\n]*(?:\n|$))+)', re.I | re.M)
+# La ligne existe-t-elle (même « non déterminés ») ? prochaine-tache.mjs l'exige sur toute tâche (#360), comme `**Attend**`.
+FT_LIGNE = re.compile(r'\*\*\s*Fichiers (?:permis|touchés)\s*\*\*', re.I)
 JOURNAUX = re.compile(r'(^|/)(HANDOVER|CHANGELOG)\.md$', re.I)
 def fichiers_declares(body):
     for m in sorted(FD.finditer(body or ''), key=lambda x: bool(re.match('touch', x.group(1), re.I))):
@@ -252,7 +254,7 @@ def calculer(repo, rl, i, pr):
          'gab': [c for c in GAB.get(lvl, []) if champ(body, c) is None],
          'av': champ(body, 'Avant'), 'ap': champ(body, 'Après'), 'fq': champ(body, 'Fini quand'),
          'res': champ(body, 'Résultat') or champ(body, 'Objectif'),
-         'pa': champ(body, 'Preuve attendue'), 'fp': fichiers_permis(body), 'fpl': fichiers_declares(body), 'rp': reponses_options(body)}
+         'pa': champ(body, 'Preuve attendue'), 'fp': fichiers_permis(body), 'fpl': fichiers_declares(body), 'ft_ligne': bool(FT_LIGNE.search(body)), 'rp': reponses_options(body)}
     m = VIEILLE.search(body)
     if not pr and m:
         # ancienne forme : la PR est nommée dans le corps de l'issue, sans lien depuis la PR
@@ -340,7 +342,7 @@ def traiter(rk):
         sig = signature(i, pr, i.get('body') or '')
         ancien = PREV.get((repo, i['number']))
         pr_a = ancien.get('pr') if ancien else None
-        if LEGER and ancien and sig is not None and ancien.get('sig') == sig and 'fpl' in ancien and not (pr_a and pr_a.get('state') == 'open' and 'ff' not in pr_a):   # 'fpl' ou 'ff' absent = relevé d'avant les deux places : recalculé
+        if LEGER and ancien and sig is not None and ancien.get('sig') == sig and 'fpl' in ancien and 'ft_ligne' in ancien and not (pr_a and pr_a.get('state') == 'open' and 'ff' not in pr_a):   # 'fpl', 'ft_ligne' ou 'ff' absent = relevé d'avant les deux places : recalculé
             # non-tâche : ses sous-issues ont-elles changé ? (les enfants disent qui est leur parent)
             if ancien['lvl'] == 'tâche' or refs_enfants(rl, ancien['kids']) == ENFANTS.get(f'{rl}#{i["number"]}', set()):
                 nodes[i['number']] = ancien; reutilises += 1

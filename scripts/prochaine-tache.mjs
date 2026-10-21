@@ -271,6 +271,25 @@ export function attendAbsent(n, maintenant = new Date()) {
   return nouvelle || maintenant.getTime() >= Date.parse(ATTEND_OBLIGATOIRE.DES_TOUTES);
 }
 
+// Ligne « Fichiers touchés » (ou « Fichiers permis ») obligatoire (tâche #360, demande de Marc relayée le 21/10/2026 : « la deuxième place doit être réelle »).
+// Même mécanique que `**Attend**` : une tâche créée à partir de `DES_NOUVELLES` la porte `GRACE_NOUVELLE_H` heures après sa création au plus (le temps que le filet du
+// PC, toutes les 10 minutes, en écrive une estimation si son fil ne l'a pas fait : `fichiers-touches.mjs`, qui peut aussi la déclarer « non déterminés ») ; les plus anciennes
+// ont jusqu'à `DES_TOUTES` pour la recevoir. `ft_ligne` vient de `fetch.py` ; absent (relevé d'une
+// ancienne version du PC) : aucune règle, on ne devine pas. Exemptées : un geste de Marc (aucun fichier), une preuve attendue (déjà livrée), un travail commencé
+// (`en-cours`, `jules`) et une tâche dont la PR est ouverte (ses fichiers viennent de la PR).
+export const FICHIERS_OBLIGATOIRES = { DES_NOUVELLES: '2026-10-21T16:00:00Z', DES_TOUTES: '2026-10-23T16:00:00Z', GRACE_NOUVELLE_H: 3 };
+const EXEMPTEES_DE_FICHIERS = ['qui:marc', 'preuve-attendue', 'en-cours', 'jules'];
+
+/** Vrai si la tâche n'a pas la ligne « Fichiers touchés » ET que la règle s'applique déjà à elle. */
+export function fichiersAbsents(n, maintenant = new Date()) {
+  if (n.lvl !== 'tâche' || n.ft_ligne !== false) return false;
+  if (EXEMPTEES_DE_FICHIERS.some((e) => (n.labels ?? []).includes(e)) || n.pr?.state === 'open') return false;
+  const creee = n.created ? Date.parse(n.created) : NaN;
+  const nouvelle = Number.isFinite(creee) && creee >= Date.parse(FICHIERS_OBLIGATOIRES.DES_NOUVELLES);
+  if (nouvelle && maintenant.getTime() >= creee + FICHIERS_OBLIGATOIRES.GRACE_NOUVELLE_H * 3_600_000) return true;
+  return maintenant.getTime() >= Date.parse(FICHIERS_OBLIGATOIRES.DES_TOUTES);
+}
+
 /** Pourquoi une tâche ouverte n'est pas prenable (code), ou null si elle l'est. */
 function ecart(n, depot, idx, maintenant = new Date()) {
   const dependances = n.deps ?? [];
@@ -287,6 +306,8 @@ function ecart(n, depot, idx, maintenant = new Date()) {
   if (ouverte) return { code: 'attend-ouverte', detail: ouverte };
   // Toute tâche dit ce qu'elle attend (décision de Marc, 19/10/2026) : `**Attend** : aucune` ou `**Attend** : #n — raison`. Sans la ligne (et sans lien natif), rien n'est prouvé.
   if (attendAbsent(n, maintenant)) return { code: 'attend-absent', detail: '' };
+  // Les fichiers aussi s'écrivent (#360) : sans eux, la deuxième place du dépôt ne peut jamais servir à cette tâche.
+  if (fichiersAbsents(n, maintenant)) return { code: 'fichiers-absents', detail: '' };
   if (n.pr?.state === 'open') return { code: 'pr-ouverte', detail: `PR ${n.pr.repo ?? depot.repo}#${n.pr.n}` };
   // Réservée à Jules par celui qui l'a rangée : Claude ne la prend pas (sinon les deux la prendraient), le filet du PC la confie quand le dépôt est libre.
   if (n.labels.includes('faisable-jules')) return { code: 'jules-reservee', detail: 'faisable-jules' };
@@ -300,7 +321,7 @@ export const ATTENTE = { marcHeures: 48, marcIsoleHeures: 168, filHeures: 24 };
 
 // Qui peut lever l'obstacle d'après son code. Un code absent de la table n'a PERSONNE pour le lever.
 const PROPRIETAIRE = { 'geste-marc': 'marc', 'preuve-attendue': 'preuve', 'en-cours': 'fil', jules: 'fil', 'pr-ouverte': 'fil', 'frein-quota': 'frein', 'jules-reservee': 'fil', prenable: 'file', mission: 'mission' };
-const CAUSE_SANS_PROPRIETAIRE = { 'attend-absent': 'attend-absent', 'preuve-chez-marc': 'preuve-chez-marc', bloquee: 'bloquee-sans-reprise', 'attend-inconnue': 'dependance-illisible', 'fini-quand-absent': 'fini-quand-absent', cycle: 'dependance-circulaire' };
+const CAUSE_SANS_PROPRIETAIRE = { 'attend-absent': 'attend-absent', 'fichiers-absents': 'fichiers-absents', 'preuve-chez-marc': 'preuve-chez-marc', bloquee: 'bloquee-sans-reprise', 'attend-inconnue': 'dependance-illisible', 'fini-quand-absent': 'fini-quand-absent', cycle: 'dependance-circulaire' };
 
 const heuresDepuis = (t, maintenant) => (t ? (maintenant.getTime() - Date.parse(t)) / 3_600_000 : null);
 const plusRecent = (...dates) => dates.filter(Boolean).sort().pop() ?? null;
@@ -544,7 +565,7 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
     };
   });
   const { attentes, oubliees, file_marc, etats } = analyserAttentes(depots, idx, maintenant);
-  return { version: VERSION, source_asof: backlog.asof, non_calcule: NON_CALCULE, frein: palier, frein_detail: frein?.detail ?? null, alertes, depots, attentes, oubliees, file_marc, etats, liens_manquants: liensManquants(idx), attend_absent: attendAbsentListe(idx, maintenant), seuils_oubli: ATTENTE };
+  return { version: VERSION, source_asof: backlog.asof, non_calcule: NON_CALCULE, frein: palier, frein_detail: frein?.detail ?? null, alertes, depots, attentes, oubliees, file_marc, etats, liens_manquants: liensManquants(idx), attend_absent: attendAbsentListe(idx, maintenant), fichiers_absents: fichiersAbsentsListe(idx, maintenant), seuils_oubli: ATTENTE };
 }
 
 function lireArguments(argv) {
@@ -571,6 +592,17 @@ export function attendAbsentListe(idx, maintenant = new Date()) {
   for (const [r, { noeud: n }] of idx.noeuds) {
     if (n.lvl !== 'tâche' || n.state !== 'open' || n.attend_ligne !== false || (n.deps ?? []).length) continue;
     out.push({ ref: r, applique: attendAbsent(n, maintenant) });
+  }
+  return out.sort((a, b) => a.ref.localeCompare(b.ref));
+}
+
+/** Les tâches ouvertes sans ligne de fichiers : { ref, applique } (`applique` faux = délai de grâce, la règle ne les écarte pas encore). */
+export function fichiersAbsentsListe(idx, maintenant = new Date()) {
+  const out = [];
+  for (const [r, { noeud: n }] of idx.noeuds) {
+    if (n.lvl !== 'tâche' || n.state !== 'open' || n.ft_ligne !== false) continue;
+    if (EXEMPTEES_DE_FICHIERS.some((e) => (n.labels ?? []).includes(e)) || n.pr?.state === 'open') continue;
+    out.push({ ref: r, applique: fichiersAbsents(n, maintenant) });
   }
   return out.sort((a, b) => a.ref.localeCompare(b.ref));
 }
