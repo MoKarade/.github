@@ -207,8 +207,8 @@ LIEN = {}
 PRLOG = []
 for repo, key, name in REPOS:
     ouvertes, fermees, fus, _, _ = LISTES[repo]
-    # au, b : auteur et branche de la PR. Jules ouvre ses PR au nom de Marc : la page le reconnaît d'abord à l'étiquette `jules`
-    # de la tâche liée, puis à son compte ou à sa branche s'ils le nomment ; sinon elle ne devine pas
+    # au, b : auteur et branche de la PR. Jules ouvre ses PR au nom de Marc : la page le reconnaît à l'étiquette `jules` de la tâche
+    # liée, jamais au nom de la branche (« claude/jules-suivi » est une PR d'un fil Claude SUR Jules). `b` dit seulement « fil Claude » (claude/*)
     nouveaux = [{'r': key, 'n': p['number'], 'c': p['created_at'], 'm': p['merged_at'], 'au': (p.get('user') or {}).get('login'), 'b': (p.get('head') or {}).get('ref'),
                  'k': 'tache' if liens(p.get('body'), repo) else 'robot' if (p.get('user') or {}).get('type') == 'Bot' else 'autre'} for p in fus]
     if LEGER:
