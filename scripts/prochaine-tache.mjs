@@ -39,6 +39,14 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { PLACES_PAR_DEPOT, raisonIncompatible, fichiersDuTravail } from './capacite.mjs';
 
+/**
+ * Une alerte du PC (« Entretien du PC : rouge le 21-10 », « Gemini en panne sur le PC ») porte l'étiquette `incident` mais n'est pas une panne
+ * de production du dépôt qui la reçoit : elle attend un geste de Marc sur sa machine. Elle ne gèle donc pas la file du dépôt (`incidents_pc`
+ * la liste, la pastille la compte toujours). Avant le 21/10/2026, #312 puis #313 ont gardé `.github` à l'état `incident` pendant plus de 26 h
+ * et 28 lancements y ont été jugés « hors file » par I4 (fiabilité, .github#121).
+ */
+export const INCIDENT_PC = /\b(?:du|sur le) PC\b/i;
+
 export const VERSION = 1;
 
 // Étiquettes qui sortent une tâche de la file, avec la raison écrite dans `exclues`.
@@ -540,7 +548,8 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
     if (alternanceEnJeu && hautDerniere.chantier && !typeDerniere) chantiersSansType.add(hautDerniere.chantier);
     if (chantiersSansType.size) alertes.push(`${depot.name} : alternance standard/fonction non calculable (chantier sans étiquette chantier:standard ou chantier:fonction : ${[...chantiersSansType].join(', ')})`);
 
-    const incidents = depot.incidents ?? [];
+    const incidentsPc = (depot.incidents ?? []).filter((i) => INCIDENT_PC.test(i.t ?? ''));
+    const incidents = (depot.incidents ?? []).filter((i) => !INCIDENT_PC.test(i.t ?? ''));
     const places = { total: PLACES_PAR_DEPOT, prises: occupePar.length, libres: Math.max(0, PLACES_PAR_DEPOT - occupePar.length) };
     const { suivantes, sautees } = choisirSuivantes(file, occupePar, incidents.length ? 0 : places.libres);
     const statut = incidents.length ? 'incident' : occupePar.length === 0 ? (file.length ? 'libre' : retenues ? 'frein' : 'rien') : suivantes.length ? 'partiel' : 'occupe';
@@ -556,6 +565,7 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
       couloirs: couloirsDe(occupePar, suivantes),
       si_libre: file[0]?.ref ?? null,
       incidents: incidents.map((i) => ({ n: i.n, titre: i.t, url: i.url })),
+      incidents_pc: incidentsPc.map((i) => ({ n: i.n, titre: i.t, url: i.url })),
       occupe_par: occupePar,
       attend_marc: enAttenteMarc.map((n) => ({ ref: ref(depot.repo, n.n), pr: n.pr.n })),
       derniere: refDerniere,

@@ -147,7 +147,8 @@ def etapes(ev):
 GAB = {'chantier': ['Objectif', 'Pourquoi', 'Fini quand', 'Source'], 'mission': ['Résultat', 'Fini quand', 'Source'],
        'tâche': ['Avant', 'Après', 'Fini quand', 'Source']}
 def champ(body, nom):
-    m = re.search(r'^\s*\*\*\s*' + re.escape(nom) + r'\s*(?:\*\*\s*:|:\s*\*\*)\s*(.*?)(?=^\s*\*\*[^*\n]{1,40}?(?:\*\*\s*:|:\s*\*\*)|\Z)', body or '', re.M | re.S | re.I)
+    # `**Après** (besoin validé par Marc le 19/10/2026) : …` : une précision entre parenthèses avant les deux-points reste le champ « Après » (carai#8, 21/10/2026)
+    m = re.search(r'^\s*\*\*\s*' + re.escape(nom) + r'\s*(?:\*\*\s*(?:\([^)\n]{0,160}\)\s*)?:|:\s*\*\*)\s*(.*?)(?=^\s*\*\*[^*\n]{1,40}?(?:\*\*\s*:|:\s*\*\*)|\Z)', body or '', re.M | re.S | re.I)
     if not m: return None
     t = re.sub(r'\s+', ' ', m.group(1)).strip()
     return t[:280] + ('…' if len(t) > 280 else '')

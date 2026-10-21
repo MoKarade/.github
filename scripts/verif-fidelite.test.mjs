@@ -311,3 +311,22 @@ test('I4 : deux occupants au calcul, l’un fermé avant le lancement = accord ;
   const deux = releve([noeud(1, { start: '2026-10-16T09:00:00Z' }), noeud(2, { start: '2026-10-16T09:30:00Z' }), noeud(3, { start: '2026-10-16T10:14:00Z' })]);
   assert.deepEqual(mesure(deux, vivant(), { snapshots, depuisI4: '2026-10-16T10:00:00Z' }).i4.ecarts.map((e) => e.ref), ['hubperso#3']);
 });
+
+test('I4 : une tâche née après un calcul sans suivante est « hors file » (ni accord ni écart) ; avec une suivante annoncée, c’est un écart', () => {
+  const sansAnnonce = { hubperso: [{ asof: '2026-10-16T10:10:00Z', statut: 'incident', suivante: null }] };
+  const r = releve([noeud(2, { start: '2026-10-16T10:14:00Z', created: '2026-10-16T10:13:00Z' }), noeud(3, { start: '2026-10-16T10:14:30Z', created: '2026-10-16T09:00:00Z' })]);
+  const m = mesure(r, vivant(), { snapshots: sansAnnonce, depuisI4: '2026-10-16T10:00:00Z' });
+  assert.deepEqual(m.i4.hors_file.map((x) => x.ref), ['hubperso#2']);
+  assert.deepEqual(m.i4.ecarts.map((e) => e.ref), ['hubperso#3']); // née avant le calcul : elle aurait pu être annoncée
+  assert.equal(m.i4.lancements, 1);
+  const annoncee = { hubperso: [{ asof: '2026-10-16T10:10:00Z', statut: 'libre', suivante: 'hubperso#1' }] };
+  const ecart = mesure(releve([noeud(2, { start: '2026-10-16T10:14:00Z', created: '2026-10-16T10:13:00Z' })]), vivant(), { snapshots: annoncee, depuisI4: '2026-10-16T10:00:00Z' });
+  assert.deepEqual(ecart.i4.hors_file, []);
+  assert.deepEqual(ecart.i4.ecarts.map((e) => [e.ref, e.annoncee]), [['hubperso#2', 'hubperso#1']]);
+});
+
+test('historique : i4_hors_file est gardé par relevé', () => {
+  const r = releve([noeud(2, { start: '2026-10-16T10:14:00Z', created: '2026-10-16T10:13:00Z' })]);
+  const m = mesure(r, vivant(), { snapshots: { hubperso: [{ asof: '2026-10-16T10:10:00Z', statut: 'rien', suivante: null }] }, depuisI4: '2026-10-16T10:00:00Z' });
+  assert.equal(ajouterAHistorique(null, m, '2026-10-16T12:05:00Z').historique[0].i4_hors_file, 1);
+});
