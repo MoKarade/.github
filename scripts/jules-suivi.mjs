@@ -197,8 +197,9 @@ export const piedDeJules = (corps) => String(corps ?? '').includes(PIED_JULES);
 export function marquerParJules({ depot, gh, aBlanc = false }) {
   const court = depot.replace('MoKarade/', '');
   const sortie = { marquees: [] };
-  const ouvertes = gh('GET', `repos/${depot}/pulls?state=open&per_page=50`);
-  const fermees = gh('GET', `repos/${depot}/pulls?state=closed&sort=updated&direction=desc&per_page=30`);
+  const liste = (r) => (Array.isArray(r) ? r : []);
+  const ouvertes = liste(gh('GET', `repos/${depot}/pulls?state=open&per_page=50`));
+  const fermees = liste(gh('GET', `repos/${depot}/pulls?state=closed&sort=updated&direction=desc&per_page=30`));
   const vues = new Set();
   let lectures = 0;
   let creee = false;
@@ -209,7 +210,7 @@ export function marquerParJules({ depot, gh, aBlanc = false }) {
     let jules = piedDeJules(p.body);
     if (!jules && p.state === 'open' && lectures < COMMENTAIRES_MAX) {
       lectures += 1;
-      jules = (gh('GET', `repos/${depot}/issues/${p.number}/comments?per_page=100`) ?? []).some((c) => c.user?.login === BOT_JULES);
+      jules = liste(gh('GET', `repos/${depot}/issues/${p.number}/comments?per_page=100`)).some((c) => c.user?.login === BOT_JULES);
     }
     if (!jules) continue;
     if (!aBlanc) {
