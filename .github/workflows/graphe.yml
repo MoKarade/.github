@@ -1,0 +1,77 @@
+name: Graphe de code (workflow commun)
+
+# Construit le graphe de code du dépôt appelant, le réduit à une page lisible (scripts/graphe-page.py de CE dépôt)
+# et téléverse l'artefact `graphe` : `graph.html` et `meta.json`. Hubperso l'affiche tel quel, à jour à chaque push
+# sur la branche par défaut. Tâche : MoKarade/.github#374. Format convenu avec le fil Hubperso (Hubperso#265).
+#
+# Appel depuis un dépôt (job séparé, jamais un check requis) :
+#
+#   graphe:
+#     if: github.event_name == 'push'
+#     permissions: { contents: read }
+#     uses: MoKarade/.github/.github/workflows/graphe.yml@main
+#     with:
+#       runner: ${{ github.event.repository.visibility == 'public' && '"ubuntu-latest"' || '["self-hosted","pc-marc"]' }}
+#       depot: ${{ github.repository }}
+#
+# Zéro coût : dépôt privé = robot du PC (`runner`), jamais `ubuntu-latest`. Le dépôt appelant doit avoir `scripts/graphe.sh`
+# (graphe-code, mission #327). Aucun jeton, aucun appel LLM (`GRAPHIFY_BACKEND=none` dans graphe.sh). L'artefact ne
+# contient que des chemins de fichiers et des dossiers : ni commentaire de code, ni TODO, ni contenu.
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: 'Machine, en JSON : "ubuntu-latest" (dépôt public) ou ["self-hosted","pc-marc"] (dépôt privé).'
+        type: string
+        default: '"ubuntu-latest"'
+      depot:
+        description: 'Dépôt appelant (MoKarade/nom).'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  graphe:
+    name: Graphe de code
+    timeout-minutes: 15
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Le script de tri vient de ce dépôt (public), jamais du code de l'appelant.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: MoKarade/.github
+          ref: main
+          path: .outils-graphe
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - name: Construire le graphe complet
+        run: |
+          set -euo pipefail
+          test -f scripts/graphe.sh || { echo "::error::scripts/graphe.sh absent : le graphe de code n'est pas posé dans ce dépôt."; exit 1; }
+          bash scripts/graphe.sh update
+      - name: Réduire à la page lisible
+        env:
+          DEPOT: ${{ inputs.depot }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^VERSION="\([^"]*\)".*/\1/p' scripts/graphe.sh)"
+          python="${GRAPHE_VENV:-${XDG_CACHE_HOME:-$HOME/.cache}/graphe-venv-$version}/bin/python"
+          mkdir -p sortie-graphe
+          "$python" .outils-graphe/scripts/graphe-page.py graphify-out/graph.json sortie-graphe/graph.html \
+            --titre "Graphe ${DEPOT#*/}" --meta sortie-graphe/meta.json --depot "$DEPOT" --sha "$SHA"
+          test "$(wc -c < sortie-graphe/graph.html)" -lt 1048576 || { echo "::error::graph.html dépasse 1 Mo."; exit 1; }
+          cat sortie-graphe/meta.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: graphe
+          path: sortie-graphe/
+          retention-days: 90
+          if-no-files-found: error
