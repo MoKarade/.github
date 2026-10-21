@@ -9,8 +9,10 @@
 export const PLACES_PAR_DEPOT = 2;
 
 // Journaux que presque chaque PR touche (la doc touchée se met à jour dans la MÊME PR) : ils ne rendent pas deux travaux incompatibles,
-// un conflit de texte s'y règle en fusionnant la base. Tout autre fichier commun (package.json, lockfile, CLAUDE.md, AGENTS.md…) compte.
-const JOURNAUX = /(^|\/)(HANDOVER|CHANGELOG)\.md$/i;
+// un conflit de texte s'y règle en fusionnant la base. Même sort pour les deux index que chaque tâche complète (21/10/2026, demande de JobAI : cinq tâches
+// prêtes ne pouvaient pas tourner ensemble pour cela seul) : `docs/INDEX.md` (généré : on le régénère après la fusion de la base) et `docs/adr/README.md`
+// (une ligne ajoutée par ADR). Tout autre fichier commun (package.json, lockfile, CLAUDE.md, AGENTS.md…) compte.
+const JOURNAUX = /(^|\/)(HANDOVER|CHANGELOG)\.md$|^docs\/(INDEX|adr\/README)\.md$/i;
 
 // « **Fichiers permis** (aucun autre) : » (gabarit Jules, docs/jules-gabarit-issue.md) ou « **Fichiers touchés** : » (tâche écrite pour Claude),
 // suivi d'une liste à puces. Même grammaire que `fichiers_declares` de outils/gantt-pc/fetch.py. Un corps peut porter les deux (une estimation
