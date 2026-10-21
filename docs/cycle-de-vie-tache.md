@@ -197,6 +197,8 @@ Confier, c'est poser l'étiquette `jules` et un commentaire d'une ligne. Le mén
 
 **Captures d'une app dont l'écran demande des gestes** (tâche #307) : `captures.yml` accepte, en plus des pages, `etapes` (une par ligne, format fermé, aucun JavaScript libre : `aller /chemin`, `cliquer-bouton Nom exact`, `attendre-texte Texte` avec 15 s au plus, `pointeur x y`) et `stockage-local` (`cle=valeur` posé dans le localStorage avant le premier chargement), jouées de chaque côté avant de photographier. Les pages peuvent porter un fragment (`/#DEBT`). Une étape qui échoue marque les pages « étape impossible » sans détail interne. C'est ce qui permet à FinanceAI (mode test activé par l'écran) d'appeler le workflow commun.
 
+**La version du code qui tourne se lit sur la ligne du tour** (tâche #314) : la ligne que `filet-pc.mjs` imprime se termine par `code : filet-pc <sha7>, jules-suivi <sha7>, jules-marquage <sha7>, jules-gabarit <sha7>, jules-auto <sha7>`, le sha git de chaque fichier tel que le PC le fait tourner (le PC reçoit les scripts un par un, sans dépôt). Une preuve cite ces sha et les compare à `git rev-parse origin/main:scripts/<nom>.mjs` : « sans ÉCHEC » seul ne prouve pas qu'une fonction fusionnée tourne.
+
 ## 6. Répartition du travail
 
 **Qui lance** : un **événement** d'abord, un relevé à l'heure seulement en filet quotidien (décision de Marc, 15/10/2026 : « plus de vérifications toutes les X heures »). Une demande directe de Marc n'attend rien : le Coordinateur ouvre le fil tout de suite.
