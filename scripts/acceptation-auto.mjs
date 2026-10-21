@@ -167,6 +167,6 @@ export async function accepterApresFusion({ api, depot, numeroPr, config = {}, m
   // Le signal pour Marc, sur la PR : fusionnée, en ligne (ou rien à déployer) et tâche fermée. Un échec ici ne défait rien.
   await api('POST', `/repos/${depot}/issues/${numeroPr}/comments`, {
     body: `Fusionnée et acceptée automatiquement : tâche #${numero} fermée avec sa preuve (${deploiement.ok ? `déploiement READY, ${deploiement.detail}` : 'rien à déployer'}).`,
-  }).catch(() => {});
+  }).catch((erreur) => console.warn(`Réacteur : commentaire « Fusionnée et acceptée » non posté sur la PR #${numeroPr} (la tâche est bien acceptée). ${erreur.message}`));
   return { statut: 'acceptee', motifs: [], tache: numero };
 }
