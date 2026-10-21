@@ -177,6 +177,54 @@ const FENETRE_SIGNAL_H = 24;
 export const ATTENTE_MAX_H = 1;
 const heuresEntre = (depuis, maintenant) => (maintenant.getTime() - Date.parse(depuis)) / 3_600_000;
 
+// Étiquette des PR de Jules (tâche MoKarade/.github#426, demande de Marc du 21/10/2026 18:00Z relayée par le fil Jules) : Jules ouvre ses PR sous l'identité
+// de Marc, rien ne les distingue ; la page de suivi lit cette étiquette. Critère mesuré sur 1 483 PR (17 de Jules, aucune autre) : le corps porte
+// `jules.google.com/task/`, ou le compte `google-labs-jules[bot]` a commenté la PR.
+export const ETIQUETTE_PAR_JULES = 'par-jules';
+export const COULEUR_PAR_JULES = '9b7be0';
+export const PIED_JULES = 'jules.google.com/task/';
+export const BOT_JULES = 'google-labs-jules[bot]';
+export const COMMENTAIRES_MAX = 20; // PR ouvertes dont on lit les commentaires par dépôt et par tour
+
+/** Le corps d'une PR porte-t-il le pied de page de Jules ? (Le commentaire du bot se lit à part, par `marquerParJules`.) */
+export const piedDeJules = (corps) => String(corps ?? '').includes(PIED_JULES);
+
+/**
+ * Pose `par-jules` sur les PR de Jules d'un dépôt : les ouvertes et les trente dernières fermées. Le corps suffit pour toutes ; le commentaire du bot
+ * n'est lu que pour une PR OUVERTE sans pied de page (une lecture par PR et par tour, au plus `COMMENTAIRES_MAX`). Une PR déjà étiquetée n'est pas relue.
+ * L'étiquette est créée au premier besoin (le dépôt neuf n'en a pas). @returns {{ marquees: string[] }}
+ */
+export function marquerParJules({ depot, gh, aBlanc = false }) {
+  const court = depot.replace('MoKarade/', '');
+  const sortie = { marquees: [] };
+  const liste = (r) => (Array.isArray(r) ? r : []);
+  const ouvertes = liste(gh('GET', `repos/${depot}/pulls?state=open&per_page=50`));
+  const fermees = liste(gh('GET', `repos/${depot}/pulls?state=closed&sort=updated&direction=desc&per_page=30`));
+  const vues = new Set();
+  let lectures = 0;
+  let creee = false;
+  for (const p of [...ouvertes, ...fermees]) {
+    if (vues.has(p.number)) continue;
+    vues.add(p.number);
+    if (noms(p.labels).includes(ETIQUETTE_PAR_JULES)) continue;
+    let jules = piedDeJules(p.body);
+    if (!jules && p.state === 'open' && lectures < COMMENTAIRES_MAX) {
+      lectures += 1;
+      jules = liste(gh('GET', `repos/${depot}/issues/${p.number}/comments?per_page=100`)).some((c) => c.user?.login === BOT_JULES);
+    }
+    if (!jules) continue;
+    if (!aBlanc) {
+      if (!creee) {
+        try { gh('POST', `repos/${depot}/labels`, { name: ETIQUETTE_PAR_JULES, color: COULEUR_PAR_JULES, description: 'PR ouverte par Jules' }); } catch { /* existe déjà (422) */ }
+        creee = true;
+      }
+      gh('POST', `repos/${depot}/issues/${p.number}/labels`, { 'labels[]': ETIQUETTE_PAR_JULES });
+    }
+    sortie.marquees.push(`${court}#${p.number}`);
+  }
+  return sortie;
+}
+
 /**
  * Un tour pour un dépôt : applique ce qui est mécanique, rend ce qui reste à dire.
  * @param gh (methode, chemin, corps) -> JSON ; @returns { acceptees, nettoyees, holds, signaux: [{ref, raison}], vu }
