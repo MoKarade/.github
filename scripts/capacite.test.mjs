@@ -15,6 +15,11 @@ test('fichiersDeclares lit « Fichiers permis » : chemins entre backticks, hors
   assert.deepEqual(fichiersDeclares(corps), ['src/a.ts', 'tests/a.test.ts']);
 });
 
+test('fichiersDeclares : « **Attend** : … » sous la liste n\'est pas une puce (.github#374, #375)', () => {
+  assert.deepEqual(fichiersDeclares('**Fichiers touchés** :\n- `scripts/a.mjs`\n- `docs/b.md`\n**Attend** : aucune\n'), ['scripts/a.mjs', 'docs/b.md']);
+  assert.equal(fichiersDeclares('**Fichiers touchés** :\n**Attend** : aucune\n'), null);
+});
+
 test('fichiersDeclares lit aussi « Fichiers touchés » et, sans backticks, le premier mot de la puce', () => {
   assert.deepEqual(fichiersDeclares('**Fichiers touchés** :\n- app/page.tsx pour la carte\n* lib/x.ts'), ['app/page.tsx', 'lib/x.ts']);
 });
