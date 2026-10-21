@@ -3,8 +3,8 @@
 //
 // Remplace la routine « Réacteur » (session Claude lancée à chaque événement). Tout ce qu'elle faisait de mécanique
 // est ici, en code testé :
-//   - pr_fusionnee : « D libre », et « preuve à poser sur D#n » si la tâche citée n'a ni « Acceptée » ni `preuve-attendue` ;
-//   - tache_fermee : « D libre » (le garde-fou de preuve a déjà validé la fermeture, voir reacteur.yml) ;
+//   - pr_fusionnee : « D libre » (aucun travail) ou « D : une place libre » (un seul sur deux places), et « preuve à poser sur D#n » si la tâche citée n'a ni « Acceptée » ni `preuve-attendue` ;
+//   - tache_fermee : « D libre » ou « D : une place libre » (le garde-fou de preuve a déjà validé la fermeture, voir reacteur.yml) ;
 //   - ci_rouge : PR encore ouverte, hors brouillon, au même commit, sinon rien ; un échec de charge du robot (job mort
 //     sans étape en échec) est relancé UNE fois et ne réveille personne ; le reste réveille.
 //   - filet : à CHAQUE passage (cron, même en retard de plusieurs heures, ou lancement manuel), ce que les événements n'ont
@@ -25,8 +25,9 @@
 // Sur l'ouverture d'une PR (pr_ouverte) il ne réveille PERSONNE et ne commente rien sur app-template#58 : il lance seulement
 // `commentaire-tache-liee.yml`, qui marque la tâche citée `en-cours` en moins de 10 minutes (tâche MoKarade/.github#157).
 //
-// « D libre » n'est écrit que si D est VRAIMENT libre (`occupations`) : sans cela, chaque fusion dans un dépôt encore occupé
-// réveillait le Coordinateur pour rien, une quarantaine de fois par heure (tâche MoKarade/.github#164). Ce qui demande un
+// « D libre » n'est écrit que si D est VRAIMENT libre (`travaux`) : sans cela, chaque fusion dans un dépôt encore occupé
+// réveillait le Coordinateur pour rien, une quarantaine de fois par heure (tâche MoKarade/.github#164). Deux places par dépôt (décision de
+// Marc, 21/10/2026, tâche #341) : à un seul travail restant, le message dit « D : une place libre » ; à deux, rien. Ce qui demande un
 // geste (« preuve à poser », abandon d'une tâche) réveille quand même, sans la ligne « libre ».
 //
 // Jamais de nom de tâche suivante dans le message (règle MoKarade/.github#136) : l'ordre vient de prochaines.json.
@@ -39,6 +40,7 @@
 import { pathToFileURL } from 'node:url';
 import { prAttendantMarc } from './attend-marc.mjs';
 import { dispense, extraireTaches } from './tache-liee.mjs';
+import { PLACES_PAR_DEPOT } from './capacite.mjs';
 
 export const DEPOT_BOITE = 'MoKarade/app-template';
 export const WORKFLOW_BOITE = 'boite-reacteur.yml';
@@ -182,6 +184,20 @@ async function commentairesDe(api, depot, numero, depuis = '') {
  * lecture qui échoue ne cache rien : on rend vide (libre), car un réveil de trop coûte moins qu'un dépôt libre qu'on ne signale pas.
  */
 export async function occupations({ api, depot, tachesExclues = [] }) {
+  const { prises, prs } = await lireOccupations({ api, depot, tachesExclues });
+  return [...[...prises].map((n) => `#${n}`), ...prs.map((pr) => `PR #${pr.number}`)];
+}
+
+/**
+ * Le nombre de TRAVAUX du dépôt (deux places par dépôt, décision de Marc du 21/10/2026) : une tâche `en-cours` ou `jules` et sa PR ouverte
+ * comptent pour un, une PR qui ne cite aucune tâche occupée compte pour un. Même lecture que `occupations`, même repli (lecture ratée : 0).
+ */
+export async function travaux({ api, depot, tachesExclues = [] }) {
+  const { prises, prs, tachesDe } = await lireOccupations({ api, depot, tachesExclues });
+  return prises.size + prs.filter((pr) => !tachesDe([pr]).some((n) => prises.has(n))).length;
+}
+
+async function lireOccupations({ api, depot, tachesExclues }) {
   try {
     const ouvertes = ((await api('GET', `/repos/${depot}/pulls?state=open&per_page=30`)) ?? []).filter((pr) => !dispense(pr));
     const attendMarc = new Set(prAttendantMarc((await api('GET', `/repos/${depot}/issues?labels=qui:marc&state=open&per_page=100`)) ?? []));
@@ -194,10 +210,17 @@ export async function occupations({ api, depot, tachesExclues = [] }) {
       const lot = (await api('GET', `/repos/${depot}/issues?labels=${label}&state=open&per_page=30`)) ?? [];
       for (const i of lot) if (!i.pull_request && !exclues.has(i.number)) prises.add(i.number);
     }
-    return [...[...prises].map((n) => `#${n}`), ...prs.map((pr) => `PR #${pr.number}`)];
+    return { prises, prs, tachesDe };
   } catch {
-    return [];
+    return { prises: new Set(), prs: [], tachesDe: () => [] };
   }
+}
+
+/** « D libre » sans travail, « D : une place libre » avec un seul ; rien quand les deux places sont prises. */
+export function signeLibre(depot, travauxEnCours) {
+  if (travauxEnCours <= 0) return `${depot} libre`;
+  if (travauxEnCours < PLACES_PAR_DEPOT) return `${depot} : une place libre`;
+  return '';
 }
 
 /**
@@ -210,10 +233,10 @@ export async function decider({ api, evt, maintenant = new Date() }) {
   if (type === 'pr_ouverte') return { action: 'balayer' };
   if (type === 'tache_fermee') {
     const abandon = evt.raison === 'not_planned' ? ' (abandonnée : vérifier la raison)' : '';
-    const libre = (await occupations({ api, depot })).length === 0;
-    // Un dépôt encore occupé n'a rien de neuf à dire, sauf une tâche abandonnée dont il faut vérifier la raison.
-    if (!libre && !abandon) return { action: 'rien', raison: 'dépôt encore occupé' };
-    return { action: 'reveiller', motif: construireMotif([libre ? `${depot} libre` : '', `tâche ${depot}#${evt.issue} fermée${abandon}`]) };
+    const en = await travaux({ api, depot });
+    // Un dépôt dont les deux places sont prises n'a rien de neuf à dire, sauf une tâche abandonnée dont il faut vérifier la raison.
+    if (en >= PLACES_PAR_DEPOT && !abandon) return { action: 'rien', raison: 'dépôt encore occupé' };
+    return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), `tâche ${depot}#${evt.issue} fermée${abandon}`]) };
   }
 
   if (type === 'pr_fusionnee') {
@@ -230,10 +253,10 @@ export async function decider({ api, evt, maintenant = new Date() }) {
       }
     }
     const tachesExclues = taches.filter((t) => t.depot === depot).map((t) => t.numero);
-    const libre = (await occupations({ api, depot, tachesExclues })).length === 0;
-    // Dépôt encore occupé et rien à prouver : la fusion n'apprend rien au Coordinateur.
-    if (!libre && preuves.length === 0) return { action: 'rien', raison: 'dépôt encore occupé' };
-    return { action: 'reveiller', motif: construireMotif([libre ? `${depot} libre` : '', `PR #${evt.pr} fusionnée`, ...preuves]) };
+    const en = await travaux({ api, depot, tachesExclues });
+    // Dépôt dont les deux places sont prises et rien à prouver : la fusion n'apprend rien au Coordinateur.
+    if (en >= PLACES_PAR_DEPOT && preuves.length === 0) return { action: 'rien', raison: 'dépôt encore occupé' };
+    return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), `PR #${evt.pr} fusionnée`, ...preuves]) };
   }
 
   if (type === 'ci_rouge') {
