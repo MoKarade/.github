@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "graphify": {
+      "command": "bash",
+      "args": [
+        "scripts/graphe.sh",
+        "serve"
+      ]
+    }
+  }
+}

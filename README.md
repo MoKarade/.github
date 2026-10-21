@@ -4,6 +4,7 @@ Le dépôt commun aux apps de Marc.
 
 - **Issues** : le travail qui touche plusieurs dépôts (chantiers, missions, tâches communes).
 - **`docs/`** : les règles communes, à commencer par le [cycle de vie d'une tâche](docs/cycle-de-vie-tache.md).
+- **Graphe de code** : hooks et MCP `graphify` posés (0 jeton) ; `scripts/graphe.sh query|affected|path|explain` avant de grepper ; wiki : `graphify-out/wiki/index.md`. Détail : [docs/graphe-code.md](docs/graphe-code.md).
 - **`scripts/fumee.mjs`** : le test de fumée appelé par `fumee.yml` ; tests : `node --test scripts/fumee.test.mjs`.
 - **`scripts/garde-fou.mjs`** : le contrôle « Garde-fou » appelé par `.github/workflows/garde-fou.yml` de chaque dépôt. Il décide si une PR des chemins protégés peut être fusionnée seule par Mergify ; tests : `node --test scripts/garde-fou.test.mjs`.
 - **`scripts/relecture-ia.mjs`** : la relecture IA des PR au Garde-fou rouge pour une raison levable (références à un secret, cas de test), lancée toutes les 10 minutes par `relecture-ia.yml`. Règles, limites et secrets : [docs/relecture-ia.md](docs/relecture-ia.md) ; tests : `node --test scripts/relecture-ia.test.mjs`.
