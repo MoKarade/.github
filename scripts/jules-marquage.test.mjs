@@ -176,3 +176,11 @@ test('retirerPerimees retire faisable-jules de Hubperso#247 (exclue par décisio
   const r = retirerPerimees({ depot: 'MoKarade/Hubperso', gh: g.gh });
   assert.deepEqual(r, ['Hubperso#247']);
 });
+
+test('sans ligne « Attend » : jamais réservée à Jules (la file l\'écarterait), avec elle oui', () => {
+  const sans = github({ issues: [tache(7, [], corps(7, { attend: '' }))] });
+  assert.deepEqual(marquerFaisables({ depot: 'MoKarade/JobAI', gh: sans.gh }).marquees, []);
+  assert.equal(ecritures(sans.appels).length, 0);
+  const avec = github({ issues: [tache(8)] });
+  assert.deepEqual(marquerFaisables({ depot: 'MoKarade/JobAI', gh: avec.gh }).marquees, ['JobAI#8']);
+});
