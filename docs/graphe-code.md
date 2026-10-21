@@ -24,6 +24,13 @@
 - Ce que `grep` ne donne pas : `affected "X"` rend les importeurs transitifs ET les documents qui citent X, avec fichier:ligne. [Certain]
 - Les chiffres du document source (71,5x, -80 %, 76 % LongMemEval) viennent du fournisseur, sur d'autres corpus. [Probable]
 
+## Page visuelle lisible (tâche MoKarade/.github#371, 21/10/2026)
+- `graph.html` complet (fait par `graphify update`) est illisible : 25 à 40 % de nœuds de documents, des titres de doc en tête des « god nodes », 1 à 7 k nœuds. Il reste utile pour les requêtes, pas pour regarder.
+- `scripts/graphe-page.py GRAPH_JSON SORTIE.html [--max-noeuds 400] [--titre …]` produit une vue par FICHIER : code des dossiers sources seulement (sans tests, générés, dépendances, config, docs, fichiers isolés), un lien = au moins un appel ou import entre deux fichiers, couleur = dossier, panneau sous le graphe sur téléphone. Local, 0 jeton, 0 réseau ; interprète : celui du venv de `graphe.sh` (`~/.cache/graphe-venv-<version>/bin/python`).
+- Mesure du 21/10/2026 sur les 9 dépôts clonés (fichiers sur la page / poids du HTML) : app-template 20 (34 Ko), DriveAI 53 (75 Ko), Hubperso 98 (115 Ko), batchchef 135 (142 Ko), MemoryAI 159 (217 Ko), CarAI 170 (199 Ko), JobAI 214 (252 Ko), FinanceAI 400 plafonné (680 Ko ; 623 fichiers reliés avant plafond), hub-contract 2. Avant : 0,2 à 2,6 Mo. [Certain, mesuré]
+- Rendu vérifié en Chromium sans tête à 1280 et 390 px (JobAI, CarAI) ; le panneau passe sous le graphe à moins de 700 px. Le moteur `.gs` de DriveAI n'est pas dans cette page (second graphe, `graphe.sh moteur`).
+- `graph.html` charge `vis-network` depuis unpkg : une page publiée doit le servir ou l'accepter. Les requêtes (`query`, `affected`) gardent le graphe complet.
+
 ## Retour arrière
 Supprimer `.claude/settings.json` (ou ses trois blocs), `.mcp.json`, `scripts/graphe.sh`, `.graphifyignore`, les deux lignes de `.gitignore` et la ligne de `CLAUDE.md`. Rien d'autre n'a été modifié.
 
