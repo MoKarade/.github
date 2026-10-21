@@ -441,13 +441,14 @@ Le Gantt montre l'état réel du travail. Il ne contient **rien de tapé à la m
   - une PR de tâche de plus de 400 lignes (hors tests).
 - **Autres** :
   - un incident ouvert ;
-  - un dépôt qui a plus de fils en cours que de places (deux depuis le 21/10/2026, §6 capacité ; le contrôle garde son ancien nom « plus d'un fil »).
+  - un dépôt qui a plus de fils en cours que de places (deux depuis le 21/10/2026, §6 capacité ; le contrôle garde son ancien nom « plus d'un fil ») ;
+  - des « fichiers touchés » qui n'en sont pas (`fichiers illisibles` : une ligne en gras prise pour une puce, un libellé à deux-points ; un motif comme `docs/*.md` reste permis).
 
 Le fil « Vue personnalisée du projet » possède les outils du Gantt. Cette section est leur cahier des charges.
 
 **Source de vérité** (mission MoKarade/.github#116, 16/10/2026) : GitHub est la source, le Gantt en est la vue. Chaque relevé écrit trois fichiers dans `commun/outils/gantt/` : `backlog.json` (le relevé), `prochaines.json` (la file, §5) et `fiabilite.json` (`scripts/verif-fidelite.mjs`). Ce dernier relit GitHub directement et mesure :
 - **I1 cohérence** : les défauts de la pastille ;
-- **I2 fidélité** : les écarts entre le relevé et GitHub (état, étiquettes, PR liée), hors ce qui change après le relevé ;
+- **I2 fidélité** : les écarts entre le relevé et GitHub (état, étiquettes, PR liée), hors ce qui change après le relevé ; un écart se corrige seul : `tour.py` fait un relevé plein au tour qui suit une mesure à écarts (une fois par mesure, jamais au tour économe), car un relevé léger peut perdre le lien d'une PR ancienne ;
 - **I3 prise tracée** : `en-cours` posé au plus 10 minutes après l'ouverture de la PR (le balayage le pose, §8) ; aucune PR fusionnée sans tâche (robots exclus) ; aucune branche `claude/*` sans tâche ; aucun `en-cours` sans PR depuis plus de 3 h ;
 - **I4 accord file/agents** : la tâche lancée était la `suivante` du dernier calcul ; la `suivante` de chaque calcul de `prochaines.json` (toutes les 10 minutes) est gardée par `verif-fidelite.mjs --snapshot-seulement`, et un lancement sur une file de plus de 40 minutes est listé (`perimes`).
   Dépôt `occupe` au calcul : `prochaines.json` garde aussi `si_libre` (la tête de file) et le snapshot les occupants (`occupe_par`) ; la tête de file prise dès que chaque occupant est fermé est un accord, compté à part dans `accords_apres_liberation`. Un occupant encore ouvert, un fil actif sans référence ou une autre tâche que la tête de file restent des écarts (deux travaux à la fois).

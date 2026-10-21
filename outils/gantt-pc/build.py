@@ -102,11 +102,16 @@ comp['releve'] = {k: gh.get(k) for k in ('v', 'mode', 'appels', 'reqs', 'n304', 
 CTRL = ['niveau:plan à retirer', 'tâche orpheline', 'corps hors gabarit', 'dépendance inconnue', 'cycle de dépendances',
         'PR sans « Tâche : #n »', 'fermée sans preuve', 'fusionnée sans preuve depuis 2 h', 'preuve programmée dépassée depuis plus d\'1 h', 'en cours sans PR depuis 24 h',
         'jules sans PR depuis 24 h', 'bloquée depuis plus de 7 jours', 'PR de plus de 400 lignes', 'incident ouvert',
-        "plus d'un fil en cours sur un dépôt", 'ménage en retard']
+        "plus d'un fil en cours sur un dépôt", 'ménage en retard', 'fichiers illisibles']
 
 # Le contrôle « plus d'un fil » (nom gardé : la page le connaît) ne signale qu'AU-DELÀ des places du dépôt : deux travaux à la fois depuis le 21/10/2026
 # (scripts/capacite.mjs, PLACES_PAR_DEPOT). Avant ce changement, 7 des 25 défauts du 21/10 n'étaient que des dépôts à deux fils, permis par la règle.
 PLACES_PAR_DEPOT = 2
+
+def chemin_illisible(c):
+    # Un « fichier » déclaré qui n'en est pas un : une ligne en gras prise pour une puce (« *Attend** », .github#374 et #375, 21/10/2026), un libellé avec deux-points ou une espace.
+    # Un motif (`docs/claude/*.md`) reste permis ; c'est le fetch.py qui lit les puces, ce contrôle voit ce qui en sort.
+    return not c or c.startswith('*') or '**' in c or ':' in c or any(x.isspace() for x in c)
 
 def sante(gh):
     REF = {f"{r['repo'].lower()}#{n['n']}": n for r in gh['repos'] for n in r['nodes'].values()}
@@ -162,6 +167,9 @@ def sante(gh):
             for d in n.get('deps', []):
                 if d not in REF:
                     add('dépendance inconnue', r, n, d)
+            mauvais = [c for c in (n.get('fpl') or []) if chemin_illisible(c)]
+            if mauvais:
+                add('fichiers illisibles', r, n, 'pas des chemins : ' + ', '.join(mauvais[:3]))
         if len(fils) > PLACES_PAR_DEPOT:
             for n in fils:
                 add("plus d'un fil en cours sur un dépôt", r, n, f"{len(fils)} tâches en cours dans {r['name']} (limite : {PLACES_PAR_DEPOT})")
