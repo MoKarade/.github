@@ -4,7 +4,7 @@
 // Rôle : quand une issue `niveau:tâche` est fermée, ce script relit ses commentaires et vérifie, sur GitHub,
 // que la fermeture est justifiée.
 //   - `completed` : un commentaire « **Acceptée** — … » écrit par une personne ou par Claude (jamais un robot,
-//     jamais Jules), après la fusion de la PR citée, avec l'empreinte du commit fusionné, sans aveu de doute
+//     jamais Jules, sauf l'acceptation automatique marquée de scripts/acceptation-auto.mjs), après la fusion de la PR citée, avec l'empreinte du commit fusionné, sans aveu de doute
 //     ([Probable], « pas lu »…), et, si la PR change quelque chose de servi, un déploiement de production réussi
 //     sur ce commit (ou sur un commit qui le contient) lu dans l'API GitHub.
 //   - `not_planned` / `duplicate` : un commentaire « **Abandonnée** — raison ».
@@ -39,11 +39,15 @@ const SANS_SERVICE =
 export const servi = (fichiers) => fichiers.some((f) => !SANS_SERVICE.test(f));
 
 const humain = (c) => c.user?.type === 'User' && !/jules/i.test(c.user.login ?? '');
+// Seule exception à « jamais un robot » (docs/cycle-de-vie-tache.md §10 ter) : l'acceptation automatique de scripts/acceptation-auto.mjs,
+// écrite par le robot des workflows et qui porte ce marqueur. Elle n'est reconnue que pour « Acceptée », jamais pour un abandon.
+export const MARQUEUR_AUTO = '<!-- acceptation-auto -->';
+const automatique = (c) => c.user?.login === 'github-actions[bot]' && String(c.body ?? '').includes(MARQUEUR_AUTO);
 const tri = (a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0);
 
 /** Le dernier commentaire d'une personne qui commence par l'en-tête voulu, ou null. */
 export function trouverPreuve(commentaires, entete = ENTETE_ACCEPTEE) {
-  return commentaires.filter((c) => humain(c) && entete.test(c.body ?? '')).sort(tri)[0] ?? null;
+  return commentaires.filter((c) => (humain(c) || (entete === ENTETE_ACCEPTEE && automatique(c))) && entete.test(c.body ?? '')).sort(tri)[0] ?? null;
 }
 
 /** Ce que le commentaire cite : la PR, l'empreinte, le déploiement, le texte de preuve. */
