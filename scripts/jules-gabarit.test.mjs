@@ -128,7 +128,6 @@ test('refus : chemin cité introuvable, motif à étoile, chemin protégé, MCP,
     ['mcp', CORPS().replace('place la carte', 'expose un outil MCP et place la carte'), /MCP/],
     ['base', CORPS().replace('place la carte', 'ajoute une migration et place la carte'), /migration/],
     ['toile', CORPS().replace('place la carte', 'dessine sur la toile et place la carte'), /toile/],
-    ['sans test', CORPS().replace('un test de rendu verrouille l\'ordre et est vert', 'la page est belle'), /aucun test/],
   ];
   for (const [nom, body, motif] of cas) {
     const g = github({ issues: [tache(30, { body })], fichiers: ['app/tendances/page.tsx', 'scripts/hooks/pre.sh'] });
@@ -286,7 +285,7 @@ test('montée de dépendance : sans package.json à la racine, ou sans npm audit
   assert.equal(ecritures(sans.appels).length, 0);
 
   const aucun = github({ issues: [tache(29, { body: CORPS_VITE.replace('`npm audit --omit=dev` rend 0', 'les alertes sont closes'), title: 'Mettre à jour vite' })], fichiers: ['package.json'], dossiers: [] });
-  assert.match(lancer(aucun).refusees[0].raison, /ne cite aucun test/);
+  assert.match(lancer(aucun).refusees[0].raison, /aucun chemin de fichier existant cité/);
 
   const autre = github({ issues: [tache(30, { body: CORPS_VITE.replace('mis à jour vers', 'remplacé par').replace('mise à jour mineure ou correctif', 'correctif'), title: 'Changer vite' })], fichiers: ['package.json'], dossiers: [] });
   assert.match(lancer(autre).refusees[0].raison, /aucun chemin de fichier existant cité/);
@@ -306,4 +305,34 @@ test('sans ligne « Attend » : refus dit, rien n\'est écrit (CarAI#50, 21/10/2
   assert.deepEqual(r.completees, []);
   assert.match(r.refusees[0].raison, /ligne « \*\*Attend\*\* » absente/);
   assert.equal(ecritures(g.appels).length, 0);
+});
+
+const SANS_TEST = () => CORPS().replace('un test de rendu verrouille l\'ordre et est vert', 'la page est belle');
+
+test('sans test dans « Fini quand » (décision de Marc du 21/10/2026) : Jules écrit d\'abord le test, un seul fichier de test nouveau entre dans « Fichiers permis »', () => {
+  const g = github({ issues: [tache(30, { body: SANS_TEST() })] });
+  const r = lancer(g);
+  assert.deepEqual(r.completees, ['FinanceAI#30']);
+  const corps = ecritures(g.appels)[0].corps.body;
+  assert.match(corps, /- `app\/tendances\/page\.tsx`\n- `tests\/tendances\.test\.ts` \(nouveau\)/);
+  assert.match(corps, /Écris D'ABORD le test `tests\/tendances\.test\.ts` qui prouve le « Fini quand »/);
+  assert.doesNotMatch(corps, /Écris ou complète/);
+  assert.deepEqual(evaluerJules({ repo: 'FinanceAI', n: 30, labels: ['niveau:tâche', 'faisable-jules'], body: corps }), { ok: true, raisons: [] });
+  // avec un test cité, l'étape ordinaire reste
+  const avecTest = github({ issues: [tache(31)] });
+  lancer(avecTest);
+  assert.match(ecritures(avecTest.appels)[0].corps.body, /Écris ou complète `tests\/tendances\.test\.ts`/);
+});
+
+test('sans test dans « Fini quand » : refus gardés quand le test ne se dérive pas (aucun fichier de code, test déjà cité, Fichiers permis déjà écrit)', () => {
+  const seulementMd = SANS_TEST().replaceAll('app/tendances/page.tsx', 'docs/guide.md');
+  const g1 = github({ issues: [tache(30, { body: seulementMd })], fichiers: ['docs/guide.md'] });
+  assert.match(lancer(g1).refusees[0].raison, /aucun fichier de code n'est cité/);
+  const dejaTest = SANS_TEST().replace('**Source**', '**Source** : `tests/tendances.test.ts` ;');
+  const g2 = github({ issues: [tache(30, { body: dejaTest })], fichiers: ['app/tendances/page.tsx', 'tests/tendances.test.ts'] });
+  assert.match(lancer(g2).refusees[0].raison, /fichier de test est cité/);
+  const permis = SANS_TEST().replace('**Attend**', '**Fichiers permis** (aucun autre) :\n- `app/tendances/page.tsx`\n\n**Attend**');
+  const g3 = github({ issues: [tache(30, { body: permis })] });
+  assert.match(lancer(g3).refusees[0].raison, /« Fichiers permis » est déjà écrit/);
+  for (const g of [g1, g2, g3]) assert.equal(ecritures(g.appels).length, 0);
 });
