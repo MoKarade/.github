@@ -37,6 +37,8 @@
 // Huitième ajout (tâche MoKarade/.github#303) : compléter seul le corps des tâches pour Jules (`scripts/jules-gabarit.mjs`), 20 par 24 h au plus.
 // Neuvième ajout (tâche MoKarade/.github#358) : écrire seul la ligne « Fichiers touchés » des tâches qui n'en ont pas (`scripts/fichiers-touches.mjs`), 8 par tour au plus :
 // sans fichiers connus, la deuxième place d'un dépôt ne sert jamais.
+// Dixième ajout (tâche MoKarade/.github#421) : écrire seul la ligne « Acceptation automatique » des tâches dont le « Fini quand » se lit par une machine
+// (`scripts/acceptation-marquage.mjs`, 8 par tour au plus) : sans elle, `acceptation-auto.mjs` n'accepte jamais rien (§10 ter).
 // Un échec du réveil ne fait JAMAIS échouer le tour (il se dit sur la ligne imprimée) et n'enregistre pas le signalement :
 // le tour suivant réessaie.
 import { execFileSync } from 'node:child_process';
@@ -50,8 +52,9 @@ import { suivreDepot, menageFermees } from './jules-suivi.mjs';
 import { marquerFaisables, retirerPerimees } from './jules-marquage.mjs';
 import { completerDepot } from './jules-gabarit.mjs';
 import { completerDepot as estimerFichiers, PAR_TOUR_MAX as ESTIMATIONS_PAR_TOUR } from './fichiers-touches.mjs';
+import { completerDepot as marquerAcceptation, PAR_TOUR_MAX as MARQUAGES_PAR_TOUR } from './acceptation-marquage.mjs';
 
-export const MODULES_VERSION = ['filet-pc', 'jules-suivi', 'jules-marquage', 'jules-gabarit', 'jules-auto', 'fichiers-touches'];
+export const MODULES_VERSION = ['filet-pc', 'jules-suivi', 'jules-marquage', 'jules-gabarit', 'jules-auto', 'fichiers-touches', 'acceptation-marquage'];
 
 /**
  * La version du code que ce tour exécute : le sha git (7 caractères) de chaque fichier, calculé comme `git hash-object` (le PC n'a pas de dépôt,
@@ -593,6 +596,33 @@ export function tourFichiersTouches({ executer = false, aBlanc = false, gh = nul
   }
 }
 
+/**
+ * Un tour du marquage « Acceptation automatique » : voir `scripts/acceptation-marquage.mjs`. Rend la ligne à afficher ; ne lève jamais.
+ * @param gh (methode, chemin, corps) -> objet JSON ; par défaut `gh api` du PC
+ */
+export function tourAcceptationMarquee({ executer = false, aBlanc = false, gh = null, depots = DEPOTS_FILET, parTour = MARQUAGES_PAR_TOUR }) {
+  try {
+    const appel = gh ?? ghCli;
+    const budget = { restant: parTour };
+    const ecrites = [];
+    const retirees = [];
+    const echecs = [];
+    for (const depot of depots) {
+      try {
+        const r = marquerAcceptation({ depot, gh: appel, budget, aBlanc: aBlanc || !executer });
+        ecrites.push(...r.ecrites);
+        retirees.push(...r.retirees);
+      } catch (e) {
+        echecs.push(`${depot.replace('MoKarade/', '')} (${String(e.message).replace(/\s+/g, ' ').slice(0, 60)})`);
+      }
+    }
+    const seul = !executer || aBlanc ? ' (non appliqué)' : '';
+    return `acceptation-marquage : ${ecrites.length} écrite(s)${ecrites.length ? ` (${ecrites.slice(0, 6).join(', ')}${ecrites.length > 6 ? ', …' : ''})` : ''}${retirees.length ? `, ${retirees.length} retirée(s) (${retirees.slice(0, 4).join(', ')})` : ''}${seul}${echecs.length ? `, ÉCHEC ${echecs.join(' ; ')}` : ''}`;
+  } catch (e) {
+    return `acceptation-marquage : ÉCHEC (${String(e.message).slice(0, 160)})`;
+  }
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const arg = (nom) => { const i = process.argv.indexOf(nom); return i > 0 ? process.argv[i + 1] : null; };
   const fichierProchaines = process.argv[2];
@@ -611,6 +641,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const file = tourFile({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-file.json'), ...options });
     const suivi = tourJulesSuivi({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-jules-suivi.json'), ...options });
     const fichiers = tourFichiersTouches(options);
-    console.log(`${reveil} · ${quotidien} · ${oublis} · ${quota} · ${liens} · ${jules} · ${file} · ${suivi} · ${fichiers} · ${versionDuCode()}`);
+    const marquage = tourAcceptationMarquee(options);
+    console.log(`${reveil} · ${quotidien} · ${oublis} · ${quota} · ${liens} · ${jules} · ${file} · ${suivi} · ${fichiers} · ${marquage} · ${versionDuCode()}`);
   }
 }
