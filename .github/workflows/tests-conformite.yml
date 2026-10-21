@@ -1,6 +1,6 @@
 name: Tests de la conformité
 
-# Les tests de la grille (scripts/conformite.mjs) : une photo de dépôt conforme, puis une cassure par ligne.
+# Les tests de la grille (scripts/conformite.mjs) : une photo de dépôt conforme, puis une cassure par ligne ; et ceux du choix de machine des workflows communs (scripts/runners.test.mjs, tâche #443).
 # Aucune dépendance, aucun réseau. Aucun `paths:` : un contrôle exigé filtré ne tournerait pas.
 on:
   push:
@@ -26,4 +26,4 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-      - run: node --test scripts/conformite.test.mjs
+      - run: node --test scripts/conformite.test.mjs scripts/runners.test.mjs

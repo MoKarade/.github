@@ -97,7 +97,7 @@ jobs:
   captures:
     name: Captures avant/après
     timeout-minutes: 25
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || fromJSON('["self-hosted","pc-marc"]') }} # dépôt public : machines GitHub (gratuites) ; privé : robot du PC
     env:
       CAPTURES_INSTALLATION: ${{ inputs.installation }}
       CAPTURES_DEMARRAGE: ${{ inputs.demarrage }}

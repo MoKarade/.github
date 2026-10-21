@@ -51,7 +51,7 @@ jobs:
   fumee:
     name: Fumée de production
     timeout-minutes: 10
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || fromJSON('["self-hosted","pc-marc"]') }} # dépôt public : machines GitHub (gratuites) ; privé : robot du PC
     steps:
       # Le script vient de ce dépôt, jamais du code de l'appelant.
       - name: Récupérer le script de fumée
