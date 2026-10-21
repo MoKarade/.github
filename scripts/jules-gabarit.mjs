@@ -14,9 +14,9 @@
 //
 // Fonctions pures (`cheminsCites`, `deriverTest`, `composerBloc`), I/O injecté (`gh`) : les tests n'ont besoin ni de réseau ni de fichier.
 
-import { evaluerJules, section, fichiersPermis, SECTIONS_REQUISES, FICHIERS_MAX, FICHIER_ECRAN, CHEMINS_INTERDITS } from './jules-auto.mjs';
+import { evaluerJules, section, fichiersPermis, SECTIONS_REQUISES, FICHIERS_MAX, FICHIER_ECRAN, CHEMINS_INTERDITS, exclueParDecision } from './jules-auto.mjs';
 import { tachesCitees } from './jules-suivi.mjs';
-import { ETIQUETTE, PRIO_ECARTEE, MENTION_MCP, dependanceOuverte } from './jules-marquage.mjs';
+import { ETIQUETTE, MENTION_MCP, dependanceOuverte } from './jules-marquage.mjs';
 
 const ORG = 'MoKarade';
 export const MARQUEUR = '<!-- gabarit-auto -->';
@@ -217,7 +217,7 @@ export function completerDepot({ depot, gh, etat = {}, maintenant = new Date(), 
   const candidates = ouvertes
     .filter((i) => {
       const l = noms(i.labels);
-      return !l.includes(ETIQUETTE) && !l.includes(PRIO_ECARTEE) && !ETIQUETTES_QUI_ECARTENT.some((x) => l.includes(x)) && !(i.body ?? '').includes(MARQUEUR);
+      return !l.includes(ETIQUETTE) && !exclueParDecision(court, i.number) && !ETIQUETTES_QUI_ECARTENT.some((x) => l.includes(x)) && !(i.body ?? '').includes(MARQUEUR);
     })
     .sort((a, b) => prio(a) - prio(b) || a.number - b.number);
   if (!candidates.length) return sortie;
