@@ -274,6 +274,7 @@ La procédure pas à pas est la compétence `livrer-une-tache`. Elle applique ce
 
 - Le workflow commun `captures` lance l'app sur les machines GitHub, **avec les données fictives des tests uniquement**, jamais la production. Il photographie chaque page touchée avant (sur la branche par défaut) et après (sur la PR).
 - Les images sont rangées dans la branche `captures` du dépôt, sous `pr-<n>/`, et la PR reçoit un commentaire avec les deux images côte à côte. Ce commentaire est mis à jour à chaque push.
+- La branche `captures` est orpheline : le `vercel.json` de la branche par défaut ne la couvre pas, et Vercel lit `git.deploymentEnabled` dans celui du commit poussé. `scripts/captures.mjs` écrit donc à chaque commit un `vercel.json` à la racine (`{"git":{"deploymentEnabled":false}}`), pour qu'aucune préversion ne parte (une était en erreur dans FinanceAI, tâche #315). Une branche `captures` ancienne le reçoit à son prochain push.
 - L'historique reste dans la branche `captures`. Les fichiers temporaires d'Actions ne servent pas : ils disparaissent après 90 jours au plus.
 - Une capture qui montre une donnée réelle est un incident de données perso : on retire l'image et on corrige la fixture.
 
