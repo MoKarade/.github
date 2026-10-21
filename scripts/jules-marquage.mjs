@@ -5,14 +5,14 @@
 // aucune étiquette ne l'écarte, aucune dépendance n'est ouverte (ligne `**Attend**` ET lien natif « Bloquée par »), aucune PR ouverte ne la cite.
 // Une tâche pas au gabarit est refusée et laissée : c'est voulu, rien n'est deviné. Le poids de la réserve est borné (RESERVE_MAX par dépôt) :
 // une tâche réservée sort de la file de Claude, donc on ne réserve pas plus que Jules ne peut prendre.
-import { evaluerJules } from './jules-auto.mjs';
+import { evaluerJules, exclueParDecision } from './jules-auto.mjs';
 import { tachesCitees } from './jules-suivi.mjs';
 
 const ORG = 'MoKarade';
 export const RESERVE_MAX = 2;
 export const ETIQUETTE = 'faisable-jules';
-/** `prio:3` = « après le backlog » (décision de Marc) : jamais marquée seule. */
-export const PRIO_ECARTEE = 'prio:3';
+// `prio:3` n'écarte plus le marquage : Marc a répondu « Oui sauf #247 » le 21/10/2026 (carte « Laisser Jules prendre aussi les tâches prio:3 ? »).
+// Les tâches qu'il garde hors de Jules sont nommées dans `EXCLUES_PAR_DECISION` (jules-auto.mjs).
 /**
  * Une tâche qui ajoute un outil MCP reste hors du full auto (décision de Marc, 19/10/2026 19:56Z : « 4 oui ») : sa preuve en production
  * demande une session avec son connecteur. Lu dans le corps de la tâche ; le diff est relu à la fusion (`toucheMcp`, jules-suivi.mjs).
@@ -89,7 +89,7 @@ export function marquerFaisables({ depot, gh, aBlanc = false }) {
   let place = RESERVE_MAX - sortie.reserve;
   const candidates = ouvertes.filter((i) => {
     const l = noms(i.labels);
-    return !l.includes(ETIQUETTE) && !l.includes(PRIO_ECARTEE);
+    return !l.includes(ETIQUETTE) && !exclueParDecision(court, i.number);
   });
   if (place <= 0 || candidates.length === 0) return sortie;
 

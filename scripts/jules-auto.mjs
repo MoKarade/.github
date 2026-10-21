@@ -47,6 +47,12 @@ export const CHEMINS_INTERDITS = [
   [/(^|\/)(BACKLOG|HANDOVER|CLAUDE|AGENTS)\.md$/, 'fichier d\'instructions à ne pas réécrire'],
 ];
 const DEPOTS_INTERDITS = { 'hub-contract': 'le contrat', };
+/**
+ * Tâches que Marc garde hors de Jules, nommées une à une. 21/10/2026 : à la carte « Laisser Jules prendre aussi les tâches prio:3 ? », Marc a
+ * répondu « Oui sauf #247 » (Hubperso#247 : ADR de la tuile Wear OS, à faire après le backlog). La liste est un `Set` de « dépôt#n » en minuscules.
+ */
+export const EXCLUES_PAR_DECISION = new Set(['hubperso#247']);
+export const exclueParDecision = (repo, n) => EXCLUES_PAR_DECISION.has(`${String(repo ?? '').toLowerCase()}#${n}`);
 const ETIQUETTES_INTERDITES = ['sécurité', 'securite', 'incident', 'preuve-manquante', 'migration', 'secret'];
 // Les apps sont privées (connexion centralisée dans le hub) : sans porte « mode captures », que Marc a refusée le 19/10/2026 (« b »), le workflow
 // commun `captures.yml` ne peut pas photographier leurs pages, et le filet n'accepte seul une PR d'écran qu'avec ces captures. FinanceAI, 100 %
@@ -80,6 +86,7 @@ export function evaluerJules({ repo, n, labels = [], body = '' }) {
   const raisons = [];
   const depot = String(repo ?? '').toLowerCase();
   if (DEPOTS_INTERDITS[depot]) raisons.push(`dépôt réservé à Claude (${DEPOTS_INTERDITS[depot]})`);
+  if (exclueParDecision(repo, n)) raisons.push('tâche gardée hors de Jules par décision de Marc (21/10/2026)');
   if (!labels.includes('faisable-jules')) raisons.push('étiquette « faisable-jules » absente');
   for (const l of labels) if (ETIQUETTES_INTERDITES.includes(String(l).toLowerCase())) raisons.push(`étiquette « ${l} » : tâche à garder pour Claude`);
   for (const l of ETIQUETTES_QUI_ECARTENT) if (labels.includes(l)) raisons.push(`étiquette « ${l} »`);
