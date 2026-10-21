@@ -172,6 +172,33 @@ export function motifDesOublis(reveils, reste = 0) {
   return construireMotif([`oubli : ${reveils.map(ligneOubli).join(' ; ')}${reste ? ` ; +${reste} autre(s) au prochain tour` : ''}`]);
 }
 
+export const QUOTA_MORT_H = 6;
+export const FENETRE_QUOTA_H = 24;
+
+/**
+ * Décide s'il faut réveiller parce que le quota Claude n'est plus mesuré (MoKarade/.github#337). Ne modifie pas son entrée.
+ * La tâche « Quota-Claude » du PC s'est arrêtée 38 h avec le quota (19-21/10/2026) sans qu'aucun réveil ne parte : l'alerte vivait seulement dans `prochaines.json`.
+ * `frein_detail.perime` est vrai quand la mesure a plus de 3 h ; au-delà de `QUOTA_MORT_H` (ou sans mesure du tout), c'est une panne de la mesure.
+ * @param etat { signale: iso } : un seul signalement par 24 h ; une mesure fraîche l'efface, la panne suivante réveille donc tout de suite.
+ * @returns { etat, reveils: [{ heures }], raison }
+ */
+export function evaluerQuotaMort({ prochaines, etat = {}, maintenant = new Date() }) {
+  const age = minutesEntre(prochaines?.calcule_le ?? '', maintenant);
+  if (!Number.isFinite(age) || age > PROCHAINES_PERIME_MIN) return { etat: { signale: etat?.signale ?? null }, reveils: [], raison: 'prochaines.json périmé' };
+  const d = prochaines.frein_detail;
+  const mort = d?.perime === true && (d.age_heures == null || d.age_heures > QUOTA_MORT_H);
+  if (!mort) return { etat: { signale: null }, reveils: [], raison: d ? 'quota mesuré il y a moins de 6 h' : 'frein_detail absent' };
+  const recent = etat?.signale && minutesEntre(etat.signale, maintenant) < FENETRE_QUOTA_H * 60;
+  if (recent) return { etat: { signale: etat.signale }, reveils: [], raison: 'déjà signalé il y a moins de 24 h' };
+  return { etat: { signale: maintenant.toISOString() }, reveils: [{ heures: d.age_heures == null ? null : Math.round(d.age_heures) }], raison: '' };
+}
+
+/** Le texte du réveil : `RÉACTEUR : quota Claude non mesuré depuis N h (…)`. Sans mesure du tout, pas de durée. */
+export function motifDuQuota(reveils) {
+  const h = reveils[0]?.heures;
+  return construireMotif([`quota Claude non mesuré ${h == null ? 'du tout' : `depuis ${h} h`} (tâche Quota-Claude du PC arrêtée ?)`]);
+}
+
 export const DEPOTS_FILET = ['MoKarade/.github', 'MoKarade/app-template', 'MoKarade/batchchef-', 'MoKarade/CarAI', 'MoKarade/DriveAI', 'MoKarade/FinanceAI', 'MoKarade/hub-contract', 'MoKarade/Hubperso', 'MoKarade/JobAI', 'MoKarade/MemoryAI'];
 export const WORKFLOW_FILET = 'reacteur.yml';
 export const HEURE_FILET_MIN = 6 * 60; // 6 h 00, heure du Québec (America/Toronto : même fuseau, heure d'été comprise)
@@ -292,6 +319,34 @@ export function tourOublis({ fichierProchaines, fichierEtat, executer = false, a
     }
   } catch (e) {
     return `filet oublis : ÉCHEC (${String(e.message).slice(0, 160)})`;
+  }
+}
+
+/** Un tour du quota : réveille le Coordinateur si la mesure du quota est morte depuis plus de 6 h. Rend la ligne à afficher ; ne lève jamais. */
+export function tourQuota({ fichierProchaines, fichierEtat, executer = false, aBlanc = false, maintenant = new Date(), lancer = execFileSync }) {
+  try {
+    const prochaines = lireJson(fichierProchaines, null);
+    if (!prochaines) return 'filet quota : prochaines.json illisible';
+    const avant = lireJson(fichierEtat, {});
+    const r = evaluerQuotaMort({ prochaines, etat: avant, maintenant });
+    if (r.reveils.length === 0) {
+      if (!aBlanc) ecrireJson(fichierEtat, r.etat);
+      return `filet quota : rien (${r.raison})`;
+    }
+    const motif = motifDuQuota(r.reveils);
+    if (aBlanc) return `filet quota : à blanc, réveil prévu : ${motif}`;
+    if (!executer) { ecrireJson(fichierEtat, r.etat); return `filet quota : réveil décidé, non envoyé : ${motif}`; }
+    try {
+      reveiller(motif, lancer);
+      ecrireJson(fichierEtat, r.etat);
+      return 'filet quota : réveil envoyé';
+    } catch (e) {
+      // Un réveil raté n'enregistre rien : le tour suivant réessaie.
+      ecrireJson(fichierEtat, { signale: avant?.signale ?? null });
+      return `filet quota : ÉCHEC du réveil (${String(e.stderr || e.message).replace(/\s+/g, ' ').slice(0, 160)})`;
+    }
+  } catch (e) {
+    return `filet quota : ÉCHEC (${String(e.message).slice(0, 160)})`;
   }
 }
 
@@ -518,10 +573,11 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const reveil = tour({ fichierProchaines, fichierEtat, ...options });
     const quotidien = tourQuotidien({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-quotidien.json'), ...options });
     const oublis = tourOublis({ fichierProchaines, fichierEtat: fichierEtat.replace(/(\.json)?$/, '-oublis.json'), ...options });
+    const quota = tourQuota({ fichierProchaines, fichierEtat: fichierEtat.replace(/(\.json)?$/, '-quota.json'), ...options });
     const liens = tourLiens({ fichierProchaines, ...options });
     const jules = tourJules({ fichierProchaines, fichierEtat: fichierEtat.replace(/(\.json)?$/, '-jules.json'), ...options });
     const file = tourFile({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-file.json'), ...options });
     const suivi = tourJulesSuivi({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-jules-suivi.json'), ...options });
-    console.log(`${reveil} · ${quotidien} · ${oublis} · ${liens} · ${jules} · ${file} · ${suivi} · ${versionDuCode()}`);
+    console.log(`${reveil} · ${quotidien} · ${oublis} · ${quota} · ${liens} · ${jules} · ${file} · ${suivi} · ${versionDuCode()}`);
   }
 }
