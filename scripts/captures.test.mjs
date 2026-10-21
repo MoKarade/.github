@@ -163,6 +163,55 @@ test('publier : crée la branche captures, la met à jour, garde l’historique,
   }
 });
 
+/** La branche `captures` ne doit jamais créer de préversion Vercel : Vercel lit `vercel.json` dans le commit poussé (MoKarade/FinanceAI#1170). */
+test('publier : la branche captures porte un vercel.json qui coupe le déploiement, même si elle existait sans lui', () => {
+  const racine = mkdtempSync(join(tmpdir(), 'cap-vercel-'));
+  try {
+    const distant = join(racine, 'distant.git');
+    execFileSync('git', ['init', '-q', '--bare', distant]);
+    const remote = `file://${distant}`;
+    const sortie = (nom, contenu) => {
+      const d = join(racine, nom);
+      mkdirSync(d, { recursive: true });
+      writeFileSync(join(d, 'accueil.png'), contenu);
+      return d;
+    };
+    const lire = (fichier) => execFileSync('git', ['--git-dir', distant, 'show', `captures:${fichier}`], { encoding: 'utf8' });
+
+    // Branche créée avant la correction : orpheline, sans vercel.json (comme celle de FinanceAI, commit 41d89bf).
+    const ancien = join(racine, 'ancien');
+    mkdirSync(join(ancien, 'pr-1', 'apres'), { recursive: true });
+    writeFileSync(join(ancien, 'pr-1', 'apres', 'accueil.png'), 'ANCIEN');
+    const g = (...args) => execFileSync('git', args, { cwd: ancien, stdio: 'ignore' });
+    g('init', '-q', '-b', 'captures');
+    g('config', 'user.name', 't');
+    g('config', 'user.email', 't@t');
+    g('add', '-A');
+    g('commit', '-q', '-m', 'ancien');
+    g('push', '-q', remote, 'captures');
+    assert.throws(() => lire('vercel.json'));
+
+    // Le premier push après la correction ajoute vercel.json, même quand les images ne changent pas.
+    assert.deepEqual(publier({ remote, pr: 1, sha: 'aaaaaaa1', avant: join(racine, 'absent'), apres: join(ancien, 'pr-1', 'apres') }), { pousse: true });
+    assert.deepEqual(JSON.parse(lire('vercel.json')), { git: { deploymentEnabled: false } });
+    assert.equal(lire('pr-1/apres/accueil.png'), 'ANCIEN');
+
+    // Ensuite : idempotent, et chaque commit suivant garde le fichier.
+    assert.deepEqual(publier({ remote, pr: 1, sha: 'aaaaaaa1', avant: join(racine, 'absent'), apres: join(ancien, 'pr-1', 'apres') }), { pousse: false });
+    assert.deepEqual(publier({ remote, pr: 2, sha: 'bbbbbbb2', avant: sortie('a', 'A'), apres: sortie('p', 'P') }), { pousse: true });
+    assert.deepEqual(JSON.parse(lire('vercel.json')), { git: { deploymentEnabled: false } });
+
+    // Branche toute neuve : vercel.json dès le premier commit.
+    const distant2 = join(racine, 'distant2.git');
+    execFileSync('git', ['init', '-q', '--bare', distant2]);
+    assert.deepEqual(publier({ remote: `file://${distant2}`, pr: 3, sha: 'ccccccc3', avant: sortie('a3', 'A3'), apres: sortie('p3', 'P3') }), { pousse: true });
+    const premier = execFileSync('git', ['--git-dir', distant2, 'show', 'captures:vercel.json'], { encoding: 'utf8' });
+    assert.deepEqual(JSON.parse(premier), { git: { deploymentEnabled: false } });
+  } finally {
+    rmSync(racine, { recursive: true, force: true });
+  }
+});
+
 test('publier : une erreur autre que « branche absente » remonte', () => {
   assert.throws(() => publier({ remote: 'file:///inexistant/depot.git', pr: 1, sha: 'abc', avant: '/nulle/part', apres: '/nulle/part' }));
 });
