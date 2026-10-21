@@ -5,13 +5,18 @@
 // dont le CORPS est une consigne complète au gabarit `docs/jules-gabarit-issue.md`. Aucune IA, aucun jugement : une tâche est confiable
 // ou elle ne l'est pas, et la raison s'écrit. Règles : plan du fil Jules, `commun/plans/2026-10-19_jules-automatique.md`.
 //
-// Dépôt libre : aucun incident, aucune issue `jules` ou `en-cours` ouverte, aucune PR ouverte (hors robots et boîte du Réacteur) ; vérifié EN
-// DIRECT au moment de confier. Plafond : trois tâches Jules en même temps sur les dix dépôts (le quota de Jules est de 15 simultanées).
+// Dépôt avec une place libre (deux places par dépôt, décision de Marc du 21/10/2026) : aucun incident et moins de deux travaux (issues `jules` ou
+// `en-cours` ouvertes, PR ouvertes hors robots et boîte du Réacteur ; une tâche et sa PR comptent pour un). Avec un travail déjà en cours, Jules ne
+// prend la deuxième place que si les fichiers de sa tâche (« Fichiers permis ») et ceux de ce travail sont DÉCLARÉS et disjoints (`capacite.mjs`) ;
+// vérifié EN DIRECT au moment de confier. Plafond : trois tâches Jules en même temps sur les dix dépôts (le quota de Jules est de 15 simultanées).
 // Confier = poser l'étiquette `jules` (le signal que Jules lit) + un commentaire d'une ligne. Le « ménage » du cycle de vie (§7) retire
 // l'étiquette après 24 h sans PR ; une tâche déjà confiée deux fois ne l'est plus (elle reste réservée : le silence de 24 h réveille alors le
 // Coordinateur, qui corrige le corps).
 //
 // Fonctions pures (`evaluerJules`, `choisirPourJules`), I/O injecté (`lireIssue`, `gh`) : les tests n'ont besoin ni de réseau ni de fichier.
+
+import { PLACES_PAR_DEPOT, fichiersDeclares, raisonIncompatible } from './capacite.mjs';
+import { extraireTaches } from './tache-liee.mjs';
 
 const ORG = 'MoKarade';
 
@@ -142,8 +147,11 @@ export function choisirPourJules(prochaines, lireIssue, etat = {}) {
   for (const d of depots) {
     if (!(d.reservees_jules ?? []).length) continue;
     resultat.depotsConcernes += 1;
-    // Un dépôt occupé (travail en cours, PR ouverte, incident) attend : une chose à la fois. La tâche reste réservée.
-    if ((d.occupe_par ?? []).length || (d.incidents ?? []).length) continue;
+    // Deux travaux en cours, ou un incident : le dépôt attend. La tâche reste réservée.
+    const occupants = d.occupe_par ?? [];
+    if (occupants.length >= PLACES_PAR_DEPOT || (d.incidents ?? []).length) continue;
+    // Un seul travail en cours dont les fichiers ne sont pas déclarés : pas de deuxième place (dans le doute, un seul), sans rien lire.
+    if (occupants.some((o) => !Array.isArray(o.fichiers) || !o.fichiers.length)) continue;
     if (enCours + resultat.choix.length >= SIMULTANEES_MAX) continue;
     for (const c of d.reservees_jules.slice(0, CANDIDATES_MAX)) {
       if ((etat.confies?.[c.ref]?.fois ?? 0) >= FOIS_MAX) { resultat.pasPretes.push({ ref: c.ref, raisons: [`déjà confiée ${FOIS_MAX} fois`] }); continue; }
@@ -152,6 +160,8 @@ export function choisirPourJules(prochaines, lireIssue, etat = {}) {
       if (issue.state !== 'open') { resultat.pasPretes.push({ ref: c.ref, raisons: ['fermée'] }); continue; }
       const verdict = evaluerJules({ repo: d.repo, n: c.n, labels: issue.labels, body: issue.body });
       if (!verdict.ok) { resultat.pasPretes.push({ ref: c.ref, raisons: verdict.raisons }); continue; }
+      const gene = occupants.map((o) => raisonIncompatible(o.fichiers, fichiersDeclares(issue.body))).find(Boolean);
+      if (gene) { resultat.pasPretes.push({ ref: c.ref, raisons: [`place partagée refusée : ${gene} avec ${occupants.map((o) => o.ref ?? o.motif).join(', ')}`] }); continue; }
       resultat.choix.push({ repo: d.repo, ref: c.ref, n: c.n, titre: c.titre });
       break;
     }
@@ -160,8 +170,8 @@ export function choisirPourJules(prochaines, lireIssue, etat = {}) {
 }
 
 /**
- * Confie la tâche à Jules après une dernière vérification EN DIRECT : issue ouverte, aucune étiquette qui l'écarte, et aucun autre travail
- * `jules` ou `en-cours` ouvert, et aucune PR ouverte (hors robots et boîte du Réacteur). `gh(methode, chemin, corps)` rend l'objet JSON ou lève.
+ * Confie la tâche à Jules après une dernière vérification EN DIRECT : issue ouverte, aucune étiquette qui l'écarte, moins de deux travaux dans le
+ * dépôt (issues `jules` ou `en-cours` ouvertes, PR ouvertes hors robots et boîte du Réacteur), et, avec un travail déjà en cours, des fichiers disjoints. `gh(methode, chemin, corps)` rend l'objet JSON ou lève.
  * @returns {{ statut: 'confiee'|'sautee', raison?: string }}
  */
 export function confierAJules({ repo, n }, gh, { aBlanc = false } = {}) {
@@ -171,17 +181,33 @@ export function confierAJules({ repo, n }, gh, { aBlanc = false } = {}) {
   if (issue.state !== 'open') return { statut: 'sautee', raison: 'fermée' };
   const ecartee = ETIQUETTES_QUI_ECARTENT.find((l) => etiquettes.includes(l));
   if (ecartee) return { statut: 'sautee', raison: `étiquette « ${ecartee} »` };
+  // Les travaux du dépôt, lus EN DIRECT : issues `en-cours` ou `jules` ouvertes (avec leur corps, donc leurs fichiers), et PR ouvertes qui ne
+  // citent aucune de ces issues (une tâche et sa PR comptent pour un travail ; une PR seule a des fichiers inconnus).
+  const issuesTravail = new Map();
   for (const l of ETIQUETTES_QUI_OCCUPENT) {
-    const ouvertes = gh('GET', `${base}/issues?labels=${encodeURIComponent(l)}&state=open&per_page=5`);
-    if ((Array.isArray(ouvertes) ? ouvertes : []).some((i) => !i.pull_request)) return { statut: 'sautee', raison: `dépôt occupé (issue « ${l} » ouverte)` };
+    const ouvertes = gh('GET', `${base}/issues?labels=${encodeURIComponent(l)}&state=open&per_page=30`);
+    for (const i of Array.isArray(ouvertes) ? ouvertes : []) if (!i.pull_request && i.number !== n) issuesTravail.set(i.number, i);
   }
   const prs = gh('GET', `${base}/pulls?state=open&per_page=30`);
-  const travail = (Array.isArray(prs) ? prs : []).find((p) => p.user?.type !== 'Bot' && !String(p.user?.login ?? '').endsWith('[bot]') && !(repo.toLowerCase() === BOITE.depot && p.number === BOITE.pr));
-  if (travail) return { statut: 'sautee', raison: `dépôt occupé (PR #${travail.number} ouverte)` };
+  const prsTravail = (Array.isArray(prs) ? prs : []).filter((p) => p.user?.type !== 'Bot' && !String(p.user?.login ?? '').endsWith('[bot]') && !(repo.toLowerCase() === BOITE.depot && p.number === BOITE.pr));
+  const prsSeules = prsTravail.filter((p) => !extraireTaches(p.body, repo).some((t) => t.depot.toLowerCase() === repo.toLowerCase() && issuesTravail.has(t.numero)));
+  const travaux = issuesTravail.size + prsSeules.length;
+  const nom = (i) => `issue #${i.number}`;
+  if (travaux >= PLACES_PAR_DEPOT) {
+    const premier = [...issuesTravail.values()].map(nom)[0] ?? `PR #${prsSeules[0]?.number} ouverte`;
+    return { statut: 'sautee', raison: `dépôt occupé (${premier}, ${travaux} travaux sur ${PLACES_PAR_DEPOT} places)` };
+  }
+  if (travaux === 1) {
+    // Deuxième place : seulement si le seul autre travail déclare ses fichiers et qu'ils sont disjoints de ceux de cette tâche.
+    const autre = [...issuesTravail.values()][0];
+    if (!autre) return { statut: 'sautee', raison: `dépôt occupé (PR #${prsSeules[0].number} ouverte : fichiers inconnus, un seul travail à la fois)` };
+    const gene = raisonIncompatible(fichiersDeclares(autre.body), fichiersDeclares(issue.body));
+    if (gene) return { statut: 'sautee', raison: `dépôt occupé (${nom(autre)} en cours : ${gene})` };
+  }
   if (aBlanc) return { statut: 'confiee', raison: 'à blanc' };
   gh('POST', `${base}/issues/${n}/labels`, { 'labels[]': 'jules' });
   gh('POST', `${base}/issues/${n}/comments`, {
-    body: `Confiée à Jules automatiquement par le filet du PC (tâche réservée \`faisable-jules\`, dépôt libre, corps au gabarit). Le corps de l'issue est sa consigne. Claude relit la PR et pose la preuve « Acceptée ».`,
+    body: `Confiée à Jules automatiquement par le filet du PC (tâche réservée \`faisable-jules\`, une place libre dans le dépôt, corps au gabarit). Le corps de l'issue est sa consigne. Claude relit la PR et pose la preuve « Acceptée ».`,
   });
   return { statut: 'confiee' };
 }
