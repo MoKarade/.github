@@ -40,6 +40,16 @@ export function fichiersDeclares(body) {
   return null;
 }
 
+/**
+ * Les fichiers d'un travail en cours : ceux que sa tâche DÉCLARE plus ceux que sa PR ouverte touche VRAIMENT (`pr.ff` du relevé du PC). La réalité
+ * s'ajoute à la déclaration sans la remplacer : une PR peut encore grandir jusqu'à ses fichiers déclarés. `reels` null = liste tronquée ou absente
+ * (le relevé ne garde pas les PR de 100 fichiers ou plus) : elle ne fournit rien. Résultat null = rien de connu (hors journaux) : pas de parallèle.
+ */
+export function fichiersDuTravail(declares, reels) {
+  const tous = [...new Set([...(Array.isArray(declares) ? declares : []), ...(Array.isArray(reels) ? reels : [])])].filter((c) => !JOURNAUX.test(nettoyer(c)));
+  return tous.length ? tous : null;
+}
+
 /** Un chemin devient soit un fichier exact, soit un préfixe (dossier `a/b/` ou motif `a/b/*.ts` : tout ce qui précède l'étoile). */
 function forme(chemin) {
   const c = nettoyer(chemin).toLowerCase();
