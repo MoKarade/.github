@@ -353,7 +353,7 @@ test('frein : un relevé de plus de 3 h garde le dernier palier connu et le dit 
   assert.equal(frein(85, undefined, vieux).detail.perime, true);
 });
 
-// Panne de quota du 19-21/10/2026 (.github#320) : la mesure s'est arrêtée à 100 % avec le quota, le palier 2 est resté après la remise à zéro.
+// Panne de quota du 19-21/10/2026 (.github#319) : la mesure s'est arrêtée à 100 % avec le quota, le palier 2 est resté après la remise à zéro.
 test('frein : mesure d’avant la remise à zéro, passée depuis plus de 15 min = semaine précédente, palier normal dit tel quel', () => {
   const reset = '2026-10-21T12:00:00Z';
   const apres = (minutes, extra = {}) => calculerFrein({ pct: 100, mesureUtc: '2026-10-19T22:04:00Z', precedent: 2, resetUtc: reset, maintenant: new Date(Date.parse(reset) + minutes * 60_000), ...extra });
