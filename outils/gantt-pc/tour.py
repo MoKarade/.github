@@ -149,7 +149,9 @@ def releve(econome=False, quota_complet=True, drive=None):
     fd = p.get('frein_detail') or {}
     if fd.get('apres_reset'): quota += ' · quota Claude : remise à zéro passée, mesure de la semaine précédente ignorée (frein normal)'
     elif (fd.get('age_heures') or 0) > 3: quota += f' · quota Claude : mesure vieille de {fd["age_heures"]} h (tâche Quota-Claude arrêtée ?)'
-    return 0, f'OK {maintenant()} relevé {mode} {asof} · prochaines.json {p["calcule_le"]} {file} · fiabilité : {fid}{quota}{filet}{rep}'
+    rv = lire('backlog.json').get('relectures_vide')      # pages vides de GitHub relues pendant ce relevé (.github#494) : se DIT, une panne de lecture ne se devine pas
+    relectures = '' if rv is None else f' · relectures de pages vides : {rv}'
+    return 0, f'OK {maintenant()} relevé {mode} {asof} · prochaines.json {p["calcule_le"]} {file} · fiabilité : {fid}{relectures}{quota}{filet}{rep}'
 
 
 def main():

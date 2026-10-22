@@ -1,4 +1,5 @@
 import json, os, re, sys, datetime, subprocess, shutil
+import defauts_preuve      # preuves en retard pour le filet du PC (tâche .github#513)
 # v5 gardée dans fetch_v5.py / build_v5.py + page5.html
 # v6 (15/10/2026) : cahier des charges du §13 de MoKarade/.github docs/cycle-de-vie-tache.md.
 # v7 (16/10/2026) : la file « tâche suivante » n'est plus calculée par la page : build.py fait tourner le script de MoKarade/.github
@@ -197,6 +198,11 @@ def sante(gh):
     pm = [1 for r in gh['repos'] for n in r['nodes'].values() if n['lvl'] == 'tâche' and n['state'] == 'open' and 'preuve-manquante' in n['labels'] and f"{r['repo'].lower()}#{n['n']}" not in vu]
     return {'ctrl': CTRL, 'pb': pb, 'hors': hors, 'n': len(pb) + len(pm)}
 comp['sante'] = sante(gh)
+
+# Preuves en retard, pour le filet du PC (scripts/preuves-retard.mjs, tâche .github#513) : il les redit au Coordinateur toutes les 4 h.
+_dp = D + 'defauts-preuve' + OUT + '.json'
+json.dump(defauts_preuve.calculer(gh, comp['sante'], datetime.datetime.now(datetime.timezone.utc)), open(_dp + '.tmp', 'w', encoding='utf-8'), ensure_ascii=False)
+os.replace(_dp + '.tmp', _dp)
 # réponses de Marc depuis la page (reponses.py) : la page y lit si un clic a été appliqué ou refusé
 try: comp['reponses'] = json.load(open(D + 'reponses-journal.json', encoding='utf-8'))[-50:]
 except (OSError, ValueError): comp['reponses'] = []
