@@ -11,7 +11,7 @@
 #   (sans option : tout, Actions sur le mois entier ; --rapide : Actions sur 36 h seulement, tout le reste identique)
 import re, json, sys, os, datetime, math, threading, urllib.request
 from concurrent.futures import ThreadPoolExecutor
-import ghcache
+import ghcache, visibilite
 
 OPT = {a.split('=', 1)[0]: (a.split('=', 1) + [''])[1] for a in sys.argv[1:] if a.startswith('--')}
 D = os.path.dirname(os.path.abspath(__file__)) + '/'
@@ -108,19 +108,32 @@ out = {'v': 9, 'asof': iso(NOW), 'tz': 'America/Toronto',
 def prive(r):
     """Dépôt privé ? (relu une fois par jour)"""
     c = cache.setdefault('prive', {})
-    if r in c and NOW - t(c[r]['t']) < 24 * H: return c[r]['p']
+    vis = cache.setdefault('visibilite', {})
+    if r in c and NOW - t(c[r]['t']) < 24 * H:
+        visibilite.noter(vis, r, c[r]['p'], c[r]['t'])       # historique créé (et semé) même quand la lecture du jour est en cache
+        return c[r]['p']
     p = bool(gh(f'repos/MoKarade/{r}').get('private'))
     c[r] = {'p': p, 't': iso(NOW)}
+    visibilite.noter(vis, r, p, iso(NOW))
     return p
+
+def _passages(vis, depuis):
+    """« : FinanceAI privé depuis le 21/10, carai public depuis le 19/10 » : les passages de visibilité du mois, dits dans la note."""
+    parts = [f"{r} {'privé' if p else 'public'} depuis le {t[8:10]}/{t[5:7]}" for r in REPOS for t, p in visibilite.passages(vis, r, depuis)]
+    return ' (' + ', '.join(parts) + ')' if parts else ''
 
 # ---- 1. Minutes GitHub Actions (dépôts PRIVÉS seulement ; les dépôts publics sont gratuits) ----
 def actions():
-    privees = [r for r in REPOS if prive(r)]
+    privees = [r for r in REPOS if prive(r)]          # relit aussi la visibilité : `visibilite` est à jour
+    vis = cache.setdefault('visibilite', {})
     since = iso(mois0)
+    # GitHub ne facture que les exécutions lancées pendant que le dépôt était privé : un dépôt devenu public ou privé en cours de mois
+    # ne compte que pour sa période privée (FinanceAI, privé depuis le 21/10 : 5 478 min comptées à tort le 22/10).
+    scrutes = [r for r in REPOS if visibilite.a_ete_prive_depuis(vis, r, since)]
     # relevé rapide : seulement les exécutions des 36 dernières heures (les plus anciennes sont déjà en cache) ; le relevé complet relit le mois
     depuis = iso(max(mois0, NOW - 36 * H)) if RAPIDE else since
     todo, en_cours = [], []
-    for r in privees:
+    for r in scrutes:
         for run in pages(f'repos/MoKarade/{r}/actions/runs?created=%3E%3D{depuis}', 'workflow_runs'):
             key = f"{r}/{run['id']}/{run.get('run_attempt', 1)}"
             if run['status'] != 'completed': en_cours.append((r, run))
@@ -146,8 +159,8 @@ def actions():
     # anciens noms de dépôts (renommés en minuscules) : entrées périmées du cache, sinon comptées en double
     for k in [k for k, v in cache['runs'].items() if v['r'] not in REPOS]: del cache['runs'][k]
     tot, par_j, par_depot = 0, {}, {}
-    for k, v in cache['runs'].items():
-        if v['c'] < since: continue
+    comptes = {k: v for k, v in cache['runs'].items() if v['c'] >= since and visibilite.etait_prive(vis, v['r'], v['c'])}
+    for k, v in comptes.items():
         tot += v['m']; par_depot[v['r']] = par_depot.get(v['r'], 0) + v['m']
         for d, m in v['j'].items(): par_j[d] = par_j.get(d, 0) + m
     # exécutions en cours : minutes déjà écoulées des jobs qui tournent (non comptées dans `utilise`, qui ne prend que le terminé)
@@ -163,11 +176,11 @@ def actions():
             'en_cours': {'runs': len(en_cours), 'min': ec_min},
             'par_jour': {d: par_j.get(d, 0) for d in out['jours']}, 'par_depot': par_depot, 'depots': privees,
             # chaque exécution mesurée : [début, dépôt, workflow (null si mesurée avant le 21/10), minutes]
-            'runs': sorted([[v['c'], v['r'], v.get('w'), v['m']] for v in cache['runs'].values() if v['m'] and v['c'] >= iso(NOW - LONG * 24 * H)]),
+            'runs': sorted([[v['c'], v['r'], v.get('w'), v['m']] for v in cache['runs'].values() if v['m'] and v['c'] >= iso(NOW - LONG * 24 * H) and visibilite.etait_prive(vis, v['r'], v['c'])]),
             # tout le mois, jour par jour : la courbe cumulée de la page s'appuie dessus (un jour sans trace = 0 mesuré)
             'par_jour_mois': {jour_de(mois0 + datetime.timedelta(days=i, hours=12)): par_j.get(jour_de(mois0 + datetime.timedelta(days=i, hours=12)), 0)
                               for i in range(0, (min(NOW, mois1) - mois0).days + 1)},
-            'mesure': 'mesuré', 'note': 'Dépôts privés seulement (' + ', '.join(privees) + '), jobs sur machines GitHub ; le robot du PC et les dépôts publics ne comptent pas. Chaque job arrondi à la minute. Une exécution en cours n\'entre dans le total qu\'une fois finie ; ses minutes écoulées sont indiquées à part.',
+            'mesure': 'mesuré', 'note': 'Dépôts privés seulement (' + ', '.join(privees) + '), et seulement tant qu\'ils l\'étaient' + _passages(vis, since) + ', jobs sur machines GitHub ; le robot du PC et les dépôts publics ne comptent pas. Chaque job arrondi à la minute. Une exécution en cours n\'entre dans le total qu\'une fois finie ; ses minutes écoulées sont indiquées à part.',
             'source': 'Plan GitHub Free : 2 000 min/mois (docs/couts.md de CarAI)'}
 
 # ---- 2. Déploiements Vercel (6 000 par jour et 450 par heure pour tout le compte, plan Pro ; Hobby = 100 par jour) ----
