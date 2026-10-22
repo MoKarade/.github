@@ -6,7 +6,7 @@ class LireVide(unittest.TestCase):
     def avec(self, reponses):
         """Remplace une lecture par une suite de (JSON, vide confirmée par le cache en 304) ; rend le nombre de lectures."""
         suite, n = list(reponses), [0]
-        def faux(path, *args):
+        def faux(path, *args, **kw):
             n[0] += 1
             return suite.pop(0)
         self._ancienne, ghcache._lire = ghcache._lire, faux
@@ -59,5 +59,39 @@ class LireVide(unittest.TestCase):
         self.avec([([], False), ([1], False)])
         ghcache.lire('repos/x/issues?page=4')
         self.assertEqual(ghcache.STATS['relectures_vide'], avant + 1)
+
+class CacheDisque(unittest.TestCase):
+    """Vrai _lire, `gh api` simulé : ce qui entre au cache (ETag compris) et ce qu'un 304 en fait."""
+    def setUp(self):
+        import tempfile, types
+        self.dossier = tempfile.mkdtemp() + '/'
+        anciens = (ghcache.DOSSIER, ghcache.ACTIF, ghcache.subprocess.run)
+        ghcache.DOSSIER, ghcache.ACTIF = self.dossier, True
+        self.addCleanup(lambda: (setattr(ghcache, 'DOSSIER', anciens[0]), setattr(ghcache, 'ACTIF', anciens[1]), setattr(ghcache.subprocess, 'run', anciens[2])))
+        self.sortie, self.envoyes = [], []
+        def faux(cmd, **kw):
+            self.envoyes.append(cmd)
+            return types.SimpleNamespace(stdout=self.sortie.pop(0), stderr='', returncode=0)
+        ghcache.subprocess.run = faux
+
+    @staticmethod
+    def rep(statut, etag, corps=''):
+        return f'HTTP/2.0 {statut} X\nEtag: {etag}\n\n{corps}'
+
+    def test_une_vide_passagere_ne_remplace_pas_la_bonne_liste_du_cache(self):
+        self.sortie[:] = [self.rep(200, '"E1"', '[1,2]')]
+        self.assertEqual(ghcache.lire('repos/x/issues?page=1'), [1, 2])
+        # la même page revient vide en 200 (ETag différent), puis la relecture reçoit un 304 sur la bonne liste
+        self.sortie[:] = [self.rep(200, '"E0"', '[]'), self.rep(304, '"E1"')]
+        self.assertEqual(ghcache.lire('repos/x/issues?page=1'), [1, 2])
+        self.assertIn('If-None-Match: "E1"', self.envoyes[-1])      # le cache gardait E1, pas l'ETag de la vide
+
+    def test_une_vraie_liste_vide_entre_au_cache_apres_les_relectures(self):
+        self.sortie[:] = [self.rep(200, '"E0"', '[]')] * 4
+        self.assertEqual(ghcache.lire('repos/x/issues?labels=incident'), [])
+        self.sortie[:] = [self.rep(304, '"E0"')]
+        n = len(self.envoyes)
+        self.assertEqual(ghcache.lire('repos/x/issues?labels=incident'), [])
+        self.assertEqual(len(self.envoyes), n + 1)                  # confirmée en 304 : une seule lecture
 
 if __name__ == '__main__': unittest.main()

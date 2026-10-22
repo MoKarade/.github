@@ -43,15 +43,17 @@ def lire(path, *args, verifier_vide=False):
     (page suivante d'une liste dont la page précédente était pleine : une telle page ne peut pas être vide)."""
     res, confirmee = _lire(path, *args)
     if _vide(res) and (verifier_vide or not confirmee):
-        for attente in ATTENTES_VIDE:
+        for i, attente in enumerate(ATTENTES_VIDE):
             time.sleep(attente)
             with _V: STATS['relectures_vide'] += 1
-            res2, _ = _lire(path, *args)
+            res2, _ = _lire(path, *args, ecrire_vide=i == len(ATTENTES_VIDE) - 1)     # une vide n'entre au cache qu'une fois confirmée par toutes les relectures
             if not _vide(res2): return res2
     return res
 
-def _lire(path, *args):
-    """Une lecture -> (JSON, vrai si c'est une liste vide que le serveur confirme en 304 sur une liste vide déjà en cache)."""
+def _lire(path, *args, ecrire_vide=False):
+    """Une lecture -> (JSON, vrai si c'est une liste vide que le serveur confirme en 304 sur une liste vide déjà en cache).
+    Une réponse vide n'est écrite au cache (avec son ETag) que si `ecrire_vide` : sinon une vide passagère remplacerait la bonne liste du cache,
+    et la même vide, revenue avec le même ETag, serait « confirmée » en 304 sans relecture."""
     cle = path + '|' + ' '.join(args)
     f = _fichier(cle)
     etag = corps_cache = None
@@ -73,12 +75,13 @@ def _lire(path, *args):
             return (json.loads(corps_cache) if corps_cache.strip() else None), cache_vide
         if statut is not None and 200 <= statut < 300:
             with _V: STATS['n200'] += 1
-            if ACTIF and en.get('etag'):
+            res = json.loads(corps) if corps.strip() else None
+            if ACTIF and en.get('etag') and (ecrire_vide or not _vide(res)):
                 try:
                     with open(f + '.tmp', 'w', encoding='utf-8') as fh: json.dump({'etag': en['etag'], 'corps': corps}, fh)
                     os.replace(f + '.tmp', f)
                 except OSError: pass
-            return (json.loads(corps) if corps.strip() else None), False
+            return res, False
         with _V: STATS['erreurs'] += 1
         dernier = f"{path.split('?')[0]} : HTTP {statut} " + (corps or r.stderr or r.stdout)[:200].replace('\n', ' ')
         # limite secondaire (403/429 « rate limit ») : on attend ce que GitHub demande, sans insister
