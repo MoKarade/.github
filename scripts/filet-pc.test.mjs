@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
-import { DEPOTS_FILET, annulerSignalements, dateQuebec, evaluerFilet, evaluerOublis, evaluerQuotaMort, evaluerQuotidien, grouperOublis, lancerFilet, ligneOubli, motifDesOublis, motifDuFilet, motifDuQuota, reveiller, tour, tourOublis, tourQuota, tourQuotidien, tourLiens, LIENS_PAR_TOUR, tourJules, evaluerFile, motifDeLaFile, tourFile, versionDuCode, MODULES_VERSION, tourAcceptationMarquee } from './filet-pc.mjs';
+import { DEPOTS_FILET, annulerSignalements, dateQuebec, evaluerFilet, evaluerOublis, evaluerQuotaMort, evaluerQuotidien, grouperOublis, lancerFilet, ligneOubli, motifDesOublis, motifDuFilet, motifDuQuota, reveiller, tour, tourOublis, tourQuota, tourQuotidien, tourLiens, LIENS_PAR_TOUR, tourJules, evaluerFile, motifDeLaFile, tourFile, versionDuCode, MODULES_VERSION, tourAcceptationMarquee, tourPreuvesRetard } from './filet-pc.mjs';
 
 const T0 = new Date('2026-10-17T18:00:00Z');
 const apres = (min, base = T0) => new Date(base.getTime() + min * 60_000);
@@ -586,8 +586,8 @@ test('tourFile : à blanc ne touche à rien ; une erreur GitHub se dit sans fair
 
 test('versionDuCode : le sha git de chaque fichier, comme git hash-object ; un fichier absent est dit « absent »', () => {
   const ligne = versionDuCode((nom) => { if (nom === 'jules-auto') throw new Error('absent'); return Buffer.from('abc'); });
-  assert.match(ligne, /^code : filet-pc f2ba8f8, jules-suivi f2ba8f8, jules-marquage f2ba8f8, jules-gabarit f2ba8f8, jules-auto absent, fichiers-touches f2ba8f8, acceptation-marquage f2ba8f8$/);
-  assert.equal(MODULES_VERSION.length, 7);
+  assert.match(ligne, /^code : filet-pc f2ba8f8, jules-suivi f2ba8f8, jules-marquage f2ba8f8, jules-gabarit f2ba8f8, jules-auto absent, fichiers-touches f2ba8f8, acceptation-marquage f2ba8f8, preuves-retard f2ba8f8$/);
+  assert.equal(MODULES_VERSION.length, 8);
   // les vrais fichiers de ce dépôt sont tous lisibles
   assert.doesNotMatch(versionDuCode(), /absent/);
 });
@@ -618,4 +618,28 @@ test('tourAcceptationMarquee : écrit la ligne sur la tâche éligible, dit « n
   assert.match(patches[0], /\*\*Acceptation automatique\*\* : oui/);
   const ko = tourAcceptationMarquee({ executer: true, gh: () => { throw new Error('réseau coupé'); }, depots: ['MoKarade/CarAI'] });
   assert.match(ko, /^acceptation-marquage : 0 écrite\(s\), ÉCHEC CarAI \(réseau coupé\)$/);
+});
+
+// ---- Preuves en retard (tâche .github#513) : le tour redit au Coordinateur, puis se tait 4 h ----
+test('preuves-retard : le tour envoie le réveil, se tait 4 h ; un échec n’enregistre rien ; à blanc, rien ne part', () => {
+  const dossier = mkdtempSync(join(tmpdir(), 'preuves-'));
+  const fichierDefauts = join(dossier, 'defauts-preuve.json');
+  const fichierEtat = join(dossier, 'etat.json');
+  const ecrire = (maintenant) => writeFileSync(fichierDefauts, JSON.stringify({ calcule_le: iso(maintenant), defauts: [{ k: 'fusionnée sans preuve depuis 2 h', ref: 'FinanceAI#1240' }] }));
+  ecrire(T0);
+  assert.match(tourPreuvesRetard({ fichierDefauts, fichierEtat, aBlanc: true, maintenant: T0, lancer: () => assert.fail('à blanc : rien ne part') }), /à blanc, réveil prévu : RÉACTEUR : preuve en retard : FinanceAI#1240/);
+  assert.match(tourPreuvesRetard({ fichierDefauts, fichierEtat, executer: true, maintenant: T0, lancer: () => { throw new Error('gh KO'); } }), /ÉCHEC du réveil/);
+  const appels = [];
+  ecrire(apres(10));
+  assert.match(tourPreuvesRetard({ fichierDefauts, fichierEtat, executer: true, maintenant: apres(10), lancer: (cmd, args) => appels.push([cmd, args]) }), /réveil envoyé \(1 tâche/);
+  assert.ok(appels[0][1].some((a) => a === 'texte=RÉACTEUR : preuve en retard : FinanceAI#1240 (fusionnée sans preuve)'));
+  ecrire(apres(20));
+  assert.match(tourPreuvesRetard({ fichierDefauts, fichierEtat, executer: true, maintenant: apres(20), lancer: () => assert.fail('pas de second réveil') }), /rien/);
+  ecrire(apres(251));
+  assert.match(tourPreuvesRetard({ fichierDefauts, fichierEtat, executer: true, maintenant: apres(251), lancer: (cmd, args) => appels.push([cmd, args]) }), /réveil envoyé/);
+  assert.equal(appels.length, 2);
+});
+
+test('preuves-retard : fichier absent, la ligne le dit sans lever', () => {
+  assert.match(tourPreuvesRetard({ fichierDefauts: join(tmpdir(), 'nexiste-pas', 'defauts-preuve.json'), fichierEtat: join(tmpdir(), 'x.json'), maintenant: T0 }), /illisible/);
 });

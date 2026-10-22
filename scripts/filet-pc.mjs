@@ -39,6 +39,8 @@
 // sans fichiers connus, la deuxième place d'un dépôt ne sert jamais.
 // Dixième ajout (tâche MoKarade/.github#421) : écrire seul la ligne « Acceptation automatique » des tâches dont le « Fini quand » se lit par une machine
 // (`scripts/acceptation-marquage.mjs`, 8 par tour au plus) : sans elle, `acceptation-auto.mjs` n'accepte jamais rien (§10 ter).
+// Onzième ajout (tâche MoKarade/.github#513) : redire au Coordinateur, toutes les 4 h, chaque preuve en retard (`scripts/preuves-retard.mjs`, `defauts-preuve.json` du relevé) :
+// une tâche fusionnée sans « Acceptée » valide ou dont la preuve programmée est dépassée ne dépend plus du seul fil qui devait la poser.
 // Un échec du réveil ne fait JAMAIS échouer le tour (il se dit sur la ligne imprimée) et n'enregistre pas le signalement :
 // le tour suivant réessaie.
 import { execFileSync } from 'node:child_process';
@@ -53,8 +55,9 @@ import { marquerFaisables, retirerPerimees } from './jules-marquage.mjs';
 import { completerDepot } from './jules-gabarit.mjs';
 import { completerDepot as estimerFichiers, PAR_TOUR_MAX as ESTIMATIONS_PAR_TOUR } from './fichiers-touches.mjs';
 import { completerDepot as marquerAcceptation, PAR_TOUR_MAX as MARQUAGES_PAR_TOUR } from './acceptation-marquage.mjs';
+import { annulerPreuves, evaluerPreuvesRetard, motifDesPreuves } from './preuves-retard.mjs';
 
-export const MODULES_VERSION = ['filet-pc', 'jules-suivi', 'jules-marquage', 'jules-gabarit', 'jules-auto', 'fichiers-touches', 'acceptation-marquage'];
+export const MODULES_VERSION = ['filet-pc', 'jules-suivi', 'jules-marquage', 'jules-gabarit', 'jules-auto', 'fichiers-touches', 'acceptation-marquage', 'preuves-retard'];
 
 /**
  * La version du code que ce tour exécute : le sha git (7 caractères) de chaque fichier, calculé comme `git hash-object` (le PC n'a pas de dépôt,
@@ -326,6 +329,33 @@ export function tourOublis({ fichierProchaines, fichierEtat, executer = false, a
     }
   } catch (e) {
     return `filet oublis : ÉCHEC (${String(e.message).slice(0, 160)})`;
+  }
+}
+
+/** Un tour des preuves en retard : redit au Coordinateur les tâches fusionnées sans preuve ou à preuve dépassée. Rend la ligne à afficher ; ne lève jamais. */
+export function tourPreuvesRetard({ fichierDefauts, fichierEtat, executer = false, aBlanc = false, maintenant = new Date(), lancer = execFileSync }) {
+  try {
+    const defauts = lireJson(fichierDefauts, null);
+    if (!defauts) return 'preuves-retard : defauts-preuve.json illisible';
+    const r = evaluerPreuvesRetard({ defauts, etat: lireJson(fichierEtat, {}), maintenant });
+    if (r.reveils.length === 0) {
+      if (!aBlanc) ecrireJson(fichierEtat, r.etat);
+      return `preuves-retard : rien (${r.raison})`;
+    }
+    const motif = motifDesPreuves(r.reveils, r.reste);
+    if (aBlanc) return `preuves-retard : à blanc, réveil prévu : ${motif}`;
+    if (!executer) { ecrireJson(fichierEtat, r.etat); return `preuves-retard : réveil décidé, non envoyé : ${motif}`; }
+    try {
+      reveiller(motif, lancer);
+      ecrireJson(fichierEtat, r.etat);
+      return `preuves-retard : réveil envoyé (${r.reveils.length} tâche(s))`;
+    } catch (e) {
+      // Un réveil raté n'enregistre rien : le tour suivant réessaie.
+      ecrireJson(fichierEtat, annulerPreuves(r.etat, r.reveils));
+      return `preuves-retard : ÉCHEC du réveil (${String(e.stderr || e.message).replace(/\s+/g, ' ').slice(0, 160)})`;
+    }
+  } catch (e) {
+    return `preuves-retard : ÉCHEC (${String(e.message).slice(0, 160)})`;
   }
 }
 
@@ -643,6 +673,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const suivi = tourJulesSuivi({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-jules-suivi.json'), ...options });
     const fichiers = tourFichiersTouches(options);
     const marquage = tourAcceptationMarquee(options);
-    console.log(`${reveil} · ${quotidien} · ${oublis} · ${quota} · ${liens} · ${jules} · ${file} · ${suivi} · ${fichiers} · ${marquage} · ${versionDuCode()}`);
+    const preuves = tourPreuvesRetard({ fichierDefauts: fichierProchaines.replace(/[^/\\]*$/, '') + 'defauts-preuve.json', fichierEtat: fichierEtat.replace(/(\.json)?$/, '-preuves.json'), ...options });
+    console.log(`${reveil} · ${quotidien} · ${oublis} · ${quota} · ${liens} · ${jules} · ${file} · ${suivi} · ${fichiers} · ${marquage} · ${preuves} · ${versionDuCode()}`);
   }
 }
