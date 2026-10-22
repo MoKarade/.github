@@ -32,15 +32,17 @@ if (-not $Drive) {
             $p = Join-Path $l.Root $n
             if (Test-Path $p) {
                 $trouves += Get-ChildItem -LiteralPath $p -Directory -Recurse -Depth 6 -Filter '_Gantt' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+                # Le dossier a été renommé « Gantt » (22/10/2026) : on ne le prend que s'il porte déjà `etat.json`, pour ne pas confondre avec un autre dossier du même nom.
+                $trouves += Get-ChildItem -LiteralPath $p -Directory -Recurse -Depth 6 -Filter 'Gantt' -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path $_.FullName 'etat.json') } | ForEach-Object { $_.FullName }
             }
         }
     }
     $avec = @($trouves | Where-Object { Test-Path (Join-Path $_ 'etat.json') })
     if ($avec.Count -eq 1) { $Drive = $avec[0] }
     elseif ($avec.Count -eq 0 -and @($trouves).Count -eq 1) { $Drive = $trouves[0] }
-    elseif (@($trouves).Count -gt 1) { throw ("Plusieurs dossiers _Gantt trouvés : " + ($trouves -join ' | ') + ' : relancer avec -Drive "<le bon>".') }
+    elseif (@($trouves).Count -gt 1) { throw ("Plusieurs dossiers _Gantt ou Gantt trouvés : " + ($trouves -join ' | ') + ' : relancer avec -Drive "<le bon>".') }
 }
-if (-not $Drive) { throw 'Dossier Google Drive _Gantt introuvable : relancer avec -Drive "<chemin du dossier _Gantt>".' }
+if (-not $Drive) { throw 'Dossier Google Drive _Gantt (ou Gantt) introuvable : relancer avec -Drive "<chemin du dossier>".' }
 if (-not (Test-Path -LiteralPath $Drive)) { New-Item -ItemType Directory -Force $Drive | Out-Null }
 Write-Host "OK   Drive : $Drive"
 
