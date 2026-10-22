@@ -12,7 +12,7 @@
 #      GitHub avec le jeton gh du PC, puis réveil du Coordinateur ; avant le relevé, pour qu'il en voie déjà l'effet
 #   5. dépôt dans le dossier Google Drive synchronisé (--drive DOSSIER) : donnees.json.gz (lu par la page), prochaines.json,
 #      fiabilite.json, quota.json, etat.json. Les fichiers sont RÉÉCRITS SUR PLACE : Drive garde alors le même identifiant.
-#   5 bis. envoi au hub (pousser_hub.py, .github#544) : POST https://hubperso.com/api/gantt, secret lu dans C:\dev\_pc-local\gantt-secret.txt, jamais bloquant
+#   5 bis. envoi au hub (pousser_hub.py, .github#544) : POST https://www.hubperso.com/api/gantt, secret lu dans C:\dev\_pc-local\gantt-secret.txt, jamais bloquant
 # Freins : le jeton du PC est celui de Marc, partagé avec tout le reste de son compte (5 000 appels/h). Sous 1 500 appels restants, tour
 # économe (relevé léger, quotas rapides, pas de mesure de fiabilité) ; sous 3 500, quotas Claude et coût API seuls ; sous 300, tour sauté ; « rate limit » au tour précédent = 30 min
 # d'attente. Un seuil unique à 3 000 sautait des tours entiers dès que le compte servait ailleurs (PC de Marc, 16/10 : 1 911 restants).
