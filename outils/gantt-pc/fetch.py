@@ -17,6 +17,7 @@
 import json, subprocess, sys, datetime, re, os, time, threading, base64, hashlib, urllib.parse
 from reponses import options as reponses_options     # réponses préfaites d'une question (section « Réponses » de l'issue)
 from concurrent.futures import ThreadPoolExecutor
+import completude
 from ci import resume_ci     # fin de CI et CI rouge d'une PR fusionnée (onglet Rythme)
 ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
 OPT = {a.split('=', 1)[0]: (a.split('=', 1) + [''])[1] for a in sys.argv[1:] if a.startswith('--')}
@@ -30,13 +31,13 @@ if OPT.get('--depots'):          # sous-ensemble de dépôts : pour les tests se
     REPOS = [r for r in REPOS if r[0] in OPT['--depots'].split(',')]
 
 import ghcache      # lecture avec ETag : un 304 ne compte pas dans la limite de GitHub (mesuré le 16/10/2026)
-def _un(path, *args): return ghcache.lire(path, *args)
+def _un(path, *args, **kw): return ghcache.lire(path, *args, **kw)
 def gh(path, *args):
     # pagination à la main (page=N) : le lien « suivant » de --paginate passe par repositories/{id}, refusé par le relais
     if 'per_page=' not in path: return _un(path, *args)
     out = []
     for p in range(1, 60):
-        d = _un(path + ('&' if '?' in path else '?') + f'page={p}', *args)
+        d = _un(path + ('&' if '?' in path else '?') + f'page={p}', *args, verifier_vide=p > 1)     # une page vide après une page pleine : GitHub se trompe, on relit (ghcache.lire)
         if not isinstance(d, list): return d
         out += d
         if len(d) < int(re.search(r'per_page=(\d+)', path).group(1)): break
@@ -453,6 +454,15 @@ def miroir_scripts():
     return out
 res['scripts'] = miroir_scripts()
 OUT_F = D + OUT if not os.path.isabs(OUT) else OUT
+# Perte brutale d'éléments depuis le relevé précédent = lecture incomplète de GitHub (page vide, 22/10/2026) : pas de publication, le tour garde le précédent
+try: prec = json.load(open(OUT_F, encoding='utf-8'))
+except Exception: prec = None
+if prec:
+    perdus = completude.pertes(prec, res, datetime.datetime.now(datetime.timezone.utc))
+    if perdus:
+        print('relevé INCOMPLET, non publié : ' + ', '.join(f'{d} {a} -> {b} éléments' for d, a, b in perdus), file=sys.stderr)
+        sys.exit(3)
+res['relectures_vide'] = ghcache.compteurs()['relectures_vide']
 json.dump(res, open(OUT_F + '.tmp', 'w'), ensure_ascii=False)
 os.replace(OUT_F + '.tmp', OUT_F)
 # quotas (Actions, Vercel, Jules, Gemini) : mesure à part, un échec ne bloque pas le relevé. La boucle les lance elle-même (--sans-quota).
