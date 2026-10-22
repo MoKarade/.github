@@ -1,7 +1,7 @@
 name: Graphe de code (workflow commun)
 
 # Construit le graphe de code du dépôt appelant, le réduit à une page lisible (scripts/graphe-page.py de CE dépôt)
-# et téléverse l'artefact `graphe` : `graph.html` et `meta.json`. Hubperso l'affiche tel quel, à jour à chaque push
+# et téléverse l'artefact `graphe` : `graph.html`, `meta.json` et `impact.json` (mesure de l'impact, schéma impact-v1). Hubperso l'affiche tel quel, à jour à chaque push
 # sur la branche par défaut. Tâche : MoKarade/.github#374. Format convenu avec le fil Hubperso (Hubperso#265).
 #
 # Appel depuis un dépôt (job séparé, jamais un check requis) :
@@ -48,7 +48,9 @@ jobs:
         run: |
           set -euo pipefail
           test -f scripts/graphe.sh || { echo "::error::scripts/graphe.sh absent : le graphe de code n'est pas posé dans ce dépôt."; exit 1; }
+          debut="$(date +%s)"
           bash scripts/graphe.sh update
+          echo "DUREE_CONSTRUCTION=$(( $(date +%s) - debut ))" >> "$GITHUB_ENV"
       # Le script de tri vient de ce dépôt (public), jamais du code de l'appelant. Récupéré APRÈS la construction du graphe,
       # pour que ses propres fichiers n'entrent pas dans le graphe du dépôt appelant.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -70,6 +72,24 @@ jobs:
             --titre "Graphe ${DEPOT#*/}" --meta sortie-graphe/meta.json --depot "$DEPOT" --sha "$SHA"
           test "$(wc -c < sortie-graphe/graph.html)" -lt 1048576 || { echo "::error::graph.html dépasse 1 Mo."; exit 1; }
           cat sortie-graphe/meta.json
+      # Mesure de l'impact de Graphify (MoKarade/.github#465) : impact.json à côté de meta.json. Un échec de la mesure ne
+      # retire jamais le graphe de la page : l'étape est signalée en avertissement et l'artefact part sans impact.json.
+      - name: Mesurer l'impact (impact.json)
+        id: impact
+        continue-on-error: true
+        env:
+          DEPOT: ${{ inputs.depot }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^VERSION="\([^"]*\)".*/\1/p' scripts/graphe.sh)"
+          python="${GRAPHE_VENV:-${XDG_CACHE_HOME:-$HOME/.cache}/graphe-venv-$version}/bin/python"
+          "$python" -I -B .outils-graphe/scripts/graphe-impact.py graphify-out/graph.json sortie-graphe/impact.json \
+            --depot "$DEPOT" --sha "$SHA" --duree-construction "$DUREE_CONSTRUCTION" --meta sortie-graphe/meta.json
+          head -c 1500 sortie-graphe/impact.json
+      - name: Signaler une mesure d'impact manquante
+        if: steps.impact.outcome == 'failure'
+        run: echo "::warning::impact.json absent de l'artefact graphe (voir l'étape « Mesurer l'impact »)."
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: graphe
