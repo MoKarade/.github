@@ -38,7 +38,7 @@ except Exception:
     TZ = _HeureEst()
 UTC = datetime.timezone.utc
 NOW = datetime.datetime.now(UTC)
-REPOS = ['.github', 'FinanceAI', 'JobAI', 'batchchef-', 'driveai', 'Hubperso', 'carai', 'memoryai', 'app-template', 'hub-contract']
+REPOS = ['.github', 'FinanceAI', 'JobAI', 'batchchef-', 'driveai', 'Hubperso', 'carai', 'memoryai', 'app-template', 'hub-contract', 'lia-ui']
 TOUTES = ['actions', 'vercel', 'jules', 'gemini', 'claude', 'api']
 CHOISIES = [g for g in OPT['--seulement'].split(',') if g in TOUTES] if OPT.get('--seulement') else TOUTES
 RAPIDE = '--rapide' in OPT

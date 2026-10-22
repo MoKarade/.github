@@ -17,7 +17,7 @@ def normaliser(deps, soi, pr_vers_tache, prs_fusionnees):
 # (5 faux « dépendance inconnue » sur batchchef-#275, memoryai#63 et hub-contract#78, créées à 17:46Z).
 # Noms reconnus : ceux des dix dépôts (en minuscules, comme les références du relevé) ; « batchchef » seul vaut « batchchef- » (nom d'usage).
 import re
-NOMS_DEPOTS = ['.github', 'financeai', 'jobai', 'batchchef-', 'batchchef', 'driveai', 'hubperso', 'carai', 'memoryai', 'app-template', 'hub-contract']
+NOMS_DEPOTS = ['.github', 'financeai', 'jobai', 'batchchef-', 'batchchef', 'driveai', 'hubperso', 'carai', 'memoryai', 'app-template', 'hub-contract', 'lia-ui']
 ALIAS_DEPOTS = {'batchchef': 'batchchef-'}
 REF_ATTEND = re.compile(r'(?:MoKarade/([\w.-]+)|(?<![\w./-])(' + '|'.join(re.escape(n) for n in sorted(NOMS_DEPOTS, key=len, reverse=True)) + r'))?#(\d+)', re.I)
 

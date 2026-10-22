@@ -28,7 +28,7 @@ D = os.path.dirname(os.path.abspath(__file__)) + '/'
 OUT = ARGS[0] if ARGS else 'backlog.json'
 T0 = time.time()
 REPOS = [('.github','eco','Écosystème'),('FinanceAI','fin','FinanceAI'),('JobAI','job','JobAI'),('batchchef-','batch','BatchChef'),('driveai','drive','DriveAI'),
-         ('Hubperso','hub','Hubperso'),('carai','car','CarAI'),('memoryai','mem','MemoryAI'),('app-template','tpl','app-template'),('hub-contract','hc','hub-contract')]
+         ('Hubperso','hub','Hubperso'),('carai','car','CarAI'),('memoryai','mem','MemoryAI'),('app-template','tpl','app-template'),('hub-contract','hc','hub-contract'),('lia-ui','lia','lia-ui')]
 if OPT.get('--depots'):          # sous-ensemble de dépôts : pour les tests seulement (les liens entre dépôts seraient incomplets)
     REPOS = [r for r in REPOS if r[0] in OPT['--depots'].split(',')]
 

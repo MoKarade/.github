@@ -21,7 +21,7 @@ import argparse, datetime, glob, json, os, re, subprocess, sys
 D = os.path.dirname(os.path.abspath(__file__)) + os.sep
 JOURNAL = D + 'reponses-journal.json'
 GARDER = 100
-DEPOTS = {'.github', 'app-template', 'batchchef-', 'carai', 'driveai', 'financeai', 'hub-contract', 'hubperso', 'jobai', 'memoryai'}
+DEPOTS = {'.github', 'app-template', 'batchchef-', 'carai', 'driveai', 'financeai', 'hub-contract', 'hubperso', 'jobai', 'lia-ui', 'memoryai'}
 GESTES = {'fait', 'reponse', 'fusionner'}
 REF = re.compile(r'^([a-z0-9._-]+)#(\d{1,6})$')
 DEPOT_BOITE, WORKFLOW_BOITE = 'MoKarade/app-template', 'boite-reacteur.yml'   # mêmes valeurs que scripts/reveil-reacteur.mjs

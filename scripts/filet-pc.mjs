@@ -209,7 +209,7 @@ export function motifDuQuota(reveils) {
   return construireMotif([`quota Claude non mesuré ${h == null ? 'du tout' : `depuis ${h} h`} (tâche Quota-Claude du PC arrêtée ?)`]);
 }
 
-export const DEPOTS_FILET = ['MoKarade/.github', 'MoKarade/app-template', 'MoKarade/batchchef-', 'MoKarade/CarAI', 'MoKarade/DriveAI', 'MoKarade/FinanceAI', 'MoKarade/hub-contract', 'MoKarade/Hubperso', 'MoKarade/JobAI', 'MoKarade/MemoryAI'];
+export const DEPOTS_FILET = ['MoKarade/.github', 'MoKarade/app-template', 'MoKarade/batchchef-', 'MoKarade/CarAI', 'MoKarade/DriveAI', 'MoKarade/FinanceAI', 'MoKarade/hub-contract', 'MoKarade/Hubperso', 'MoKarade/JobAI', 'MoKarade/lia-ui', 'MoKarade/MemoryAI'];
 export const WORKFLOW_FILET = 'reacteur.yml';
 export const HEURE_FILET_MIN = 6 * 60; // 6 h 00, heure du Québec (America/Toronto : même fuseau, heure d'été comprise)
 export const ESSAIS_MAX = 3;
