@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# pousser_hub.py (22/10/2026, tâche .github#544) : envoie le relevé du Gantt au hub (POST https://hubperso.com/api/gantt), en plus du dépôt Drive.
+# pousser_hub.py (22/10/2026, tâche .github#544) : envoie le relevé du Gantt au hub (POST https://www.hubperso.com/api/gantt), en plus du dépôt Drive.
 # Pourquoi : le hub ne peut pas lire le Drive de Marc (privé, et FinanceAI / DriveAI ont des titres privés) ; c'est donc le PC qui pousse, le hub
 # qui range le DERNIER envoi seulement, et l'onglet « Chantier Apps » qui le lit derrière la connexion du hub (Hubperso#330, lib/gantt.ts).
 # Règles :
@@ -11,7 +11,7 @@
 # Tests : python3 -m unittest test_pousser_hub
 import base64, datetime, gzip, json, os, re, urllib.error, urllib.request
 
-URL = 'https://hubperso.com/api/gantt'
+URL = 'https://www.hubperso.com/api/gantt'   # pas hubperso.com : l'apex répond 308 vers www, et urllib ne rejoue pas un POST sur une redirection
 SECRET_PAR_DEFAUT = r'C:\dev\_pc-local\gantt-secret.txt'
 VERSION_ENVOI = 1                   # celle de lib/gantt.ts côté hub : un autre numéro y est refusé
 TAILLE_MAX = 4_000_000              # TAILLE_MAX_OCTETS du hub ; au-delà il répond 413, autant ne pas envoyer
@@ -61,7 +61,8 @@ def _poster(url, secret, octets):
     except urllib.error.HTTPError as e: return e.code, e.read(4000).decode('utf-8', 'replace')
 
 
-RAISONS = {400: 'corps refusé par le hub', 401: 'secret refusé par le hub (GANTT_SECRET différent ?)',
+RAISONS = {301: 'adresse d\'envoi redirigée, URL à corriger', 302: 'adresse d\'envoi redirigée, URL à corriger', 307: 'adresse d\'envoi redirigée, URL à corriger',
+           308: 'adresse d\'envoi redirigée, URL à corriger', 400: 'corps refusé par le hub', 401: 'secret refusé par le hub (GANTT_SECRET différent ?)',
            413: 'corps trop gros pour le hub', 429: 'trop d\'envois (limite du hub)',
            500: 'écriture en base échouée côté hub', 503: 'réception pas encore active côté hub (GANTT_SECRET ou base absents)'}
 

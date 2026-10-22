@@ -86,10 +86,14 @@ class Pousser(unittest.TestCase):
             for _, _, octets in p.appels: self.assertNotIn(FACTICE.encode(), octets)
 
     def test_chaque_echec_se_dit_sans_lever(self):
-        cas = {401: 'secret refusé', 503: 'pas encore active', 400: 'corps refusé', 413: 'trop gros', 429: 'trop d', 500: 'base échouée', 502: 'inattendue'}
+        cas = {308: 'redirigée', 401: 'secret refusé', 503: 'pas encore active', 400: 'corps refusé', 413: 'trop gros', 429: 'trop d', 500: 'base échouée', 502: 'inattendue'}
         for code, mot in cas.items():
             r = self.appeler(Poste(code, '{"ok":false}'))
             self.assertTrue(r.startswith('hub : '), r); self.assertIn(mot, r); self.assertIn(f'HTTP {code}', r)
+
+    def test_l_adresse_est_celle_du_site_www(self):
+        # L'apex hubperso.com répond 308 vers www (constaté le 22/10/2026) et urllib ne rejoue pas un POST sur une redirection.
+        self.assertEqual(ph.URL, 'https://www.hubperso.com/api/gantt')
 
     def test_reseau_coupe_ou_delai(self):
         for e in (OSError('coupé'), TimeoutError(), urllib.error.URLError('dns')):
