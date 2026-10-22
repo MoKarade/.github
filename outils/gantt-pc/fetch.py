@@ -19,6 +19,7 @@ from reponses import options as reponses_options     # réponses préfaites d'un
 from concurrent.futures import ThreadPoolExecutor
 import deps as deps_mod     # dépendances vers une PR : ramenées à la tâche qu'elle cite, ou levées si elle est fusionnée
 import completude
+from acceptation import est_preuve    # même règle que le garde-fou : une personne, ou l'acceptation automatique marquée du robot
 from ci import resume_ci     # fin de CI et CI rouge d'une PR fusionnée (onglet Rythme)
 ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
 OPT = {a.split('=', 1)[0]: (a.split('=', 1) + [''])[1] for a in sys.argv[1:] if a.startswith('--')}
@@ -156,7 +157,6 @@ def champ(body, nom):
     t = re.sub(r'\s+', ' ', m.group(1)).strip()
     return t[:280] + ('…' if len(t) > 280 else '')
 GESTE = re.compile(r'^\s*\**\s*Geste\s*\**\s*:\s*\**\s*', re.I)
-PREUVE = re.compile(r'^\s*\*\*\s*Accept[ée]e\s*\*\*', re.I)
 # « Preuve attendue : AAAA-MM-JJ HH:MM (heure du Québec) — événement », écrite dans l'issue ET commentée (§10 du cycle de vie)
 PA_LIGNE = re.compile(r'^[\s>*_-]*Preuve attendue[\s*_]*:\s*\**\s*(.*)$', re.I | re.M)
 PA_DATE = re.compile(r'\s*\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}')
@@ -332,8 +332,8 @@ def calculer(repo, rl, i, pr):
             if g:
                 t = re.sub(r'\s+', ' ', GESTE.sub('', g[-1]['body'], count=1)).strip()
                 n['geste'] = {'t': t[:400] + ('…' if len(t) > 400 else ''), 'u': g[-1]['html_url']}
-            # même règle que le garde-fou (.github, scripts/preuve.mjs, humain()) : une personne ou Claude, jamais un robot ni Jules
-            a = [c for c in com if PREUVE.match(c.get('body') or '') and (c.get('user') or {}).get('type') == 'User' and 'jules' not in ((c.get('user') or {}).get('login') or '').lower()]
+            # même règle que le garde-fou (scripts/preuve.mjs) : une personne ou Claude, ou l'acceptation automatique marquée ; jamais un autre robot ni Jules
+            a = [c for c in com if est_preuve(c)]
             if a:
                 n['preuve'] = {'u': a[-1]['html_url'], 'c': a[-1]['created_at']}
         pa, pa_u = pa_commentaires(com)
