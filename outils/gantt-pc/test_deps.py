@@ -19,4 +19,26 @@ class Normaliser(unittest.TestCase):
     def test_vide(self):
         self.assertEqual(deps.normaliser([], 'a#1', {}, set()), [])
 
+class LireAttend(unittest.TestCase):
+    def test_la_forme_courte_garde_le_depot(self):
+        corps = "**Attend** : Hubperso#311 (socle), hub-contract#78 (contrat), MemoryAI#63 (mémoire) ; une seule tâche à la fois."
+        self.assertEqual(deps.lire_attend(corps, 'batchchef-'), ['hubperso#311', 'hub-contract#78', 'memoryai#63'])
+
+    def test_les_formes_historiques_restent_lues(self):
+        self.assertEqual(deps.lire_attend('**Attend** : #12, MoKarade/x#3, MoKarade/.github#9 — raison #77', 'jobai'), ['jobai#12', 'x#3', '.github#9'])
+
+    def test_batchchef_seul_vaut_son_nom_de_depot(self):
+        self.assertEqual(deps.lire_attend('**Attend** : BatchChef#5 et batchchef-#6', 'hubperso'), ['batchchef-#5', 'batchchef-#6'])
+
+    def test_rien_n_attend_rien(self):
+        self.assertEqual(deps.lire_attend('**Attend** : rien (PR #208 fusionnée)', 'a'), [])
+        self.assertEqual(deps.lire_attend('**Attend** : aucune', 'a'), [])
+
+    def test_un_nom_de_depot_dans_un_mot_ne_compte_pas(self):
+        self.assertEqual(deps.lire_attend('**Attend** : super-carai#4 ; xmemoryai#5 ; mon-hub-contract#6', 'a'), ['a#4', 'a#5', 'a#6'])
+
+    def test_seule_la_ligne_attend_compte(self):
+        self.assertEqual(deps.lire_attend('**Avant** : Hubperso#1\n**Attend** : #2', 'a'), ['a#2'])
+        self.assertEqual(deps.lire_attend(None, 'a'), [])
+
 if __name__ == '__main__': unittest.main()
