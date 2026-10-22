@@ -17,6 +17,7 @@
 import json, subprocess, sys, datetime, re, os, time, threading, base64, hashlib, urllib.parse
 from reponses import options as reponses_options     # réponses préfaites d'une question (section « Réponses » de l'issue)
 from concurrent.futures import ThreadPoolExecutor
+import deps as deps_mod     # dépendances vers une PR : ramenées à la tâche qu'elle cite, ou levées si elle est fusionnée
 import completude
 from ci import resume_ci     # fin de CI et CI rouge d'une PR fusionnée (onglet Rythme)
 ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
@@ -239,6 +240,10 @@ def pr_de(ref):
     ps.sort(key=lambda p: (p['state'] == 'open', bool(p['merged']), p['merged'] or p['created']), reverse=True)
     return ps[0]
 
+# PR -> tâche qu'elle cite, et PR fusionnées : une dépendance écrite « #208 » vers une PR est réparée dans le relevé (deps.py), l'issue reste telle quelle
+PR_VERS_TACHE = {f"{r.lower()}#{n}": tache for tache, prs in LIEN.items() for (r, n) in prs}
+PRS_FUSIONNEES = {f"{repo.lower()}#{p['number']}" for repo in LISTES for p in LISTES[repo][1] + LISTES[repo][2] if p.get('merged_at')}
+
 # Enfants de chaque issue d'après le champ « parent » des enfants (déjà dans les listes) : sans appel, ça dit si les sous-issues ont changé
 ENFANTS = {}
 for repo, key, name in REPOS:
@@ -296,7 +301,7 @@ def calculer(repo, rl, i, pr):
     if (i.get('issue_dependencies_summary') or {}).get('total_blocked_by'):
         for b in flat(gh(f'repos/MoKarade/{repo}/issues/{i["number"]}/dependencies/blocked_by?per_page=100')):
             natives.append(f"{b['repository_url'].rsplit('/', 1)[1].lower()}#{b['number']}")
-    n['deps'] = sorted(set(deps + natives))
+    n['deps'] = deps_mod.normaliser(deps + natives, f"{rl}#{i['number']}", PR_VERS_TACHE, PRS_FUSIONNEES)
     n['attend_ligne'] = any(l.startswith('**Attend**') for l in (body or '').splitlines())   # la ligne existe, même « aucune » : prochaine-tache.mjs exige qu'elle soit écrite (19/10)
     n['deps_natives'] = sorted(set(natives))      # ceux que GitHub affiche en « Bloquée par » : prochaine-tache.mjs liste les liens qui manquent
     if lvl != 'tâche':
