@@ -182,18 +182,19 @@ test('dateQuebec : heure d\'été puis heure d\'hiver, et le jour change à minu
   assert.deepEqual(dateQuebec(QC('2026-10-19T03:30:00Z')), { jour: '2026-10-18', minutes: 23 * 60 + 30 });
 });
 
-test('quotidien : avant 6 h du Québec rien ; dès 6 h les dix dépôts, le jour même une seule fois', () => {
+test('quotidien : avant 6 h du Québec rien ; dès 6 h les onze dépôts, le jour même une seule fois', () => {
   assert.equal(evaluerQuotidien({ maintenant: QC('2026-10-18T09:59:00Z') }).a_lancer.length, 0);
   assert.match(evaluerQuotidien({ maintenant: QC('2026-10-18T09:59:00Z') }).raison, /avant 6 h/);
   const r = evaluerQuotidien({ maintenant: QC('2026-10-18T10:00:00Z') });
   assert.deepEqual(r.a_lancer, DEPOTS_FILET);
-  assert.equal(DEPOTS_FILET.length, 10);
-  assert.equal(new Set(DEPOTS_FILET).size, 10);
+  assert.equal(DEPOTS_FILET.length, 11);
+  assert.equal(new Set(DEPOTS_FILET).size, 11);
+  assert.ok(DEPOTS_FILET.includes('MoKarade/lia-ui'));
   const fait = { ...r.etat, faits: [...DEPOTS_FILET] };
   const apres = evaluerQuotidien({ etat: fait, maintenant: QC('2026-10-18T15:00:00Z') });
   assert.deepEqual(apres.a_lancer, []);
   assert.match(apres.raison, /déjà fait/);
-  assert.equal(evaluerQuotidien({ etat: fait, maintenant: QC('2026-10-19T10:05:00Z') }).a_lancer.length, 10); // le lendemain, tout repart
+  assert.equal(evaluerQuotidien({ etat: fait, maintenant: QC('2026-10-19T10:05:00Z') }).a_lancer.length, 11); // le lendemain, tout repart
 });
 
 test('quotidien : un dépôt en échec est retenté, trois essais au plus par jour', () => {
@@ -213,14 +214,14 @@ test('lancerFilet lance reacteur.yml du dépôt sur sa branche par défaut, sans
   assert.notEqual(appels[0].opts.shell, true);
 });
 
-test('tourQuotidien : dix lancements au premier tour, rien aux suivants du même jour', () => {
+test('tourQuotidien : onze lancements au premier tour, rien aux suivants du même jour', () => {
   const f = dossier();
   const appels = [];
   const lancer = (...a) => appels.push(a);
   const s1 = tourQuotidien({ fichierEtat: f.etat, executer: true, maintenant: QC('2026-10-18T10:20:00Z'), lancer });
   const s2 = tourQuotidien({ fichierEtat: f.etat, executer: true, maintenant: QC('2026-10-18T10:30:00Z'), lancer });
-  assert.equal(appels.length, 10);
-  assert.match(s1, /10 lancé\(s\) sur 10, 10\/10 faits/);
+  assert.equal(appels.length, 11);
+  assert.match(s1, /11 lancé\(s\) sur 11, 11\/11 faits/);
   assert.match(s2, /rien \(passage du jour déjà fait\)/);
 });
 
@@ -229,23 +230,23 @@ test('tourQuotidien : un échec se dit, ne lève pas, et seul le dépôt en éch
   let appels = 0;
   const lancer = (cmd, args) => { appels += 1; if (args.includes('MoKarade/CarAI')) { const e = new Error('boom'); e.stderr = 'HTTP 404: Not Found'; throw e; } };
   const s1 = tourQuotidien({ fichierEtat: f.etat, executer: true, maintenant: QC('2026-10-18T10:20:00Z'), lancer });
-  assert.match(s1, /9 lancé\(s\) sur 10.*ÉCHEC \(MoKarade\/CarAI : HTTP 404/);
+  assert.match(s1, /10 lancé\(s\) sur 11.*ÉCHEC \(MoKarade\/CarAI : HTTP 404/);
   const s2 = tourQuotidien({ fichierEtat: f.etat, executer: true, maintenant: QC('2026-10-18T10:30:00Z'), lancer });
   assert.match(s2, /0 lancé\(s\) sur 1/);
-  assert.equal(appels, 11);
+  assert.equal(appels, 12);
 });
 
 test('tourQuotidien --a-blanc : n\'envoie rien et n\'écrit pas l\'état', () => {
   const f = dossier();
   const s = tourQuotidien({ fichierEtat: f.etat, aBlanc: true, maintenant: QC('2026-10-18T10:20:00Z'), lancer: () => assert.fail('aucun envoi à blanc') });
-  assert.match(s, /à blanc, lancerait 10/);
+  assert.match(s, /à blanc, lancerait 11/);
   assert.throws(() => readFileSync(f.etat, 'utf8'));
 });
 
 test('tourQuotidien : état illisible ou dossier absent = une ligne, jamais une exception', () => {
   const f = dossier();
   writeFileSync(f.etat, '{pas du json');
-  assert.match(tourQuotidien({ fichierEtat: f.etat, executer: true, maintenant: QC('2026-10-18T10:20:00Z'), lancer: () => {} }), /10 lancé/);
+  assert.match(tourQuotidien({ fichierEtat: f.etat, executer: true, maintenant: QC('2026-10-18T10:20:00Z'), lancer: () => {} }), /11 lancé/);
   assert.match(tourQuotidien({ fichierEtat: join(f.d, 'absent', 'e.json'), executer: true, maintenant: QC('2026-10-18T10:20:00Z'), lancer: () => {} }), /ÉCHEC/);
 });
 

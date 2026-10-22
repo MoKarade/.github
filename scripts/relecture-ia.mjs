@@ -31,6 +31,7 @@ export const DEPOTS = [
   'hub-contract',
   'Hubperso',
   'JobAI',
+  'lia-ui',
   'MemoryAI',
 ];
 const PROPRIETAIRE = 'MoKarade';

@@ -21,9 +21,10 @@ function faux({ pulls, issues = {}, commentaires = {}, echec = {} }) {
 }
 const pr = (number, body, extra = {}) => ({ number, body, user: humain, head: { ref: 'claude/x' }, draft: false, ...extra });
 
-test('les dix dépôts, dont .github', () => {
-  assert.equal(DEPOTS.length, 10);
+test('les onze dépôts, dont .github et lia-ui', () => {
+  assert.equal(DEPOTS.length, 11);
   assert.ok(DEPOTS.includes('.github'));
+  assert.ok(DEPOTS.includes('lia-ui'));
 });
 
 test('tâche sans parent : le commentaire d’avertissement est posé, mis à jour, puis levé quand le parent arrive', async () => {
