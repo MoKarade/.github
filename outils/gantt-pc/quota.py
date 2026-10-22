@@ -44,13 +44,13 @@ CHOISIES = [g for g in OPT['--seulement'].split(',') if g in TOUTES] if OPT.get(
 RAPIDE = '--rapide' in OPT
 SORTIE = OPT.get('--sortie') or D + 'quota.json'
 
-def gh(path): return ghcache.lire(path)
+def gh(path, **kw): return ghcache.lire(path, **kw)
 VERROU_HIST = threading.Lock()     # quota_hist.json : claude() et api() y écrivent chacun leur clé
 def pages(path, key=None, stop=None, maxp=30):
     """Pages successives d'une liste ; stop(item) -> True arrête (les listes sont triées du plus récent au plus ancien)."""
     out = []
     for p in range(1, maxp + 1):
-        d = gh(path + ('&' if '?' in path else '?') + f'per_page=100&page={p}')
+        d = gh(path + ('&' if '?' in path else '?') + f'per_page=100&page={p}', verifier_vide=p > 1)     # page vide après une page pleine : GitHub se trompe (ghcache.lire)
         items = d[key] if key else d
         if not items: break
         for it in items:
