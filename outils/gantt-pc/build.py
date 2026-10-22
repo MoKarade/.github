@@ -17,7 +17,7 @@ UTC = datetime.timezone.utc
 def iso(d): return d.astimezone(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')
 def pr_c(p):
     if not p: return None
-    return {k: p.get(k) for k in ('n', 'repo', 'url', 'state', 'draft', 'merged', 'closed', 'upd', 'created', 'kind', 'lignes', 'c0', 'c1', 'nc', 'cs', 'au', 'jf') if p.get(k) is not None}
+    return {k: p.get(k) for k in ('n', 'repo', 'url', 'state', 'draft', 'merged', 'closed', 'upd', 'created', 'kind', 'lignes', 'c0', 'c1', 'nc', 'cs', 'au', 'jf', 'dg') if p.get(k) is not None}
 
 # --- « Preuve attendue : AAAA-MM-JJ HH:MM (heure du Québec) — événement » -> instant UTC -------------------------------------------------
 # La zone est celle que le texte nomme : UTC/GMT/Z si c'est écrit, sinon l'heure du Québec (gabarit du cycle de vie, §10). Lue en UTC par erreur,
@@ -163,7 +163,7 @@ def sante(gh):
                 add('jules sans PR depuis 24 h', r, n)
             if 'bloqué' in labels and age(n.get('bloque_depuis') or n['created']) > 7 * 86400:
                 add('bloquée depuis plus de 7 jours', r, n)
-            if p and p['state'] == 'open' and (p.get('lignes') or 0) > 400:
+            if p and p['state'] == 'open' and (p.get('lignes') or 0) > 400 and not p.get('dg'):
                 add('PR de plus de 400 lignes', r, n, f"PR #{p['n']} : {p['lignes']} lignes hors tests")
             if ({'en-cours', 'jules'} & set(labels)) and p and p['state'] == 'closed' and not p.get('merged'):
                 add('ménage en retard', r, n, f"PR #{p['n']} fermée sans fusion")

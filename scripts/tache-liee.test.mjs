@@ -120,7 +120,7 @@ test('une erreur de l’API se propage (échec fermé : jamais un feu vert)', as
 // ── Le Garde-fou de bout en bout : vrai script, fausse API GitHub sur un port local ─────────────────
 
 /** Lance garde-fou.mjs contre une fausse API ; rend le code de sortie et les écritures faites. */
-async function lancerGardeFou({ corps, auteur = humain, tache = tacheOuverte, branche = 'claude/x' }) {
+async function lancerGardeFou({ corps, auteur = humain, tache = tacheOuverte, branche = 'claude/x', lignes = 1, labels = [], brouillon = false }) {
   const ecritures = [];
   const serveur = createServer((req, res) => {
     let donnees = '';
@@ -130,9 +130,9 @@ async function lancerGardeFou({ corps, auteur = humain, tache = tacheOuverte, br
       const rep = (statut, objet) => { res.writeHead(statut, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(objet)); };
       if (req.method !== 'GET') { ecritures.push(`${req.method} ${chemin} ${donnees}`); return rep(200, { id: 1, number: 99 }); }
       if (chemin === '/repos/MoKarade/depot/pulls/7') {
-        return rep(200, { number: 7, state: 'open', draft: false, body: corps, user: auteur, title: 'feat: x', base: { sha: 'b' }, head: { sha: 'h', ref: branche, repo: { full_name: 'MoKarade/depot' } } });
+        return rep(200, { number: 7, state: 'open', draft: brouillon, labels, body: corps, user: auteur, title: 'feat: x', base: { sha: 'b' }, head: { sha: 'h', ref: branche, repo: { full_name: 'MoKarade/depot' } } });
       }
-      if (chemin === '/repos/MoKarade/depot/pulls/7/files') return rep(200, [{ filename: 'docs/a.md', status: 'modified', additions: 1, deletions: 0, patch: '@@ -1 +1 @@\n+x' }]);
+      if (chemin === '/repos/MoKarade/depot/pulls/7/files') return rep(200, [{ filename: 'docs/a.md', status: 'modified', additions: lignes, deletions: 0, patch: '@@ -1 +1 @@\n+x' }]);
       if (chemin === '/repos/MoKarade/depot/issues' || chemin === '/repos/MoKarade/depot/issues/7/comments') return rep(200, []);
       if (chemin === '/repos/MoKarade/depot/issues/120') return tache ? rep(200, tache) : rep(404, {});
       return rep(404, {});
@@ -179,4 +179,23 @@ test('Garde-fou de bout en bout : tâche fermée, rouge ; robot dispensé, vert'
   const robot = await lancerGardeFou({ corps: '', auteur: { login: 'dependabot[bot]', type: 'Bot' }, tache: null });
   assert.equal(robot.code, 0, robot.texte);
   assert.match(robot.texte, /sans objet/);
+});
+
+test('Garde-fou de bout en bout : PR de 401 lignes sortie du brouillon, rouge avec un commentaire « taille » ; 400 vert', async () => {
+  const trop = await lancerGardeFou({ corps: 'Tâche : #120', lignes: 401 });
+  assert.equal(trop.code, 1, trop.texte);
+  assert.match(trop.texte, /Taille : \*\*rouge\*\*, 401 lignes/);
+  assert.equal(trop.ecritures.length, 1);
+  assert.match(trop.ecritures[0], /^POST \/repos\/MoKarade\/depot\/issues\/7\/comments .*garde-fou-taille/);
+  const limite = await lancerGardeFou({ corps: 'Tâche : #120', lignes: 400 });
+  assert.equal(limite.code, 0, limite.texte);
+  assert.match(limite.texte, /Taille : vert/);
+});
+
+test('Garde-fou de bout en bout : 3000 lignes en brouillon ou avec la dérogation, vert', async () => {
+  const brouillon = await lancerGardeFou({ corps: 'Tâche : #120', lignes: 3000, brouillon: true });
+  assert.equal(brouillon.code, 0, brouillon.texte);
+  const deroge = await lancerGardeFou({ corps: 'Tâche : #120', lignes: 3000, labels: [{ name: 'derogation-taille' }] });
+  assert.equal(deroge.code, 0, deroge.texte);
+  assert.match(deroge.texte, /dérogation/);
 });
