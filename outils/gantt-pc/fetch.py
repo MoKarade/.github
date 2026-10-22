@@ -161,15 +161,8 @@ GESTE = re.compile(r'^\s*\**\s*Geste\s*\**\s*:\s*\**\s*', re.I)
 PA_LIGNE = re.compile(r'^[\s>*_-]*Preuve attendue[\s*_]*:\s*\**\s*(.*)$', re.I | re.M)
 PA_DATE = re.compile(r'\s*\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}')
 def deps_attend(body, repo):
-    """Dépendances écrites : « **Attend** : #12, MoKarade/x#3 — raison ». « **Attend** : rien (PR #n fusionnée) » n'attend rien (le #n est une remarque)."""
-    deps = []
-    for line in (body or '').splitlines():
-        if line.startswith('**Attend**'):
-            avant = line.split('—')[0]
-            if re.match(r'^\*\*Attend\*\*[\s:*]*(?:rien|aucune?|néant)\b', avant, re.I): continue
-            for r2, num in re.findall(r'(?:MoKarade/([\w.-]+))?#(\d+)', avant):
-                deps.append(f"{(r2 or repo).lower()}#{num}")
-    return deps
+    """Dépendances écrites : « **Attend** : #12, MoKarade/x#3, Hubperso#311 — raison » (lecture dans deps.py, testée)."""
+    return deps_mod.lire_attend(body, repo)
 def pa_commentaires(com):
     """(texte, url) de la dernière ligne « Preuve attendue » d'un commentaire de personne, une date lisible avant un texte libre ; sinon (None, None)."""
     lus = []
