@@ -105,7 +105,8 @@ function exemple() {
   const banc = [appeler('ligne_banc', 'decideAcces', 'lib/acces.ts', AFFECTED, 1400, GREP, 15)];
   return {
     version: 'impact-v1', depot: 'MoKarade/exemple', sha: 'abc1234', genereLe: '2026-10-22T12:00:00Z', methode: 'test',
-    taille: { noeuds: 10, aretes: 12, fichiers: 6, communautes: 2, langages: { ts: 5, md: 1 }, page_noeuds: 4, hors_page: 1, construction_s: 8.5 },
+    taille: { noeuds: 10, aretes: 12, fichiers: 6, communautes: 2, langages: { ts: 5, md: 1 }, page_noeuds: 4, hors_page: 1, construction_s: 8.5, cycles_import: 1, liens_surprenants: 2 },
+    cycles_exemples: [['a.ts', 'b.ts']],
     banc, totaux: appeler('totaux', banc),
   };
 }
@@ -115,6 +116,9 @@ test('impact-v1 : un exemple mesuré est valide, un exemple avec des null aussi'
   const sans = exemple();
   sans.taille.construction_s = null;
   sans.taille.hors_page = null;
+  sans.taille.cycles_import = null;
+  sans.taille.liens_surprenants = null;
+  sans.cycles_exemples = null;
   sans.banc = [appeler('ligne_banc', 'x', 'lib/x.ts', null, null, null, null)];
   sans.totaux = appeler('totaux', sans.banc);
   assert.deepEqual(appeler('valider', sans), []);
@@ -148,4 +152,45 @@ test('impact-v1 : refuse un banc de plus de 10 lignes, une version inconnue et u
   const r = exemple();
   r.banc[0].rappel = 1.5;
   assert.ok(appeler('valider', r).some((x) => x.includes('entre 0 et 1')));
+});
+
+test("la baseline grep écarte les lignes géantes (code minifié) et compte celles qu'elle écarte", () => {
+  const sortie = `lib/petit.ts:1:Point\nvendor/min.js:1:${'x'.repeat(1500)}Point\nvendor/min.js:2:${'y'.repeat(1001)}\nlib/autre.ts:3:Point\n`;
+  const [reste, ecartees] = appeler('ecarter_lignes_geantes', sortie, 1000);
+  assert.equal(ecartees, 2);
+  assert.equal(reste, 'lib/petit.ts:1:Point\nlib/autre.ts:3:Point\n');
+  assert.deepEqual(appeler('ecarter_lignes_geantes', '', 1000), ['', 0]);
+  assert.equal(appeler('ecarter_lignes_geantes', `a:1:${'z'.repeat(990)}\n`, 1000)[1], 0, 'une ligne de 995 caractères reste');
+});
+
+test('le grep du banc exclut la sortie du graphe et les dossiers générés', () => {
+  const commande = appeler('commande_grep', 'Point');
+  assert.deepEqual(commande.slice(0, 6), ['git', 'grep', '-nwI', '--no-color', 'Point', '--']);
+  assert.ok(commande.includes(':!graphify-out'));
+  for (const dossier of ['dist', 'build', '.next', 'coverage', 'node_modules']) {
+    assert.ok(commande.includes(`:(exclude,glob)**/${dossier}/**`), dossier);
+  }
+});
+
+test("cycles d'import : comptés, exemples limités à 5, liens surprenants plafonnés, null si non mesuré", () => {
+  const cycle = (n) => ({ cycle: [`a${n}.ts`, `b${n}.ts`], length: 2, why: 'circular dependency' });
+  const [n, exemples, surprenants] = appeler('resume_structure', Array.from({ length: 7 }, (_, i) => cycle(i)), Array.from({ length: 300 }, (_, i) => i));
+  assert.equal(n, 7);
+  assert.equal(exemples.length, 5);
+  assert.deepEqual(exemples[0], ['a0.ts', 'b0.ts']);
+  assert.equal(surprenants, 200);
+  assert.deepEqual(appeler('resume_structure', [], []), [0, [], 0]);
+  assert.deepEqual(appeler('resume_structure', null, []), [null, null, null]);
+});
+
+test("sans graphifyy ou sans graphe lisible, la structure n'est pas mesurée (null, pas 0)", () => {
+  assert.deepEqual(appeler('mesurer_structure', '/inexistant/graph.json'), [null, null, null]);
+});
+
+test('impact-v1 : refuse des exemples de cycles mal formés', () => {
+  for (const mauvais of ['n/a', [['a.ts'], ['b.ts'], ['c.ts'], ['d.ts'], ['e.ts'], ['f.ts']], [[]], [[1]]]) {
+    const e = exemple();
+    e.cycles_exemples = mauvais;
+    assert.ok(appeler('valider', e).some((x) => x.startsWith('cycles_exemples')), `${JSON.stringify(mauvais)} doit être refusé`);
+  }
 });
