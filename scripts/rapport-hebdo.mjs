@@ -14,7 +14,7 @@ import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const DEPOTS = ['.github', 'app-template', 'batchchef-', 'CarAI', 'DriveAI', 'FinanceAI', 'hub-contract', 'Hubperso', 'JobAI', 'MemoryAI'];
+export const DEPOTS = ['.github', 'app-template', 'batchchef-', 'CarAI', 'DriveAI', 'FinanceAI', 'hub-contract', 'Hubperso', 'JobAI', 'lia-ui', 'MemoryAI'];
 const HEURE = 3_600_000;
 const JOUR = 24 * HEURE;
 const FUSEAU = 'America/Toronto';

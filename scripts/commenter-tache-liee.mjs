@@ -13,7 +13,7 @@
 import { pathToFileURL } from 'node:url';
 import { LABEL_EN_COURS, MARQUEUR_TACHE, PROPRIETAIRE, controleTacheLiee, rapportTacheLiee } from './tache-liee.mjs';
 
-export const DEPOTS = ['.github', 'FinanceAI', 'JobAI', 'batchchef-', 'DriveAI', 'Hubperso', 'CarAI', 'MemoryAI', 'app-template', 'hub-contract'];
+export const DEPOTS = ['.github', 'FinanceAI', 'JobAI', 'batchchef-', 'DriveAI', 'Hubperso', 'CarAI', 'MemoryAI', 'app-template', 'hub-contract', 'lia-ui'];
 export const TEXTE_LEVE = 'Tâche liée : vert, le blocage est levé.';
 
 /** Le plafond d'appels du jeton est atteint : insister ne sert à rien, le passage s'arrête et reprend au suivant. */
