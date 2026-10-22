@@ -23,6 +23,18 @@ test('lignesModifiees : additions + suppressions, hors tests, lockfiles, dist et
   assert.equal(lignesModifiees(null), 0);
 });
 
+test('lignesModifiees : l’instantané et le journal de drizzle-kit ne comptent pas, le SQL oui', () => {
+  const fichiers = [
+    fichier('drizzle/0007_neuve.sql', 12),
+    fichier('drizzle/meta/0007_snapshot.json', 251),
+    fichier('drizzle/meta/_journal.json', 7),
+    fichier('lib/schema.ts', 30),
+  ];
+  assert.equal(lignesModifiees(fichiers), 42);
+  assert.equal(lignesModifiees([fichier('web/drizzle/meta/0001_snapshot.json', 900)]), 0);
+  assert.equal(lignesModifiees([fichier('docs/drizzle/metadonnees.md', 5)]), 5);
+});
+
 test('controleTaille : 400 lignes acceptées, 401 refusées', () => {
   assert.equal(controleTaille({ pr: pr(), fichiers: [fichier('a.mjs', 399, 1)] }).ok, true);
   const trop = controleTaille({ pr: pr(), fichiers: [fichier('a.mjs', 400, 1)] });

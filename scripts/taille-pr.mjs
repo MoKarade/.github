@@ -12,9 +12,9 @@ export const LIMITE_LIGNES = 400;
 export const LABEL_DEROGATION = 'derogation-taille';
 export const MARQUEUR_TAILLE = '<!-- garde-fou-taille -->';
 
-export const HORS_TAILLE = /(^|\/)(tests?|__tests__|e2e|fixtures?|__snapshots__|dist|captures)\/|\.(test|spec)\.[cm]?[jt]sx?$|\.snap$|(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$|\.lock$/i;
+export const HORS_TAILLE = /(^|\/)(tests?|__tests__|e2e|fixtures?|__snapshots__|dist|captures)\/|\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)drizzle\/meta\/|\.snap$|(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$|\.lock$/i;
 
-/** Lignes ajoutées + supprimées, hors tests, lockfiles et fichiers générés. */
+/** Lignes ajoutées + supprimées, hors tests, lockfiles et fichiers générés (dont `drizzle/meta/`, l'instantané et le journal de drizzle-kit ; les `.sql` de `drizzle/` restent comptés). */
 export function lignesModifiees(fichiers) {
   return (fichiers ?? []).reduce((somme, f) => (HORS_TAILLE.test(f.filename ?? '') ? somme : somme + (f.additions ?? 0) + (f.deletions ?? 0)), 0);
 }
