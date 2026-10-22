@@ -153,6 +153,49 @@ def releve(econome=False, quota_complet=True, drive=None):
     relectures = '' if rv is None else f' · relectures de pages vides : {rv}'
     return 0, f'OK {maintenant()} relevé {mode} {asof} · prochaines.json {p["calcule_le"]} {file} · fiabilité : {fid}{relectures}{quota}{filet}{rep}'
 
+# Drive absent (22/10/2026, .github#529) : le lecteur G: n'était plus monté de 18:31Z à 19:20Z ; le tour écrivait « OK » dans son état local puis
+# plantait au dépôt (FileNotFoundError), et la page est restée 56 min sur le relevé de 18:25Z sans que rien ne le dise.
+DRIVE_ETAT = D + '.drive-absent.json'
+DRIVE_TOURS_AVANT_REVEIL = 2          # deux tours de suite sans dépôt (20 min) avant de réveiller le Coordinateur
+DRIVE_RAPPEL_S = 4 * 3600             # puis un rappel toutes les 4 h tant que ça dure
+DEPOT_BOITE, WORKFLOW_BOITE = 'MoKarade/app-template', 'boite-reacteur.yml'
+
+
+def suivre_drive(etat, erreur, ts, reveiller):
+    """Pure (sauf `reveiller`, qui renvoie True si le réveil est parti). Renvoie le nouvel état du suivi.
+    `etat` : {'tours': n, 'depuis': ts, 'reveille': ts}. Un réveil raté n'est pas enregistré : le tour suivant réessaie."""
+    if not erreur: return {'tours': 0}
+    tours = int((etat or {}).get('tours') or 0) + 1
+    nouveau = {'tours': tours, 'depuis': (etat or {}).get('depuis') or ts, 'reveille': (etat or {}).get('reveille')}
+    if tours >= DRIVE_TOURS_AVANT_REVEIL and (nouveau['reveille'] is None or ts - nouveau['reveille'] >= DRIVE_RAPPEL_S):
+        depuis = datetime.datetime.fromtimestamp(nouveau['depuis'], datetime.timezone.utc).strftime('%Y-%m-%dT%H:%MZ')
+        texte = f'RÉACTEUR : Drive absent depuis {tours} tours (depuis {depuis}) : le relevé de la page est figé, vérifier que le lecteur Google Drive est monté sur le PC'
+        if reveiller(texte): nouveau['reveille'] = ts
+    return nouveau
+
+
+def reveiller_boite(texte):
+    # Même route que scripts/filet-pc.mjs : boite-reacteur.yml commente app-template#58 en github-actions[bot], ce qui réveille le Coordinateur.
+    try:
+        r = subprocess.run(['gh', 'workflow', 'run', WORKFLOW_BOITE, '--repo', DEPOT_BOITE, '--ref', 'main', '-f', f'texte={texte}'],
+                           env=ENV, capture_output=True, text=True, timeout=60)
+        return r.returncode == 0
+    except (OSError, subprocess.TimeoutExpired): return False
+
+
+def deposer_drive(drive, code):
+    """Dépose les sorties dans le dossier Drive. Renvoie '' si tout est écrit, sinon la raison (lecteur non monté, dossier refusé…)."""
+    try:
+        os.makedirs(drive, exist_ok=True)
+        if code == 0:
+            sur_place(D + 'donnees.json', os.path.join(drive, 'donnees.json.gz'), gz=True)
+            for f in ('prochaines.json', 'fiabilite.json', 'quota.json', 'boucle-etat.json'):
+                if os.path.exists(D + f): sur_place(D + f, os.path.join(drive, 'etat.json' if f == 'boucle-etat.json' else f))
+        else:
+            sur_place(ETAT, os.path.join(drive, 'etat.json'))   # un échec se voit aussi depuis la page
+    except OSError as e: return f'{type(e).__name__} : {e}'
+    return ''
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -183,13 +226,21 @@ def main():
             res = res.replace(f'relevé ', f'relevé en {int(time.time() - t0)} s, ', 1) if code == 0 else res
         ecrire_etat(debut, res)
         print(res)
-        if o.drive: os.makedirs(o.drive, exist_ok=True)
-        if o.drive and code == 0:
-            sur_place(D + 'donnees.json', os.path.join(o.drive, 'donnees.json.gz'), gz=True)
-            for f in ('prochaines.json', 'fiabilite.json', 'quota.json', 'boucle-etat.json'):
-                if os.path.exists(D + f): sur_place(D + f, os.path.join(o.drive, 'etat.json' if f == 'boucle-etat.json' else f))
-        elif o.drive:
-            sur_place(ETAT, os.path.join(o.drive, 'etat.json'))   # un échec se voit aussi depuis la page
+        if o.drive:
+            try: suivi = lire('.drive-absent.json')
+            except (OSError, ValueError): suivi = {}
+            erreur = deposer_drive(o.drive, code)
+            if not erreur and suivi.get('tours'):
+                res += f' · Drive : de retour après {suivi["tours"]} tour(s) sans dépôt'
+                ecrire_etat(debut, res)
+                erreur = deposer_drive(o.drive, 1)         # etat.json seul, avec la ligne de retour
+            suivi = suivre_drive(suivi, erreur, time.time(), reveiller_boite)
+            with open(DRIVE_ETAT, 'w', encoding='utf-8') as fh: json.dump(suivi, fh)
+            if erreur:
+                res += f' · DRIVE ABSENT depuis {suivi["tours"]} tour(s) : {erreur}'
+                ecrire_etat(debut, res)
+                print(res)
+                return 1
         return code
     finally:
         shutil.rmtree(verrou, ignore_errors=True)
