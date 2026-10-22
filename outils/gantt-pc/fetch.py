@@ -79,7 +79,7 @@ def liens(body, repo):
     return out
 
 # Taille d'une PR hors tests et fichiers générés (§1 : environ 400 lignes au plus)
-HORS_TAILLE = re.compile(r'(^|/)(tests?|__tests__|e2e|fixtures?|__snapshots__|dist|captures)/|\.(test|spec)\.[cm]?[jt]sx?$|\.snap$|(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$|\.lock$', re.I)
+HORS_TAILLE = re.compile(r'(^|/)(tests?|__tests__|e2e|fixtures?|__snapshots__|dist|captures)/|\.(test|spec)\.[cm]?[jt]sx?$|(^|/)drizzle/meta/|\.snap$|(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$|\.lock$', re.I)
 def taille(files):
     return sum(f['additions'] + f['deletions'] for f in files if not HORS_TAILLE.search(f['filename']))
 # Portée de Jules (cycle de vie §6 et docs/jules-gabarit-issue.md : deux fichiers au plus, environ 150 lignes, aucun chemin protégé).
