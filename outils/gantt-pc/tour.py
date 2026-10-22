@@ -12,11 +12,13 @@
 #      GitHub avec le jeton gh du PC, puis réveil du Coordinateur ; avant le relevé, pour qu'il en voie déjà l'effet
 #   5. dépôt dans le dossier Google Drive synchronisé (--drive DOSSIER) : donnees.json.gz (lu par la page), prochaines.json,
 #      fiabilite.json, quota.json, etat.json. Les fichiers sont RÉÉCRITS SUR PLACE : Drive garde alors le même identifiant.
+#   5 bis. envoi au hub (pousser_hub.py, .github#544) : POST https://hubperso.com/api/gantt, secret lu dans C:\dev\_pc-local\gantt-secret.txt, jamais bloquant
 # Freins : le jeton du PC est celui de Marc, partagé avec tout le reste de son compte (5 000 appels/h). Sous 1 500 appels restants, tour
 # économe (relevé léger, quotas rapides, pas de mesure de fiabilité) ; sous 3 500, quotas Claude et coût API seuls ; sous 300, tour sauté ; « rate limit » au tour précédent = 30 min
 # d'attente. Un seuil unique à 3 000 sautait des tours entiers dès que le compte servait ailleurs (PC de Marc, 16/10 : 1 911 restants).
 # Lancer : python -X utf8 tour.py --drive "G:\Mon disque\_Gantt"   (un tour, puis sortie ; code 0 = OK ou tour sauté, 1 = échec)
 import argparse, datetime, gzip, json, os, shutil, socket, subprocess, sys, time
+import pousser_hub
 
 D = os.path.dirname(os.path.abspath(__file__)) + os.sep
 ENV = dict(os.environ, PYTHONUTF8='1')
@@ -226,6 +228,12 @@ def main():
             res = res.replace(f'relevé ', f'relevé en {int(time.time() - t0)} s, ', 1) if code == 0 else res
         ecrire_etat(debut, res)
         print(res)
+        if code == 0 and not res.startswith('tour sauté'):
+            # 5 bis. envoi au hub (tâche .github#544) : l'onglet « Chantier Apps » lit ce que le hub a reçu. Jamais bloquant : le résultat ne change pas
+            # le code du tour, il se DIT dans la ligne (secret absent, 401, 503…), et le Drive reste la copie de secours.
+            res += ' · ' + pousser_hub.pousser(D, os.environ.get('GANTT_SECRET_FILE') or pousser_hub.SECRET_PAR_DEFAUT)
+            ecrire_etat(debut, res)
+            print(res)
         if o.drive:
             try: suivi = lire('.drive-absent.json')
             except (OSError, ValueError): suivi = {}
