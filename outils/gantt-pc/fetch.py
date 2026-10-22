@@ -419,6 +419,14 @@ try:
     print(f"graphes : {lus} artefacts lus, {len(res['graphes'])} mémorisés", file=sys.stderr)
 except Exception as e:
     print('graphes a échoué :', e, file=sys.stderr)
+# Workflows en file sans robot (tâche #532) : un échec ne bloque jamais le relevé ; `en_file` absent = relevé d'avant cette mesure ou lecture en échec.
+try:
+    import workflows_en_file
+    res['en_file'], err_wf = workflows_en_file.relever([(repo, key) for repo, key, _ in REPOS], _un, datetime.datetime.now(datetime.timezone.utc))
+    for e in err_wf: print('workflows en file', e, file=sys.stderr)
+    print(f"workflows en file : {len(res['en_file'])} signalé(s), {len(err_wf)} dépôt(s) illisible(s)", file=sys.stderr)
+except Exception as e:
+    print('workflows en file a échoué :', e, file=sys.stderr)
 CPT = ghcache.compteurs()
 # appels = requêtes comptées par GitHub (hors 304) ; reqs = toutes les requêtes ; n304 = celles qui n'ont rien coûté
 res['appels'], res['reqs'], res['n304'] = CPT['comptees'], CPT['req'], CPT['n304']
