@@ -31,6 +31,7 @@ import {
   toutesSurmontables,
 } from './relecture-regles.mjs';
 import { MARQUEUR_TACHE, controleTacheLiee, rapportTacheLiee } from './tache-liee.mjs';
+import { MARQUEUR_PLACES, controlePlaces, rapportPlaces } from './places-depot.mjs';
 import { MARQUEUR_TAILLE, controleTaille, rapportTaille } from './taille-pr.mjs';
 
 export const MARQUEUR = '<!-- garde-fou -->';
@@ -453,6 +454,9 @@ async function main() {
   // Pas de PR sans tâche (plan Gantt source de vérité, règle 2) : verdict à part, rapporté plus bas.
   const lien = await controleTacheLiee({ api, depot: GITHUB_REPOSITORY, pr });
   const texteLien = rapportTacheLiee(lien);
+  // Places du dépôt (cycle de vie §6, capacité) : une PR sortie du brouillon dont la tâche ne tient pas de place dans un dépôt plein est refusée.
+  const places = await controlePlaces({ api, pr, lien });
+  const textePlaces = rapportPlaces(places);
 
   const fichiers = [];
   for (let page = 1; ; page += 1) {
@@ -496,12 +500,12 @@ async function main() {
       'la PR attend la relecture IA (quelques minutes) ; si elle refuse, elle attend Marc.',
     );
   }
-  texte = `${texte}\n\n${texteLien}\n\n${texteTaille}`;
+  texte = `${texte}\n\n${texteLien}\n\n${texteTaille}\n\n${textePlaces}`;
   console.log(texte);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${texte}\n`);
   if (dry) {
     console.log('(DRY_RUN : rien écrit sur GitHub)');
-    process.exitCode = resultat.violations.length > 0 || !lien.ok || !taille.ok ? 1 : 0;
+    process.exitCode = resultat.violations.length > 0 || !lien.ok || !taille.ok || !places.ok ? 1 : 0;
     return;
   }
 
@@ -571,7 +575,18 @@ async function main() {
       console.warn(`Garde-fou : commentaire « taille » non posté (le verdict reste rouge). ${erreur.message}`);
     }
   }
-  process.exitCode = echec || !lien.ok || !taille.ok ? 1 : 0;
+  // Commentaire de la règle « places » : même forme, un seul, mis à jour.
+  const anciennePlaces = commentaires.find((c) => c.body?.includes(MARQUEUR_PLACES));
+  if (!places.ok || anciennePlaces) {
+    try {
+      const corps = `${MARQUEUR_PLACES}\n${places.ok ? 'Places : vert, le blocage est levé.' : textePlaces}`;
+      if (anciennePlaces) await api('PATCH', `/repos/${GITHUB_REPOSITORY}/issues/comments/${anciennePlaces.id}`, { body: corps });
+      else await api('POST', `/repos/${GITHUB_REPOSITORY}/issues/${numero}/comments`, { body: corps });
+    } catch (erreur) {
+      console.warn(`Garde-fou : commentaire « places » non posté (le verdict reste rouge). ${erreur.message}`);
+    }
+  }
+  process.exitCode = echec || !lien.ok || !taille.ok || !places.ok ? 1 : 0;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

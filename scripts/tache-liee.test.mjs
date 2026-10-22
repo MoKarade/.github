@@ -120,7 +120,7 @@ test('une erreur de l’API se propage (échec fermé : jamais un feu vert)', as
 // ── Le Garde-fou de bout en bout : vrai script, fausse API GitHub sur un port local ─────────────────
 
 /** Lance garde-fou.mjs contre une fausse API ; rend le code de sortie et les écritures faites. */
-async function lancerGardeFou({ corps, auteur = humain, tache = tacheOuverte, branche = 'claude/x', lignes = 1, labels = [], brouillon = false }) {
+async function lancerGardeFou({ corps, auteur = humain, tache = tacheOuverte, branche = 'claude/x', lignes = 1, labels = [], brouillon = false, enCours = [] }) {
   const ecritures = [];
   const serveur = createServer((req, res) => {
     let donnees = '';
@@ -133,7 +133,8 @@ async function lancerGardeFou({ corps, auteur = humain, tache = tacheOuverte, br
         return rep(200, { number: 7, state: 'open', draft: brouillon, labels, body: corps, user: auteur, title: 'feat: x', base: { sha: 'b' }, head: { sha: 'h', ref: branche, repo: { full_name: 'MoKarade/depot' } } });
       }
       if (chemin === '/repos/MoKarade/depot/pulls/7/files') return rep(200, [{ filename: 'docs/a.md', status: 'modified', additions: lignes, deletions: 0, patch: '@@ -1 +1 @@\n+x' }]);
-      if (chemin === '/repos/MoKarade/depot/issues' || chemin === '/repos/MoKarade/depot/issues/7/comments') return rep(200, []);
+      if (chemin === '/repos/MoKarade/depot/issues') return rep(200, req.url.includes('labels=en-cours') ? enCours : []);
+      if (chemin === '/repos/MoKarade/depot/issues/7/comments') return rep(200, []);
       if (chemin === '/repos/MoKarade/depot/issues/120') return tache ? rep(200, tache) : rep(404, {});
       return rep(404, {});
     });
@@ -198,4 +199,17 @@ test('Garde-fou de bout en bout : 3000 lignes en brouillon ou avec la dérogatio
   const deroge = await lancerGardeFou({ corps: 'Tâche : #120', lignes: 3000, labels: [{ name: 'derogation-taille' }] });
   assert.equal(deroge.code, 0, deroge.texte);
   assert.match(deroge.texte, /dérogation/);
+});
+
+test('Garde-fou de bout en bout : dépôt plein (un autre travail en cours), rouge avec un commentaire « places » ; tâche déjà en cours, vert', async () => {
+  const autre = { number: 130, title: 'autre', labels: [{ name: 'niveau:tâche' }, { name: 'en-cours' }] };
+  const plein = await lancerGardeFou({ corps: 'Tâche : #120', enCours: [autre] });
+  assert.equal(plein.code, 1, plein.texte);
+  assert.match(plein.texte, /Places : \*\*rouge\*\*/);
+  assert.equal(plein.ecritures.length, 1);
+  assert.match(plein.ecritures[0], /^POST \/repos\/MoKarade\/depot\/issues\/7\/comments .*garde-fou-places/);
+  const tient = await lancerGardeFou({ corps: 'Tâche : #120', enCours: [autre], tache: { ...tacheOuverte, labels: [{ name: 'niveau:tâche' }, { name: 'en-cours' }] } });
+  assert.equal(tient.code, 0, tient.texte);
+  const brouillon = await lancerGardeFou({ corps: 'Tâche : #120', enCours: [autre], brouillon: true });
+  assert.equal(brouillon.code, 0, brouillon.texte);
 });
