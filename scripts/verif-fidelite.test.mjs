@@ -296,8 +296,29 @@ test('lireVivant : les PR fermées se lisent jusqu\'à la borne du relevé, pas 
     if (/\/pulls\?state=closed/.test(chemin)) return /page=1$/.test(chemin) ? recentes : [{ number: 439, updated_at: '2026-10-15T16:03:41Z' }];
     throw new Error(`chemin inattendu : ${chemin}`);
   };
-  const v = lireVivant(api, ['DriveAI'], { asof: '2026-10-18T03:00:00Z', depuis: '2026-10-16T18:00:13Z' });
+  const v = lireVivant(api, ['DriveAI'], { asof: '2026-10-18T03:00:00Z', depuis: '2026-10-16T18:00:13Z', attentes: [] });
   assert.ok(v.DriveAI.pulls.some((p) => p.number === 439));
+});
+
+test('lireVivant : une page vide de GitHub est relue avant d\'être crue (22/10/2026 : 138 tâches fermées « absentes de GitHub »)', () => {
+  let ferme = 0;
+  const api = (chemin) => {
+    if (/\/issues\?state=closed/.test(chemin)) { ferme += 1; return ferme <= 2 ? [] : [{ number: 3 }]; }   // vide deux fois, puis la vraie page
+    if (/\/issues\?state=open/.test(chemin)) return [{ number: 1 }];
+    if (/\/pulls\?/.test(chemin) || /\/branches\?/.test(chemin)) return [];
+    throw new Error(`chemin inattendu : ${chemin}`);
+  };
+  const v = lireVivant(api, ['Hubperso'], { asof: ASOF, depuis: DEPUIS, attentes: [0, 0, 0] });
+  assert.deepEqual(v.Hubperso.issues.map((i) => i.number), [1, 3]);
+  assert.equal(ferme, 3);
+});
+
+test('lireVivant : une vraie liste vide reste vide après les relectures', () => {
+  let appels = 0;
+  const api = (chemin) => { if (/\/pulls\?state=open/.test(chemin)) appels += 1; return []; };
+  const v = lireVivant(api, ['Hubperso'], { asof: ASOF, depuis: DEPUIS, attentes: [0, 0, 0] });
+  assert.deepEqual(v.Hubperso.pulls, []);
+  assert.equal(appels, 4);                       // la lecture, puis trois relectures
 });
 
 const prochaines = (calcule_le, suivante) => ({ calcule_le, depots: [{ repo: 'Hubperso', statut: suivante ? 'libre' : 'occupe', suivante: suivante ? { ref: suivante } : null }] });

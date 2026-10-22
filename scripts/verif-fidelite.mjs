@@ -306,10 +306,25 @@ export function apiGh(chemin) {
   return JSON.parse(execFileSync('gh', ['api', chemin], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
 }
 
-function pages(api, chemin, { max = 10, arret = () => false } = {}) {
+// GitHub rend par moments une liste VIDE pour une page pleine, première page comprise (22/10/2026, tâche .github#494) : le mesureur voyait alors des tâches
+// fermées « absentes de GitHub » (138 écarts I2 à 16:09Z alors que le relevé était complet). Une page vide est donc relue, 3 fois au plus, avant d'être crue.
+const ATTENTES_VIDE_S = [1, 2, 3];
+const dormir = (s) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, s * 1000);
+
+function lirePage(api, url, attentes) {
+  let lot = api(url);
+  for (const s of attentes) {
+    if (lot.length > 0) break;
+    dormir(s);
+    lot = api(url);
+  }
+  return lot;
+}
+
+function pages(api, chemin, { max = 10, arret = () => false, attentes = ATTENTES_VIDE_S } = {}) {
   const sortie = [];
   for (let page = 1; page <= max; page += 1) {
-    const lot = api(`${chemin}${chemin.includes('?') ? '&' : '?'}per_page=100&page=${page}`);
+    const lot = lirePage(api, `${chemin}${chemin.includes('?') ? '&' : '?'}per_page=100&page=${page}`, attentes);
     sortie.push(...lot);
     if (lot.length < 100 || arret(lot)) break;
   }
@@ -317,7 +332,7 @@ function pages(api, chemin, { max = 10, arret = () => false } = {}) {
 }
 
 /** Ce que GitHub dit MAINTENANT, par dépôt : tâches ouvertes et fermées récentes, PR récentes, branches claude/*. */
-export function lireVivant(api, depots, { asof, depuis }) {
+export function lireVivant(api, depots, { asof, depuis, attentes = ATTENTES_VIDE_S }) {
   const debut = debutFenetre(asof);
   const etiquette = `labels=${encodeURIComponent('niveau:tâche')}`;
   const vivant = {};
@@ -325,18 +340,18 @@ export function lireVivant(api, depots, { asof, depuis }) {
     const base = `/repos/MoKarade/${depot}`;
     const sansPr = (i) => !i.pull_request;
     const issues = [
-      ...pages(api, `${base}/issues?state=open&${etiquette}`).filter(sansPr),
-      ...pages(api, `${base}/issues?state=closed&${etiquette}&since=${debut}`).filter(sansPr),
+      ...pages(api, `${base}/issues?state=open&${etiquette}`, { attentes }).filter(sansPr),
+      ...pages(api, `${base}/issues?state=closed&${etiquette}&since=${debut}`, { attentes }).filter(sansPr),
     ];
     // Une tâche fermée dans la fenêtre peut avoir sa PR fusionnée bien avant (DriveAI#464 : PR #439 du 15/10, tâche fermée le 16/10) : les PR fermées
     // se lisent donc jusqu'à la borne du relevé, comme fetch.py, et non jusqu'au début de la fenêtre des tâches (écart I2 « PR liée », 18/10).
     const limite = [depuis, debut, BORNE_RELEVE].reduce((a, b) => (a < b ? a : b));
     const pulls = [
-      ...pages(api, `${base}/pulls?state=open`),
-      ...pages(api, `${base}/pulls?state=closed&sort=updated&direction=desc`, { max: 5, arret: (lot) => lot[lot.length - 1].updated_at < limite }),
+      ...pages(api, `${base}/pulls?state=open`, { attentes }),
+      ...pages(api, `${base}/pulls?state=closed&sort=updated&direction=desc`, { max: 5, attentes, arret: (lot) => lot[lot.length - 1].updated_at < limite }),
     ];
     const branches = [];
-    for (const b of pages(api, `${base}/branches`).filter((x) => x.name.startsWith('claude/'))) {
+    for (const b of pages(api, `${base}/branches`, { attentes }).filter((x) => x.name.startsWith('claude/'))) {
       const detail = api(`${base}/branches/${encodeURI(b.name)}`);
       branches.push({ name: b.name, date: detail.commit?.commit?.committer?.date ?? '' });
     }
