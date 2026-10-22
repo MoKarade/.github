@@ -29,9 +29,14 @@ COMMENTAIRE = re.compile(r"^\s*(//|/\*|\*|#)")
 TEST = re.compile(r"(^|/)(tests?|__tests__|e2e|spec)/|\.(test|spec)\.[A-Za-z]+$")  # le graphe en ressort presque jamais
 SOURCE = re.compile(r"\.(tsx?|jsx?|mjs|cjs|py|gs|go|rs|java|rb|php|cs|kt|swift)$")
 DELAI = 120  # secondes par appel : un symbole qui dépasse reste null, le banc continue
+# Baseline git grep (depuis le 22/10/2026) : ni code généré (dist/ commité dans hub-contract : 20 000 jetons par symbole),
+# ni ligne de plus de 1 000 caractères (code minifié : un symbole de Hubperso tombait dans un fichier vendu de 771 000 caractères).
+GENERES = tuple(f":(exclude,glob)**/{d}/**" for d in ("dist", "build", ".next", "coverage", "node_modules"))
+LIGNE_MAX_GREP = 1000
+PLAFOND_SURPRENANTS = 200
 CHAMPS_BANC = ("graphe_caracteres", "graphe_jetons", "graphe_ms", "grep_caracteres", "grep_jetons", "grep_ms",
                "fichiers_graphe", "fichiers_grep", "fichiers_communs", "graphe_en_plus", "grep_en_plus",
-               "rappel", "grep_commentaires")
+               "rappel", "grep_commentaires", "grep_exclus")
 
 
 def jetons(caracteres):
@@ -80,12 +85,54 @@ def analyser_grep(sortie):
     return fichiers, commentaires
 
 
+def commande_grep(symbole):
+    """La baseline : `git grep -nwI` du symbole, hors sortie du graphe et hors dossiers générés."""
+    return ["git", "grep", "-nwI", "--no-color", symbole, "--", ":!graphify-out", *GENERES]
+
+
+def ecarter_lignes_geantes(sortie, longueur_max=LIGNE_MAX_GREP):
+    """(sortie de git grep sans les lignes de plus de longueur_max caractères, nombre de lignes écartées).
+    Une ligne géante est du code minifié ou généré : un agent ne la lit pas, et elle gonflait la baseline."""
+    gardees, ecartees = [], 0
+    for ligne in sortie.splitlines(keepends=True):
+        if len(ligne) > longueur_max:
+            ecartees += 1
+        else:
+            gardees.append(ligne)
+    return "".join(gardees), ecartees
+
+
+def resume_structure(cycles, surprenants):
+    """(nombre de cycles d'import, au plus 5 exemples, nombre de liens surprenants plafonné) ; null si non mesuré."""
+    if cycles is None or surprenants is None:
+        return None, None, None
+    return len(cycles), [c["cycle"] for c in cycles[:5]], min(len(surprenants), PLAFOND_SURPRENANTS)
+
+
+def mesurer_structure(chemin_graphe):
+    """Cycles d'import et liens surprenants du graphe, par graphifyy (déterministe, 0 jeton) ; null si indisponible."""
+    try:
+        from graphify.analyze import find_import_cycles, surprising_connections
+        from graphify.paths import load_node_link_graph
+        G = load_node_link_graph(chemin_graphe)
+        communautes = {}
+        for noeud, attributs in G.nodes(data=True):
+            if attributs.get("community") is not None:
+                communautes.setdefault(int(attributs["community"]), []).append(noeud)
+        cycles = find_import_cycles(G, max_cycle_length=5, top_n=1000)
+        surprenants = surprising_connections(G, communautes, top_n=PLAFOND_SURPRENANTS)
+    except Exception as e:  # paquet absent ou graphe illisible : la mesure est facultative
+        print(f"::warning::structure du graphe non mesurée : {e}", file=sys.stderr)
+        return None, None, None
+    return resume_structure(cycles, surprenants)
+
+
 def est_code(chemin):
     """Fichier de code hors documentation et hors tests : le périmètre du rappel (les tests restent dans grep_jetons)."""
     return SOURCE.search(chemin) is not None and TEST.search(chemin) is None
 
 
-def ligne_banc(symbole, fichier, sortie_graphe, ms_graphe, sortie_grep, ms_grep):
+def ligne_banc(symbole, fichier, sortie_graphe, ms_graphe, sortie_grep, ms_grep, grep_exclus=None):
     """Une ligne du banc. Toute entrée None (appel échoué) laisse sa mesure à null."""
     ligne = {"symbole": symbole, "fichier": fichier, **{c: None for c in CHAMPS_BANC}}
     if sortie_graphe is not None:
@@ -96,7 +143,7 @@ def ligne_banc(symbole, fichier, sortie_graphe, ms_graphe, sortie_grep, ms_grep)
         fichiers, commentaires = analyser_grep(sortie_grep)
         code_grep = {f for f in fichiers if est_code(f)}
         ligne.update(grep_caracteres=len(sortie_grep), grep_jetons=jetons(len(sortie_grep)), grep_ms=ms_grep,
-                     fichiers_grep=len(code_grep), grep_commentaires=commentaires)
+                     fichiers_grep=len(code_grep), grep_commentaires=commentaires, grep_exclus=grep_exclus)
     if sortie_graphe is not None and sortie_grep is not None:
         communs = code_graphe & code_grep
         ligne.update(fichiers_communs=len(communs), graphe_en_plus=len(code_graphe - code_grep),
@@ -125,7 +172,7 @@ def totaux(banc):
     }
 
 
-def taille(graphe, meta, duree_construction):
+def taille(graphe, meta, duree_construction, structure=(None, None, None)):
     noeuds = graphe.get("nodes", [])
     liens = graphe.get("links", graphe.get("edges", []))
     fichiers = {n["source_file"] for n in noeuds if n.get("source_file")}
@@ -140,6 +187,8 @@ def taille(graphe, meta, duree_construction):
         "page_noeuds": meta.get("noeuds") if meta else None,
         "hors_page": max(len(code) - meta["noeuds"], 0) if meta and isinstance(meta.get("noeuds"), int) else None,
         "construction_s": duree_construction,
+        "cycles_import": structure[0],
+        "liens_surprenants": structure[2],
     }
 
 
@@ -166,6 +215,10 @@ def valider(impact):
         nombre(f"taille.{cle}", (impact.get("taille") or {}).get(cle), nullable=False)
     for cle, v in ((impact.get("taille") or {}).get("langages") or {}).items():
         nombre(f"taille.langages.{cle}", v, nullable=False)
+    exemples = impact.get("cycles_exemples")
+    if exemples is not None and not (isinstance(exemples, list) and len(exemples) <= 5 and all(
+            isinstance(c, list) and c and all(isinstance(f, str) for f in c) for c in exemples)):
+        ecarts.append("cycles_exemples : null ou 5 listes de chemins au plus attendues")
     banc = impact.get("banc")
     if not isinstance(banc, list) or len(banc) > 10:
         ecarts.append("banc : liste de 10 lignes au plus attendue")
@@ -203,19 +256,24 @@ def lancer(commande, **options):
     return r.stdout, ms
 
 
-def construire(graphe, meta, depot, sha, duree_construction, banc_n, maintenant):
+def construire(graphe, meta, depot, sha, duree_construction, banc_n, maintenant, structure=(None, None, None)):
     banc = []
     for s in choisir_symboles(graphe, banc_n):
         sortie_graphe, ms_graphe = lancer(["bash", "scripts/graphe.sh", "affected", s["symbole"]])
-        sortie_grep, ms_grep = lancer(["git", "grep", "-nwI", "--no-color", s["symbole"], "--", ":!graphify-out"])
-        banc.append(ligne_banc(s["symbole"], s["fichier"], sortie_graphe, ms_graphe, sortie_grep, ms_grep))
+        sortie_grep, ms_grep = lancer(commande_grep(s["symbole"]))
+        exclus = None
+        if sortie_grep is not None:
+            sortie_grep, exclus = ecarter_lignes_geantes(sortie_grep)
+        banc.append(ligne_banc(s["symbole"], s["fichier"], sortie_graphe, ms_graphe, sortie_grep, ms_grep, exclus))
     return {
         "version": VERSION,
         "depot": depot,
         "sha": sha,
         "genereLe": maintenant,
-        "methode": "jetons estimes = caracteres / 4 ; affected (scripts/graphe.sh) contre git grep -w ; null = non mesure",
-        "taille": taille(graphe, meta, duree_construction),
+        "methode": ("jetons estimes = caracteres / 4 ; affected (scripts/graphe.sh) contre git grep -w, hors dist/build/.next/"
+                    "coverage/node_modules et hors lignes de plus de 1000 caracteres (baseline changee le 22/10/2026) ; null = non mesure"),
+        "taille": taille(graphe, meta, duree_construction, structure),
+        "cycles_exemples": structure[1],
         "banc": banc,
         "totaux": totaux(banc),
     }
@@ -235,7 +293,7 @@ def main():
     graphe = json.load(open(a.graphe, encoding="utf-8"))
     meta = json.load(open(a.meta, encoding="utf-8")) if a.meta and os.path.exists(a.meta) else None
     maintenant = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    impact = construire(graphe, meta, a.depot, a.sha, a.duree_construction, a.banc, maintenant)
+    impact = construire(graphe, meta, a.depot, a.sha, a.duree_construction, a.banc, maintenant, mesurer_structure(a.graphe))
     ecarts = valider(impact)
     if ecarts:
         print("impact.json invalide :\n- " + "\n- ".join(ecarts), file=sys.stderr)
