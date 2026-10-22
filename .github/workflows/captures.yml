@@ -138,13 +138,21 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
 
+      # --with-deps appelle sudo : seulement sur les machines GitHub (dépôt public). Le robot du PC n'a pas
+      # sudo et possède déjà les bibliothèques système de Chromium.
       - name: Installer le navigateur
+        env:
+          VISIBILITE: ${{ github.event.repository.visibility }}
         run: |
           mkdir -p "$CAPTURES_OUTILS"
           cd "$CAPTURES_OUTILS"
           echo '{"name":"captures-outils","private":true}' > package.json
           npm install --no-audit --no-fund --save-exact playwright@1.49.1
-          npx playwright install --with-deps chromium
+          if [ "$VISIBILITE" = "public" ]; then
+            npx playwright install --with-deps chromium
+          else
+            npx playwright install chromium
+          fi
 
       # Si l'app « avant » ne démarre pas, la PR n'est pas en faute : on photographie quand même « après ».
       - name: Photographier avant (branche de base)
