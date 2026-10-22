@@ -46,3 +46,14 @@ test('securite.yml : OSV-Scanner passe par un binaire vérifié, sans aucune act
   assert.match(yaml, /sha256sum -c/);
   assert.match(yaml, /osv-scanner" scan source --lockfile=/);
 });
+
+test('captures.yml : --with-deps (sudo) seulement en dépôt public', () => {
+  const yaml = readFileSync(new URL('../.github/workflows/captures.yml', import.meta.url), 'utf8');
+  // Le robot du PC n'a pas sudo : `playwright install --with-deps` y échoue (« sudo: a password is required »).
+  const lignes = yaml.split('\n');
+  const idx = lignes.findIndex((l) => l.includes('npx playwright install --with-deps'));
+  assert.ok(idx > 0, '--with-deps absent : le chemin public a disparu');
+  assert.match(lignes[idx - 1], /if \[ "\$VISIBILITE" = "public" \]/, '--with-deps doit être réservé au dépôt public');
+  assert.match(yaml, /VISIBILITE: \$\{\{ github\.event\.repository\.visibility \}\}/);
+  assert.equal(yaml.match(/playwright install/g).length, 2, 'une seule installation par visibilité');
+});
