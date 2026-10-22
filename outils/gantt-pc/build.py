@@ -96,6 +96,7 @@ for r in gh['repos']:
 # vitesse de sortie des PR (onglet « Vitesse ») : None si le relevé est antérieur à cette mesure, la page le dit
 comp['prlog'] = gh.get('prlog')
 comp['prlog_j'] = gh.get('prlog_j')     # 1 : chaque PR dit elle-même si Jules l'a faite (champ j) ; absent : relevé d'avant ce critère, la page se rabat sur la tâche
+comp['graphes'] = gh.get('graphes')     # impact de Graphify par artefact (graphes.py) ; None : relevé d'avant cette mesure, la page le dit
 comp['releve'] = {k: gh.get(k) for k in ('v', 'mode', 'appels', 'reqs', 'n304', 'duree_s', 'reutilises') if gh.get(k) is not None}
 
 # Contrôles de la pastille (§13) : calculés ici, jamais corrigés ici (seulement signalés).

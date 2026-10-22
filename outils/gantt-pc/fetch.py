@@ -406,6 +406,18 @@ for x in PRLOG:
 print(f'CI : {len(a_lire)} PR lues, {len(CI)} mémorisées', file=sys.stderr)
 res['prlog'] = sorted(PRLOG, key=lambda x: x['m'])
 res['prlog_j'] = 1     # chaque entrée porte j = 1 quand la PR est de Jules (par_jules) : sans ce repère, la page ne sait pas si l'absence de j est mesurée
+# Impact de Graphify (tâche #466) : artefacts « graphe » des dix dépôts, mémorisés dans graphes_cache.json. Un échec ne bloque jamais le relevé.
+GRAPHES_CACHE = D + 'graphes_cache.json'
+try:
+    import graphes
+    try: GR = json.load(open(GRAPHES_CACHE, encoding='utf-8'))
+    except Exception: GR = {}
+    res['graphes'], lus, err = graphes.relever([(repo, key) for repo, key, _ in REPOS], _un, GR)
+    open(GRAPHES_CACHE + '.tmp', 'w', encoding='utf-8').write(json.dumps(GR)); os.replace(GRAPHES_CACHE + '.tmp', GRAPHES_CACHE)
+    for e in err: print('graphes', e, file=sys.stderr)
+    print(f"graphes : {lus} artefacts lus, {len(res['graphes'])} mémorisés", file=sys.stderr)
+except Exception as e:
+    print('graphes a échoué :', e, file=sys.stderr)
 CPT = ghcache.compteurs()
 # appels = requêtes comptées par GitHub (hors 304) ; reqs = toutes les requêtes ; n304 = celles qui n'ont rien coûté
 res['appels'], res['reqs'], res['n304'] = CPT['comptees'], CPT['req'], CPT['n304']
