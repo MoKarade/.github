@@ -31,6 +31,7 @@ import {
   toutesSurmontables,
 } from './relecture-regles.mjs';
 import { MARQUEUR_TACHE, controleTacheLiee, rapportTacheLiee } from './tache-liee.mjs';
+import { MARQUEUR_TAILLE, controleTaille, rapportTaille } from './taille-pr.mjs';
 
 export const MARQUEUR = '<!-- garde-fou -->';
 
@@ -463,6 +464,10 @@ async function main() {
     }
   }
 
+  // PR trop longue à relire (cycle de vie §1, environ 400 lignes hors tests) : verdict à part, comme la tâche liée.
+  const taille = controleTaille({ pr, fichiers });
+  const texteTaille = rapportTaille(taille);
+
   const contenu = (ref, chemin) =>
     api(
       'GET',
@@ -491,12 +496,12 @@ async function main() {
       'la PR attend la relecture IA (quelques minutes) ; si elle refuse, elle attend Marc.',
     );
   }
-  texte = `${texte}\n\n${texteLien}`;
+  texte = `${texte}\n\n${texteLien}\n\n${texteTaille}`;
   console.log(texte);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${texte}\n`);
   if (dry) {
     console.log('(DRY_RUN : rien écrit sur GitHub)');
-    process.exitCode = resultat.violations.length > 0 || !lien.ok ? 1 : 0;
+    process.exitCode = resultat.violations.length > 0 || !lien.ok || !taille.ok ? 1 : 0;
     return;
   }
 
@@ -555,7 +560,18 @@ async function main() {
       console.warn(`Garde-fou : commentaire « tâche liée » non posté (le verdict reste rouge). ${erreur.message}`);
     }
   }
-  process.exitCode = echec || !lien.ok ? 1 : 0;
+  // Commentaire de la règle « taille » : même forme, un seul, mis à jour ; la dérogation ou le découpage le lève.
+  const ancienneTaille = commentaires.find((c) => c.body?.includes(MARQUEUR_TAILLE));
+  if (!taille.ok || ancienneTaille) {
+    try {
+      const corps = `${MARQUEUR_TAILLE}\n${taille.ok ? 'Taille : vert, le blocage est levé.' : texteTaille}`;
+      if (ancienneTaille) await api('PATCH', `/repos/${GITHUB_REPOSITORY}/issues/comments/${ancienneTaille.id}`, { body: corps });
+      else await api('POST', `/repos/${GITHUB_REPOSITORY}/issues/${numero}/comments`, { body: corps });
+    } catch (erreur) {
+      console.warn(`Garde-fou : commentaire « taille » non posté (le verdict reste rouge). ${erreur.message}`);
+    }
+  }
+  process.exitCode = echec || !lien.ok || !taille.ok ? 1 : 0;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

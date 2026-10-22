@@ -229,7 +229,9 @@ for repo, key, name in REPOS:
     for p in ouvertes + fermees + [x for x in fus if x['number'] not in vus_pr]:
         for rl, num, kind in liens(p.get('body'), repo):
             d = {'n': p['number'], 'repo': repo, 'created': p['created_at'], 'url': p['html_url'], 'state': p['state'], 'draft': p.get('draft', False),
-                 'merged': p.get('merged_at'), 'closed': p.get('closed_at'), 'upd': p.get('updated_at'), 'kind': kind, 'au': (p.get('user') or {}).get('login')}
+                 'merged': p.get('merged_at'), 'closed': p.get('closed_at'), 'upd': p.get('updated_at'), 'kind': kind, 'au': (p.get('user') or {}).get('login'),
+                 # dérogation de taille (Garde-fou, scripts/taille-pr.mjs) : posée par Marc ou le Coordinateur, la PR n'est plus un défaut « plus de 400 lignes »
+                 **({'dg': 1} if any(l.get('name') == 'derogation-taille' for l in p.get('labels') or []) else {})}
             L = LIEN.setdefault(f'{rl}#{num}', {})
             # une PR citée deux fois (Tâche et Closes) garde le lien « tache »
             if (repo, p['number']) not in L or kind == 'tache': L[(repo, p['number'])] = d
