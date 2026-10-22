@@ -32,7 +32,7 @@ le PC, le relevé tourne sans Claude.
 ## Installer
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File installer.ps1            # trouve seul le dossier _Gantt existant sous Mon disque / My Drive (à toute profondeur)
+powershell -ExecutionPolicy Bypass -File installer.ps1            # trouve seul le dossier _Gantt existant (ou « Gantt », seulement s'il porte déjà `etat.json`) sous Mon disque / My Drive (à toute profondeur)
 powershell -ExecutionPolicy Bypass -File installer.ps1 -Drive "<chemin du dossier _Gantt>"
 ```
 
