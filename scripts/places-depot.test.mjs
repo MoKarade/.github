@@ -33,13 +33,25 @@ test('deux places : un autre travail en cours, accepté ; deux autres, refusé p
   assert.equal(deux.ok, false);
 });
 
-test('jules compte comme une place, une tâche à la fois dans les deux listes une seule fois', async () => {
-  const v = await controlePlaces({ api: fauxDepot({ enCours: [tache(10, 'en-cours', 'jules')], jules: [tache(10, 'en-cours', 'jules')] }), pr: pr(), lien: lien(20), places: 2 });
+test('une tâche jules ne tient aucune place : le dépôt n\u2019est pas plein, seule la tâche en-cours compte', async () => {
+  // Hubperso#413 bloquée par la tâche Jules #412 (23/10/2026) : le contrôle ne lit plus les tâches `jules`
+  const api = async (methode, chemin) => {
+    assert.ok(!/labels=jules/.test(chemin), 'les tâches jules ne se lisent plus');
+    return fauxDepot({ enCours: [tache(10, 'en-cours', 'jules')], jules: [tache(11, 'jules')] })(methode, chemin);
+  };
+  const plein = await controlePlaces({ api, pr: pr(), lien: lien(20), places: 1 });
+  assert.equal(plein.ok, false);
+  assert.deepEqual(plein.occupants.map((o) => o.numero), [10]);
+  const libre = await controlePlaces({ api: fauxDepot({ jules: [tache(11, 'jules')] }), pr: pr(), lien: lien(20), places: 1 });
+  assert.equal(libre.ok, true);
+  assert.equal(libre.occupants.length, 0);
+});
+
+test('la PR d\u2019une tâche jules n\u2019est jamais refusée, même dans un dépôt plein, sans lire le dépôt', async () => {
+  const api = async () => { throw new Error('ne doit pas être appelé'); };
+  const v = await controlePlaces({ api, pr: pr(), lien: lien(20, { jules: true, aPrendre: false }), places: 1 });
   assert.equal(v.ok, true);
-  assert.equal(v.occupants.length, 1);
-  const w = await controlePlaces({ api: fauxDepot({ jules: [tache(10, 'jules')] }), pr: pr(), lien: lien(20), places: 1 });
-  assert.equal(w.ok, false);
-  assert.equal(w.occupants[0].jules, true);
+  assert.match(v.raison, /Jules/);
 });
 
 test('la tâche déjà en cours est acceptée (c’est l’une des places), sans lire le dépôt', async () => {

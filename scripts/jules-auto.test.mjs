@@ -131,6 +131,8 @@ test('choisirPourJules attend qu’un dépôt soit libre : travail en cours, PR 
   assert.deepEqual(r({ occupe_par: [{ ref: 'carai#2', motif: 'en-cours' }] }).choix, []);
   assert.deepEqual(r({ occupe_par: [{ ref: 'carai#2', motif: 'pr-ouverte' }] }).choix, []);
   assert.deepEqual(r({ occupe_par: [{ ref: 'carai#2', motif: 'jules' }] }).choix, []);
+  // depuis le 23/10/2026 le relevé range les tâches Jules dans `jules_en_cours`, hors de `occupe_par` : le filet les lit toujours
+  assert.deepEqual(r({ jules_en_cours: [{ ref: 'carai#2', motif: 'jules', fichiers: ['a/x.ts'] }] }).choix, []);
   assert.deepEqual(r({ incidents: [{ n: 9 }] }).choix, []);
 });
 
@@ -142,6 +144,9 @@ test('choisirPourJules plafonne à trois Jules en même temps, et ne reconfie pa
   const dejaUn = choisirPourJules(prochaines(depot('z', [], { occupe_par: [{ ref: 'z#1', motif: 'jules' }] }), ...quatre), (repo, n) => ({ ...ouverte(n), body: corps(n, repo) }));
   assert.equal(dejaUn.choix.length, 2);
   assert.equal(dejaUn.enCours, 1);
+  const dejaUnNouveau = choisirPourJules(prochaines(depot('z', [], { jules_en_cours: [{ ref: 'z#1', motif: 'jules' }] }), ...quatre), (repo, n) => ({ ...ouverte(n), body: corps(n, repo) }));
+  assert.equal(dejaUnNouveau.enCours, 1, 'le plafond de trois lit jules_en_cours');
+  assert.equal(dejaUnNouveau.choix.length, 2);
   void lire;
   const deux = choisirPourJules(prochaines(depot('carai', [{ ref: 'carai#7', n: 7 }])), () => { throw new Error('ne doit pas être lu'); }, { confies: { 'carai#7': { fois: FOIS_MAX } } });
   assert.deepEqual(deux.choix, []);

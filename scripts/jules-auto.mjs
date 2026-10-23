@@ -149,13 +149,16 @@ export function evaluerJules({ repo, n, labels = [], body = '' }) {
  */
 export function choisirPourJules(prochaines, lireIssue, etat = {}) {
   const depots = prochaines.depots ?? [];
-  const enCours = depots.filter((d) => (d.occupe_par ?? []).some((o) => o.motif === 'jules')).length;
+  // Jules ne tient plus de place dans `occupe_par` (23/10/2026) : ses tâches se lisent dans `jules_en_cours` (et, d'un ancien relevé, dans `occupe_par`).
+  const julesDe = (d) => [...(d.jules_en_cours ?? []), ...(d.occupe_par ?? []).filter((o) => o.motif === 'jules')];
+  const enCours = depots.filter((d) => julesDe(d).length).length;
   const resultat = { choix: [], pasPretes: [], depotsConcernes: 0, enCours };
   for (const d of depots) {
     if (!(d.reservees_jules ?? []).length) continue;
     resultat.depotsConcernes += 1;
     // Deux travaux en cours, ou un incident : le dépôt attend. La tâche reste réservée.
-    const occupants = d.occupe_par ?? [];
+    // Le filet de Jules garde sa règle : il n'ajoute pas une tâche à un dépôt déjà occupé, par un fil ou par lui-même.
+    const occupants = [...(d.occupe_par ?? []).filter((o) => o.motif !== 'jules'), ...julesDe(d)];
     if (occupants.length >= PLACES_PAR_DEPOT || (d.incidents ?? []).length) continue;
     // Un seul travail en cours dont les fichiers ne sont pas déclarés : pas de deuxième place (dans le doute, un seul), sans rien lire.
     if (occupants.some((o) => !Array.isArray(o.fichiers) || !o.fichiers.length)) continue;

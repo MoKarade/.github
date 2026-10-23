@@ -64,8 +64,10 @@ export const TYPES_BALAYAGE = new Set(['pr_fusionnee', 'ci_rouge', 'tache_fermee
 // Une PR qui s'ouvre ne lance que le commentaire tâche liée (et la marque `en-cours`) : la relecture IA a son propre déclencheur.
 export const WORKFLOWS_PR_OUVERTE = ['commentaire-tache-liee.yml'];
 // Ce qui occupe un dépôt (une chose à la fois par app, docs/cycle-de-vie-tache.md) : une issue ouverte portant l'une de ces
-// étiquettes, ou une PR ouverte (brouillon compris) qui n'est pas celle d'un robot. `preuve-attendue` ne l'occupe pas.
-export const LABELS_OCCUPE = ['en-cours', 'jules'];
+// étiquettes, ou une PR ouverte (brouillon compris) qui n'est pas celle d'un robot. `preuve-attendue` ne l'occupe pas, ni `jules` : une tâche
+// confiée à Jules (et sa PR) ne tient pas de place (décision de Marc, 23/10/2026 22:45Z : « il prend quand même »).
+export const LABELS_OCCUPE = ['en-cours'];
+const LABEL_JULES = 'jules';
 const CONTROLE_MARC = 'Garde-fou';
 const CONCLUSIONS_ROUGES = new Set(['failure', 'timed_out']);
 const ROBOTS_SANS_FILET = /dependabot|mergify/i;
@@ -190,7 +192,7 @@ export async function occupations({ api, depot, tachesExclues = [] }) {
 }
 
 /**
- * Le nombre de TRAVAUX du dépôt (deux places par dépôt, décision de Marc du 21/10/2026) : une tâche `en-cours` ou `jules` et sa PR ouverte
+ * Le nombre de TRAVAUX du dépôt (deux places par dépôt, décision de Marc du 21/10/2026) : une tâche `en-cours` et sa PR ouverte
  * comptent pour un, une PR qui ne cite aucune tâche occupée compte pour un. Même lecture que `occupations`, même repli (lecture ratée : 0).
  */
 export async function travaux({ api, depot, tachesExclues = [] }) {
@@ -211,7 +213,12 @@ async function lireOccupations({ api, depot, tachesExclues }) {
       const lot = (await api('GET', `/repos/${depot}/issues?labels=${label}&state=open&per_page=30`)) ?? [];
       for (const i of lot) if (!i.pull_request && !exclues.has(i.number)) prises.add(i.number);
     }
-    return { prises, prs, tachesDe };
+    // Les tâches de Jules ne tiennent pas de place, ni leur PR (qui ne cite aucune tâche `en-cours` : elle ne compterait pas non plus comme « PR seule »).
+    const jules = new Set();
+    const lotJules = (await api('GET', `/repos/${depot}/issues?labels=${LABEL_JULES}&state=open&per_page=30`)) ?? [];
+    for (const i of lotJules) if (!i.pull_request) jules.add(i.number);
+    const prsDeJules = (pr) => tachesDe([pr]).some((n) => jules.has(n)) && !tachesDe([pr]).some((n) => prises.has(n));
+    return { prises, prs: prs.filter((pr) => !prsDeJules(pr)), tachesDe };
   } catch {
     return { prises: new Set(), prs: [], tachesDe: () => [] };
   }

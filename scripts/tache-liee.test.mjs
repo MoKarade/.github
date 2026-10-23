@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { avertissementDeLaTache, controleTacheLiee, defautDeLaTache, dispense, extraireTaches, rapportTacheLiee } from './tache-liee.mjs';
+import { avertissementDeLaTache, controleTacheLiee, defautDeLaTache, dispense, estUneTacheJules, extraireTaches, rapportTacheLiee, tientUnePlace } from './tache-liee.mjs';
 
 // Données fictives, aucun réseau : une fausse API GitHub en mémoire.
 const humain = { login: 'MoKarade', type: 'User' };
@@ -212,4 +212,12 @@ test('Garde-fou de bout en bout : dépôt plein (un autre travail en cours), rou
   assert.equal(tient.code, 0, tient.texte);
   const brouillon = await lancerGardeFou({ corps: 'Tâche : #120', enCours: [autre], brouillon: true });
   assert.equal(brouillon.code, 0, brouillon.texte);
+});
+
+test('une tâche jules ne tient pas de place (23/10/2026), une tâche en-cours si ; la tâche jules est repérée pour n\u2019être jamais refusée', () => {
+  const avec = (...noms) => ({ labels: noms.map((name) => ({ name })) });
+  assert.equal(tientUnePlace(avec('niveau:tâche', 'en-cours')), true);
+  assert.equal(tientUnePlace(avec('niveau:tâche', 'jules')), false);
+  assert.equal(estUneTacheJules(avec('niveau:tâche', 'jules')), true);
+  assert.equal(estUneTacheJules(avec('niveau:tâche', 'en-cours')), false);
 });
