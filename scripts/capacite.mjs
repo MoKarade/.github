@@ -2,8 +2,8 @@
 // Capacité d'un dépôt : UN travail à la fois (décision de Marc, 21/10/2026 20:00Z, « 124 » : économiser le quota Claude). Entre 13:21Z et 20:00Z ce même
 // jour, DEUX travaux pouvaient avancer ensemble sur des fichiers disjoints (option 2 : « plusieurs fils sur un même projet en même temps ») : toute la
 // mécanique reste en place et se rouvre en changeant `PLACES_PAR_DEPOT` (les tests de parallélisme tournent à deux places, `places-deux.mjs`).
-// Un travail est une tâche `en-cours` ou `jules`, ou la PR ouverte d'une tâche.
-// Ce module ne fait que des fonctions pures, partagées par `prochaine-tache.mjs` (la file), `jules-auto.mjs` (Jules prend la 2e place)
+// Un travail est une tâche `en-cours`, ou la PR ouverte d'une tâche (une tâche `jules` n'en est pas un depuis le 23/10/2026).
+// Ce module ne fait que des fonctions pures, partagées par `prochaine-tache.mjs` (la file), `jules-auto.mjs` (fichiers déjà pris)
 // et testées sans réseau : lire les fichiers qu'une tâche déclare, et dire si deux travaux peuvent avancer ensemble.
 //
 // Règle du doute : un travail dont les fichiers ne sont pas déclarés (ou illisibles) n'est compatible avec RIEN. Dans le doute, un seul.
