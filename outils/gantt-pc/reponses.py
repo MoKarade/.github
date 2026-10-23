@@ -63,6 +63,9 @@ def heure_quebec(t):
     return t.astimezone(z).strftime('%d/%m %H:%M')
 
 
+def _iso(t): return datetime.datetime.fromisoformat(t.replace('Z', '+00:00'))
+
+
 def plan(dem, objet, maintenant):
     """Les écritures GitHub à faire pour une demande, d'après l'objet relu (issue ou PR). Rend (actions, erreur). Pure."""
     if dem['geste'] == 'fusionner':
@@ -77,7 +80,9 @@ def plan(dem, objet, maintenant):
     if GARDE_FOU.match(objet.get('title') or ''): return [], 'le geste attendu est la fusion de la PR, pas un commentaire'
     h = heure_quebec(maintenant)
     if dem['geste'] == 'fait':
-        corps = f'**Fait** — Marc, depuis la page de suivi ({h}, heure du Québec).'
+        origine = dem.get('origine')      # « fait » clair écrit par Marc en commentaire, retiré par le relevé (gestes.py, .github#478)
+        corps = (f'**Fait** — Marc, depuis son commentaire du {heure_quebec(_iso(origine["c"]))} (heure du Québec) : {origine["u"]}'
+                 if origine else f'**Fait** — Marc, depuis la page de suivi ({h}, heure du Québec).')
     else:
         opts = options(objet.get('body'))
         if dem['texte'] not in opts: return [], 'réponse absente de la section « Réponses » de l\'issue'

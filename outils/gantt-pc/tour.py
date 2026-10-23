@@ -19,12 +19,14 @@
 # Lancer : python -X utf8 tour.py --drive "G:\Mon disque\_Gantt"   (un tour, puis sortie ; code 0 = OK ou tour sauté, 1 = échec)
 import argparse, datetime, gzip, json, os, shutil, socket, subprocess, sys, time
 import pousser_hub
+import gestes, reponses      # gestes de Marc à jour (.github#478) ; reponses.appliquer écrit le commentaire « Fait » et retire qui:marc
 
 D = os.path.dirname(os.path.abspath(__file__)) + os.sep
 ENV = dict(os.environ, PYTHONUTF8='1')
 ENV.setdefault('GANTT_CACHE_HTTP', D + '.cache-http')     # le cache ETag de ghcache.py ; /tmp n'existe pas sous Windows
 PY, NODE = sys.executable, shutil.which('node') or 'node'
 ETAT = D + 'boucle-etat.json'
+ETAT_EXTRA = {}      # clés structurées ajoutées à etat.json par le tour en cours (ex. `gestes`, .github#478)
 
 
 def maintenant(): return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -71,7 +73,7 @@ def queue(log, n=300):
 
 def ecrire_etat(debut, res):
     d = {'pid': os.getpid(), 'machine': socket.gethostname(), 'dernier_tour': debut, 'prochain_tour': None, 'resultat': res,
-         'periode_s': 600, 'ecrit': maintenant(), 'moteur': 'tour.py (tâche Windows)'}
+         'periode_s': 600, 'ecrit': maintenant(), 'moteur': 'tour.py (tâche Windows)', **ETAT_EXTRA}
     with open(ETAT + '.tmp', 'w', encoding='utf-8') as fh: json.dump(d, fh, ensure_ascii=False)
     os.replace(ETAT + '.tmp', ETAT)
     with open(D + 'releve-erreur.txt', 'w', encoding='utf-8') as fh: fh.write(res + '\n')
@@ -144,6 +146,18 @@ def releve(econome=False, quota_complet=True, drive=None):
     if os.path.exists(script_filet):
         lancer([NODE, script_filet, 'prochaines.json', '--etat', 'filet-pc-etat.json', '--executer'], '.refresh-filet.log', 120)
         filet = ' · ' + (queue('.refresh-filet.log', 520) or 'filet PC : sans sortie')
+    # 3 bis. gestes de Marc à jour (gestes.py, .github#478) : un « fait » clair de Marc retire `qui:marc` (même commentaire que le bouton « Fait »),
+    # le reste est signalé dans etat.json et dans les deux listes. Un échec se DIT, il ne fait pas échouer le tour.
+    ges = ''
+    try:
+        g = lire('donnees.json').get('gestes') or {}
+        if g.get('erreur') or 'gestes' not in g: ges = f' · gestes : non calculés ({g.get("erreur", "absents du relevé")})'
+        else:
+            retirees, refus = gestes.retirer(g['a_retirer'], reponses.appliquer, datetime.datetime.now(datetime.timezone.utc))
+            ligne, ETAT_EXTRA['gestes'] = gestes.resume(g, retirees, refus)
+            ges = ' · ' + ligne
+    except Exception as e: ges = f' · gestes : ÉCHEC {type(e).__name__} : {str(e)[:160]}'
+    rep += ges
     p = lire('prochaines.json')
     file = ' '.join(d['depot'] + '=' + (d['suivante']['ref'] if d.get('suivante') else d['statut']) for d in p['depots'])
     # La mesure du quota Claude écrite par la tâche « Quota-Claude » : trop vieille, elle ne dit plus rien (le frein garde alors son palier ou,
@@ -191,7 +205,7 @@ def deposer_drive(drive, code):
         os.makedirs(drive, exist_ok=True)
         if code == 0:
             sur_place(D + 'donnees.json', os.path.join(drive, 'donnees.json.gz'), gz=True)
-            for f in ('prochaines.json', 'fiabilite.json', 'quota.json', 'boucle-etat.json'):
+            for f in ('prochaines.json', 'fiabilite.json', 'quota.json', 'boucle-etat.json', 'gestes-de-marc.md', 'a-faire-maintenant.md'):
                 if os.path.exists(D + f): sur_place(D + f, os.path.join(drive, 'etat.json' if f == 'boucle-etat.json' else f))
         else:
             sur_place(ETAT, os.path.join(drive, 'etat.json'))   # un échec se voit aussi depuis la page

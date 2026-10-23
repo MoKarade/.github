@@ -203,6 +203,21 @@ def sante(gh):
     return {'ctrl': CTRL, 'pb': pb, 'hors': hors, 'n': len(pb) + len(pm)}
 comp['sante'] = sante(gh)
 
+# Gestes de Marc à jour (gestes.py, tâche .github#478) : signalements pour l'onglet « À toi » et etat.json, plus les deux listes générées.
+# Un échec ne bloque jamais la construction : la page dit « erreur » au lieu de montrer des gestes inventés.
+try:
+    import gestes
+    _maintenant = datetime.datetime.now(UTC)
+    _g = gestes.controler(gh['repos'], _maintenant)
+    comp['gestes'] = _g
+    for _nom, _texte in zip(('gestes-de-marc', 'a-faire-maintenant'), gestes.listes_md(_g, _maintenant)):
+        _f = D + _nom + OUT + '.md'
+        open(_f + '.tmp', 'w', encoding='utf-8').write(_texte)
+        os.replace(_f + '.tmp', _f)
+except Exception as _e:
+    comp['gestes'] = {'erreur': f'{type(_e).__name__} : {str(_e)[:160]}'}
+    print('gestes a échoué :', _e, file=sys.stderr)
+
 # Preuves en retard, pour le filet du PC (scripts/preuves-retard.mjs, tâche .github#513) : il les redit au Coordinateur toutes les 4 h.
 _dp = D + 'defauts-preuve' + OUT + '.json'
 json.dump(defauts_preuve.calculer(gh, comp['sante'], datetime.datetime.now(datetime.timezone.utc)), open(_dp + '.tmp', 'w', encoding='utf-8'), ensure_ascii=False)
