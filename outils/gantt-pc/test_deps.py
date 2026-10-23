@@ -34,6 +34,16 @@ class LireAttend(unittest.TestCase):
         self.assertEqual(deps.lire_attend('**Attend** : rien (PR #208 fusionnée)', 'a'), [])
         self.assertEqual(deps.lire_attend('**Attend** : aucune', 'a'), [])
 
+    def test_la_faute_courante_des_deux_points_dans_le_gras_est_lue(self):
+        # .github#503 (22/10/2026) : « **Attend :** aucune. » sortait de la file comme « attend-absent »
+        self.assertEqual(deps.reste_attend('**Attend :** aucune.'), 'aucune.')
+        self.assertEqual(deps.reste_attend('**Attend:** #12'), '#12')
+        self.assertEqual(deps.reste_attend('**Attend** : rien'), 'rien')
+        self.assertIsNone(deps.reste_attend('**Attendu** : rien'))
+        self.assertIsNone(deps.reste_attend('Attend : rien'))
+        self.assertEqual(deps.lire_attend('**Attend :** aucune. (#493 fermée)', 'a'), [])
+        self.assertEqual(deps.lire_attend('**Attend:** #12, Hubperso#311 — raison', 'jobai'), ['jobai#12', 'hubperso#311'])
+
     def test_un_nom_de_depot_dans_un_mot_ne_compte_pas(self):
         self.assertEqual(deps.lire_attend('**Attend** : super-carai#4 ; xmemoryai#5 ; mon-hub-contract#6', 'a'), ['a#4', 'a#5', 'a#6'])
 

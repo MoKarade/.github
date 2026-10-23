@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { dependancesEcrites, marquerFaisables, retirerPerimees, RESERVE_MAX } from './jules-marquage.mjs';
+import { aLigneAttend, dependancesEcrites, marquerFaisables, retirerPerimees, RESERVE_MAX } from './jules-marquage.mjs';
 import { tourJulesSuivi } from './filet-pc.mjs';
 
 const corps = (n, { attend = '**Attend** : aucune', sections = {} } = {}) => {
@@ -41,6 +41,14 @@ function github({ issues = [], prs = [], etats = {}, natives = {} }) {
   return { gh, appels };
 }
 const ecritures = (appels) => appels.filter((a) => a.methode !== 'GET');
+
+test('Attend écrit « **Attend :** » ou « **Attend:** » (faute courante, .github#503) : la ligne existe et se lit', () => {
+  assert.equal(aLigneAttend('**Attend :** aucune.'), true);
+  assert.equal(aLigneAttend('x\n**Attend:** #12'), true);
+  assert.equal(aLigneAttend('Attend : rien'), false);
+  assert.deepEqual(dependancesEcrites('**Attend :** aucune. (#493 fermée)', 'JobAI'), []);
+  assert.deepEqual(dependancesEcrites('**Attend:** #12, MoKarade/hubperso#3 — raison', 'JobAI'), [{ depot: 'JobAI', n: 12 }, { depot: 'hubperso', n: 3 }]);
+});
 
 test('dependancesEcrites : #n, depot/x#n, « aucune » et « rien (PR #n fusionnée) » ne comptent pas', () => {
   assert.deepEqual(dependancesEcrites('**Attend** : #12, MoKarade/hubperso#3 — raison', 'JobAI'), [{ depot: 'JobAI', n: 12 }, { depot: 'hubperso', n: 3 }]);
