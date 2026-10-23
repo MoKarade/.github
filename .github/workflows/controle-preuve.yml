@@ -1,0 +1,61 @@
+name: Contrôle de preuve (lancement à la demande)
+
+# Va voir la production pour une tâche en `preuve-attendue` et dit ce qui a été observé (tâche #248, docs/cycle-de-vie-tache.md §10 quater).
+# La tâche porte une ligne `**Contrôle** : …` au format fermé (http, navigateur, actions) ; ce workflow ne pose JAMAIS « Acceptée » :
+# le fil de la tâche le fait, avec la PR fusionnée, le déploiement et le résultat de ce lancement (résumé du job).
+#
+# Lancement : Actions > Contrôle de preuve > Run workflow, ou  gh workflow run controle-preuve.yml -f tache=MoKarade/CarAI#84
+# Sans secret : lecture anonyme de la production, jeton du job pour lire les issues et les runs des dépôts publics.
+on:
+  workflow_dispatch:
+    inputs:
+      tache:
+        description: 'La tâche à contrôler, au format propriétaire/dépôt#numéro.'
+        type: string
+        required: true
+      navigateur:
+        description: 'Installer Chromium (seulement si un contrôle « navigateur » est écrit).'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: read
+  actions: read
+
+jobs:
+  controle:
+    name: Contrôle de la preuve
+    timeout-minutes: 10
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || fromJSON('["self-hosted","pc-marc"]') }} # dépôt public : machines GitHub (gratuites) ; privé : robot du PC
+    env:
+      CONTROLE_OUTILS: ${{ github.workspace }}/.controle-outils
+      TACHE: ${{ inputs.tache }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Installer le navigateur
+        if: inputs.navigateur
+        env:
+          VISIBILITE: ${{ github.event.repository.visibility }}
+        run: |
+          mkdir -p "$CONTROLE_OUTILS"
+          cd "$CONTROLE_OUTILS"
+          echo '{"name":"controle-outils","private":true}' > package.json
+          npm install --no-audit --no-fund --save-exact playwright@1.49.1
+          if [ "$VISIBILITE" = "public" ]; then
+            npx playwright install --with-deps chromium
+          else
+            npx playwright install chromium
+          fi
+
+      - name: Contrôler
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/controle-preuve.mjs "$TACHE"
