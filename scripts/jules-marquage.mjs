@@ -21,13 +21,17 @@ export const MENTION_MCP = /registerTool|lib\/mcp\/|app\/api\/mcp|(?:outil|serve
 
 const noms = (labels) => (labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
 
+/** Reste de la ligne `**Attend**` (aussi écrite `**Attend :**` ou `**Attend:**`, faute courante : .github#503, 22/10/2026), ou null. Même règle que `deps.py` (`reste_attend`). */
+export const resteAttend = (ligne) => /^\*\*Attend\s*(?::\s*\*\*|\*\*\s*:?)\s*(.*)$/.exec(ligne)?.[1] ?? null;
+
 /** Les tâches citées par la ligne `**Attend**` d'un corps : « #12, MoKarade/x#3 — raison » -> [{depot, n}] (« rien/aucune » = aucune). */
 export function dependancesEcrites(corps, depot) {
   const refs = [];
   for (const ligne of String(corps ?? '').split('\n')) {
-    if (!ligne.startsWith('**Attend**')) continue;
-    const avant = ligne.split('—')[0];
-    if (/^\*\*Attend\*\*[\s:*]*(?:rien|aucune?|néant)\b/i.test(avant)) continue;
+    const reste = resteAttend(ligne);
+    if (reste === null) continue;
+    const avant = reste.split('—')[0];
+    if (/^[\s:*]*(?:rien|aucune?|néant)\b/i.test(avant)) continue;
     for (const m of avant.matchAll(/(?:MoKarade\/([\w.-]+))?#(\d+)/g)) refs.push({ depot: m[1] ?? depot, n: Number(m[2]) });
   }
   return refs;
@@ -82,7 +86,7 @@ export function retirerPerimees({ depot, gh, aBlanc = false }) {
  * @returns {{ marquees: string[], refusees: number, reserve: number }}
  */
 /** La tâche porte-t-elle sa ligne `**Attend**` ? Sans elle, `prochaine-tache.mjs` la sort de la file (« attend-absent ») : la réserver à Jules serait une impasse. */
-export const aLigneAttend = (corps) => String(corps ?? '').split('\n').some((l) => l.startsWith('**Attend**'));
+export const aLigneAttend = (corps) => String(corps ?? '').split('\n').some((l) => resteAttend(l) !== null);
 
 export function marquerFaisables({ depot, gh, aBlanc = false }) {
   const court = depot.replace(`${ORG}/`, '');

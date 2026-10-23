@@ -21,13 +21,23 @@ NOMS_DEPOTS = ['.github', 'financeai', 'jobai', 'batchchef-', 'batchchef', 'driv
 ALIAS_DEPOTS = {'batchchef': 'batchchef-'}
 REF_ATTEND = re.compile(r'(?:MoKarade/([\w.-]+)|(?<![\w./-])(' + '|'.join(re.escape(n) for n in sorted(NOMS_DEPOTS, key=len, reverse=True)) + r'))?#(\d+)', re.I)
 
+# « **Attend** : x », « **Attend :** x » et « **Attend:** x » : les deux dernières sont une faute courante (22/10/2026, .github#503 « **Attend :** aucune. » sortie de la
+# file comme « attend-absent » : un dépôt libre sans tâche prenable une nuit entière pour deux signes mal placés). Une seule définition, lue par fetch.py aussi.
+LIGNE_ATTEND = re.compile(r'^\*\*Attend\s*(?::\s*\*\*|\*\*\s*:?)\s*(.*)$')
+
+def reste_attend(ligne):
+    """Ce qui suit « **Attend** » sur la ligne (sans les deux-points ni les étoiles), ou None si ce n'est pas une ligne Attend."""
+    m = LIGNE_ATTEND.match(ligne)
+    return m.group(1) if m else None
+
 def lire_attend(body, repo):
     """Les dépendances écrites sur la ligne « **Attend** » : « dépôt#n » en minuscules. « **Attend** : rien (PR #n fusionnée) » n'attend rien (le #n est une remarque)."""
     deps = []
     for line in (body or '').splitlines():
-        if line.startswith('**Attend**'):
-            avant = line.split('—')[0]
-            if re.match(r'^\*\*Attend\*\*[\s:*]*(?:rien|aucune?|néant)\b', avant, re.I): continue
+        reste = reste_attend(line)
+        if reste is not None:
+            avant = reste.split('—')[0]
+            if re.match(r'^[\s:*]*(?:rien|aucune?|néant)\b', avant, re.I): continue
             for plein, court, num in REF_ATTEND.findall(avant):
                 nom = (plein or court or repo).lower()
                 deps.append(f"{ALIAS_DEPOTS.get(nom, nom)}#{num}")
