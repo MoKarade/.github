@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 import deps as deps_mod     # dépendances vers une PR : ramenées à la tâche qu'elle cite, ou levées si elle est fusionnée
 import completude
 from acceptation import est_preuve    # même règle que le garde-fou : une personne, ou l'acceptation automatique marquée du robot
+import gestes     # contrôle des gestes de Marc à jour (.github#478) : fetch.py y garde les derniers commentaires de Marc (`marc_com`)
 from ci import resume_ci     # fin de CI et CI rouge d'une PR fusionnée (onglet Rythme)
 ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
 OPT = {a.split('=', 1)[0]: (a.split('=', 1) + [''])[1] for a in sys.argv[1:] if a.startswith('--')}
@@ -327,6 +328,8 @@ def calculer(repo, rl, i, pr):
             if g:
                 t = re.sub(r'\s+', ' ', GESTE.sub('', g[-1]['body'], count=1)).strip()
                 n['geste'] = {'t': t[:400] + ('…' if len(t) > 400 else ''), 'u': g[-1]['html_url']}
+            # derniers commentaires de Marc (gestes.py, .github#478) : un « fait » clair plus récent que la pose de `qui:marc` retire l'étiquette. Aucun appel de plus.
+            if 'qui:marc' in labels and i['state'] == 'open': n['marc_com'] = gestes.commentaires_de_marc(com)
             # même règle que le garde-fou (scripts/preuve.mjs) : une personne ou Claude, ou l'acceptation automatique marquée ; jamais un autre robot ni Jules
             a = [c for c in com if est_preuve(c)]
             if a:
@@ -360,7 +363,7 @@ def traiter(rk):
         pr = pr_gardee(pr, ancien)
         sig = signature(i, pr, i.get('body') or '')
         pr_a = ancien.get('pr') if ancien else None
-        if LEGER and ancien and sig is not None and ancien.get('sig') == sig and 'fpl' in ancien and 'ft_ligne' in ancien and not (pr_a and pr_a.get('state') == 'open' and 'ff' not in pr_a):   # 'fpl', 'ft_ligne' ou 'ff' absent = relevé d'avant les deux places : recalculé
+        if LEGER and ancien and sig is not None and ancien.get('sig') == sig and 'fpl' in ancien and 'ft_ligne' in ancien and not (pr_a and pr_a.get('state') == 'open' and 'ff' not in pr_a) and not ('qui:marc' in ancien['labels'] and ancien['lvl'] == 'tâche' and ancien['state'] == 'open' and 'marc_com' not in ancien):   # 'fpl', 'ft_ligne', 'ff' ou 'marc_com' absent = relevé d'avant les deux places ou d'avant #478 : recalculé
             # non-tâche : ses sous-issues ont-elles changé ? (les enfants disent qui est leur parent)
             if ancien['lvl'] == 'tâche' or refs_enfants(rl, ancien['kids']) == ENFANTS.get(f'{rl}#{i["number"]}', set()):
                 nodes[i['number']] = ancien; reutilises += 1
