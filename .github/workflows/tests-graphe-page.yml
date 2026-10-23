@@ -1,7 +1,7 @@
 name: Tests de la page de graphe
 
 # Les tests du filtre de la page de graphe (scripts/graphe-page.py) : un graphe fictif en mémoire, python3 de la machine, aucun réseau,
-# aucune dépendance. Aucun `paths:` : un contrôle exigé filtré ne tournerait pas.
+# aucune dépendance. Et `scripts/graphe.sh usage` sur des journaux fictifs (tâche #503). Aucun `paths:` : un contrôle exigé filtré ne tournerait pas.
 on:
   push:
     branches: [main]
@@ -26,4 +26,4 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-      - run: node --test scripts/graphe-page.test.mjs
+      - run: node --test scripts/graphe-page.test.mjs scripts/graphe-usage.test.mjs
