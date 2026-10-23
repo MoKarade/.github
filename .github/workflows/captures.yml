@@ -163,6 +163,19 @@ jobs:
       - name: Photographier après (PR)
         run: bash .captures/scripts/captures-cote.sh apres "$CAPTURES_SORTIE/apres"
 
+      # Le robot du PC n'a pas le CLI gh (les machines GitHub l'ont) : binaire officiel, somme vérifiée, sans sudo.
+      - name: Installer le CLI gh s'il manque
+        env:
+          GH_VERSION: 2.74.0
+          GH_SHA256: e55c9d49dc49c0b0fef0a9acd3510482fd9e27ff52ae80f8a6e838cd25b4cd89
+        run: |
+          if command -v gh >/dev/null 2>&1; then exit 0; fi
+          curl -sSfL -o "$RUNNER_TEMP/gh.tar.gz" "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz"
+          echo "${GH_SHA256}  $RUNNER_TEMP/gh.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/gh"
+          tar -xzf "$RUNNER_TEMP/gh.tar.gz" -C "$RUNNER_TEMP/gh" --strip-components=1
+          echo "$RUNNER_TEMP/gh/bin" >> "$GITHUB_PATH"
+
       - name: Ranger les images et commenter la PR
         env:
           GH_TOKEN: ${{ github.token }}
