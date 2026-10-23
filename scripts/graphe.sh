@@ -79,8 +79,13 @@ for ligne in open(sys.argv[1], encoding="utf8", errors="replace"):
         d = json.loads(ligne)
     except ValueError:
         continue
+    if not isinstance(d, dict):
+        continue
     c = str(d.get("cmd", "?"))
     n[c] += 1; ms[c].append(d.get("ms") or 0); car[c] += d.get("car") or 0; br[str(d.get("branche") or "?")] += 1; ts.append(d.get("t") or 0)
+if not ts:  # journal vide ou sans ligne valide : min() lèverait ValueError
+    print("graphe : aucun usage valide (%s)" % sys.argv[1])
+    sys.exit(0)
 f = lambda t: datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 print("Usage du graphe : %d appels, du %s au %s" % (sum(n.values()), f(min(ts)), f(max(ts))))
 for c in sorted(n):
