@@ -99,7 +99,7 @@ const DEPOT = 'MoKarade/JobAI';
 const issuesEnCours = (numeros) => numeros.map((number) => ({ number, labels: [{ name: 'en-cours' }] }));
 const prOuverte = (number, corps, extra = {}) => ({ number, draft: false, body: corps, user: humain, head: { ref: `claude/x${number}` }, ...extra });
 
-test('occupations : issue en-cours ou jules, PR ouverte (brouillon compris) ; robots et boîte du Réacteur ne comptent pas', async () => {
+test('occupations : issue en-cours, PR ouverte (brouillon compris) ; robots et boîte du Réacteur ne comptent pas', async () => {
   assert.deepEqual(await occupations({ api: faux().api, depot: DEPOT }), []);
   assert.deepEqual(await occupations({ api: faux({ [`/repos/${DEPOT}/issues`]: issuesEnCours([12]) }).api, depot: DEPOT }), ['#12']);
   const prs = [
@@ -110,6 +110,17 @@ test('occupations : issue en-cours ou jules, PR ouverte (brouillon compris) ; ro
   assert.deepEqual(await occupations({ api: faux({ [`/repos/${DEPOT}/pulls`]: prs }).api, depot: DEPOT }), ['PR #30']);
   // une pull request renvoyée par l'API des issues n'est pas une tâche prise
   assert.deepEqual(await occupations({ api: faux({ [`/repos/${DEPOT}/issues`]: [{ number: 5, pull_request: {} }] }).api, depot: DEPOT }), []);
+});
+
+test('occupations : une tâche jules et sa PR ne tiennent pas de place (23/10/2026)', async () => {
+  const jules = [{ number: 412, labels: [{ name: 'jules' }] }];
+  const donnees = { [`/repos/${DEPOT}/issues?labels=jules&state=open&per_page=30`]: jules };
+  assert.deepEqual(await occupations({ api: faux(donnees).api, depot: DEPOT }), []);
+  assert.equal(await travaux({ api: faux({ ...donnees, [`/repos/${DEPOT}/pulls`]: [prOuverte(60, 'Tâche : #412')] }).api, depot: DEPOT }), 0);
+  // la PR d'un fil, elle, compte toujours, et une PR qui cite une tâche en-cours ET une tâche jules compte une fois
+  const mixte = { ...donnees, [`/repos/${DEPOT}/issues?labels=en-cours&state=open&per_page=30`]: issuesEnCours([12]), [`/repos/${DEPOT}/pulls`]: [prOuverte(61, 'Tâche : #12'), prOuverte(62, 'Tâche : #412')] };
+  assert.equal(await travaux({ api: faux(mixte).api, depot: DEPOT }), 1);
+  assert.deepEqual(await occupations({ api: faux(mixte).api, depot: DEPOT }), ['#12', 'PR #61']);
 });
 
 test('occupations : la tâche de la PR qui fusionne ne compte pas, sauf si une autre PR ouverte la cite', async () => {

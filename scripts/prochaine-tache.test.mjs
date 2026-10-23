@@ -166,13 +166,11 @@ test('#197 : la PR en attente de Marc fermée ou fusionnée ne compte plus (le r
   assert.deepEqual(etat(r).attend_marc, []);
 });
 
-test('capacité : en-cours et jules occupent le dépôt, preuve-attendue ne l’occupe pas', () => {
-  for (const [etiquette, motif] of [['en-cours', 'en-cours'], ['jules', 'jules']]) {
-    const r = calculer(releve(depot('a', [tache(1, { labels: [etiquette] }), tache(2)])));
-    assert.equal(etat(r).statut, 'occupe', etiquette);
-    assert.equal(etat(r).occupe_par[0].motif, motif);
-    assert.equal(etat(r).suivante, null);
-  }
+test('capacité : en-cours occupe le dépôt, preuve-attendue ne l’occupe pas', () => {
+  const r = calculer(releve(depot('a', [tache(1, { labels: ['en-cours'] }), tache(2)])));
+  assert.equal(etat(r).statut, 'occupe');
+  assert.equal(etat(r).occupe_par[0].motif, 'en-cours');
+  assert.equal(etat(r).suivante, null);
   const libre = calculer(releve(depot('a', [tache(1, { labels: ['preuve-attendue'] }), tache(2)])));
   assert.equal(etat(libre).statut, 'libre');
   assert.equal(suivante(libre), 'a#2');
@@ -964,7 +962,7 @@ test('capacité : un travail en cours et une tâche à fichiers disjoints donnen
 
 test('capacité : un chemin commun (fichier ou dossier) garde le dépôt occupé, la tâche sautée dit pourquoi', () => {
   for (const commun of [['src/a.ts'], ['src/']]) {
-    const d = etat(calculer(releve(depot('a', [tache(1, { labels: ['jules'], fpl: ['src/a.ts'] }), tache(2, { fpl: commun })]))));
+    const d = etat(calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], fpl: ['src/a.ts'] }), tache(2, { fpl: commun })]))));
     assert.equal(d.statut, 'occupe', commun.join());
     assert.equal(d.suivante, null);
     assert.equal(d.sautees_conflit[0].ref, 'a#2');
@@ -980,7 +978,7 @@ test('capacité : le travail en cours sans fichiers déclarés, ou un fil actif,
 
 test('capacité : deux travaux en cours = occupé, aucune suivante, même avec des fichiers disjoints', () => {
   const d = etat(calculer(releve(depot('a', [
-    tache(1, { labels: ['en-cours'], fpl: ['x/a.ts'] }), tache(2, { labels: ['jules'], fpl: ['x/b.ts'] }), tache(3, { fpl: ['x/c.ts'] }),
+    tache(1, { labels: ['en-cours'], fpl: ['x/a.ts'] }), tache(2, { labels: ['en-cours'], fpl: ['x/b.ts'] }), tache(3, { fpl: ['x/c.ts'] }),
   ]))));
   assert.equal(d.statut, 'occupe');
   assert.deepEqual(d.suivantes, []);
@@ -992,6 +990,18 @@ test('capacité : la PR ouverte d’une tâche en-cours ne compte qu’une fois'
   const d = etat(calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], pr: prOuverte(10), fpl: ['x/a.ts'] }), tache(2, { fpl: ['x/b.ts'] })]))));
   assert.equal(d.occupe_par.length, 1);
   assert.equal(d.statut, 'partiel');
+});
+
+test('capacité : une tâche jules ne tient aucune place (23/10/2026) : le dépôt reste libre, elle se lit dans jules_en_cours', () => {
+  const d = etat(calculer(releve(depot('a', [tache(1, { labels: ['jules'], fpl: ['src/a.ts'], pr: prOuverte(10) }), tache(2, { fpl: ['src/b.ts'] })]))));
+  assert.equal(d.statut, 'libre');
+  assert.deepEqual(d.occupe_par, [], 'ni la tâche jules, ni sa PR ouverte ne comptent');
+  assert.deepEqual(d.places, { total: 2, prises: 0, libres: 2 });
+  assert.equal(d.suivante.ref, 'a#2');
+  assert.deepEqual(d.jules_en_cours.map((j) => [j.ref, j.motif, j.fichiers]), [['a#1', 'jules', ['src/a.ts']]]);
+  const avecFil = etat(calculer(releve(depot('a', [tache(1, { labels: ['jules'] }), tache(3, { labels: ['en-cours'], fpl: ['src/c.ts'] }), tache(2, { fpl: ['src/b.ts'] })]))));
+  assert.deepEqual(avecFil.occupe_par.map((o) => o.ref), ['a#3'], 'seul le travail du fil occupe une place');
+  assert.equal(avecFil.statut, 'partiel');
 });
 
 test('capacité : un incident garde l’état incident et ne propose rien', () => {
@@ -1028,7 +1038,7 @@ test('capacité : un travail sans fichiers déclarés mais dont la PR ouverte a 
 
 test('capacité : la PR qui déborde de la déclaration est comptée (déclarés ∪ réels) : la tâche qui touche ce fichier-là est sautée', () => {
   const d = etat(calculer(releve(depot('a', [
-    tache(1, { labels: ['jules'], fpl: ['x/a.ts'], pr: prAvecFichiers(10, ['x/a.ts', 'lib/imprevu.ts']) }),
+    tache(1, { labels: ['en-cours'], fpl: ['x/a.ts'], pr: prAvecFichiers(10, ['x/a.ts', 'lib/imprevu.ts']) }),
     tache(2, { fpl: ['lib/imprevu.ts'] }),
     tache(3, { fpl: ['z/c.ts'] }),
   ]))));

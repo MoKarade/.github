@@ -15,8 +15,9 @@ export const LABEL_TACHE = 'niveau:tâche';
 export const LABEL_EN_COURS = 'en-cours';
 // Une tâche qui porte déjà l'un de ces trois états n'a pas besoin qu'on la marque « en cours » (prise par Jules, livrée en attente de preuve).
 const LABELS_PRISE = [LABEL_EN_COURS, 'jules', 'preuve-attendue'];
-// Les deux états qui occupent une place du dépôt (scripts/capacite.mjs) : `preuve-attendue` n'en occupe pas (le fil a livré).
-const LABELS_PLACE = [LABEL_EN_COURS, 'jules'];
+// Le seul état qui occupe une place du dépôt (scripts/capacite.mjs) : `preuve-attendue` n'en occupe pas (le fil a livré), `jules` non plus
+// (décision de Marc, 23/10/2026 22:45Z : « il prend quand même »).
+const LABELS_PLACE = [LABEL_EN_COURS];
 
 // Même définition que le Gantt (fetch.py, TACHE_LIGNE et REF) : une ligne qui commence par « Tâche : », puis des références.
 const LIGNE_TACHE = /^[\s>*_-]*T[âa]che[\s*_]*:(.*)$/gim;
@@ -77,10 +78,15 @@ export function priseAPoser(issue) {
   return !LABELS_PRISE.some((nom) => noms.includes(nom));
 }
 
-/** La tâche occupe-t-elle déjà une place de son dépôt (`en-cours` ou `jules`) ? */
+/** La tâche occupe-t-elle déjà une place de son dépôt (`en-cours`) ? */
 export function tientUnePlace(issue) {
   const noms = nomsDesLabels(issue);
   return LABELS_PLACE.some((nom) => noms.includes(nom));
+}
+
+/** La tâche est-elle confiée à Jules (`jules`) ? Elle ne tient pas de place et n'est jamais refusée pour manque de place. */
+export function estUneTacheJules(issue) {
+  return nomsDesLabels(issue).includes('jules');
 }
 
 /** Ce qu'il faut signaler sans refuser la PR : une tâche sans parent (mission ou chantier) est un défaut du backlog (pastille du Gantt, I1). */
@@ -109,7 +115,7 @@ export async function controleTacheLiee({ api, depot, pr }) {
     if (defaut) motifs.push(`${t.depot}#${t.numero} : ${defaut}`);
     else {
       valide = true;
-      ouvertes.push({ depot: t.depot, numero: t.numero, aPrendre: priseAPoser(issue), tientPlace: tientUnePlace(issue) });
+      ouvertes.push({ depot: t.depot, numero: t.numero, aPrendre: priseAPoser(issue), tientPlace: tientUnePlace(issue), jules: estUneTacheJules(issue) });
       const avertissement = avertissementDeLaTache(issue);
       if (avertissement) avertissements.push(`${t.depot}#${t.numero} : ${avertissement}`);
     }

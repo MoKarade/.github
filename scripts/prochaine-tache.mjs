@@ -12,11 +12,12 @@
 //   2 `prio:1`   3 sécurité (étiquette `sécurité`)
 //   4 même mission que la dernière tâche lancée ou fermée du dépôt   5 même chantier
 //   6 alternance : le chantier de l'autre type (`chantier:standard` / `chantier:fonction`)   7 le reste
-// Prenable : ouverte et `niveau:tâche` ; sans `qui:marc`, `bloqué`, `en-cours`, `jules`, `preuve-attendue` ;
+// Prenable : ouverte et `niveau:tâche` ; sans `qui:marc`, `bloqué`, `en-cours`, `jules` (déjà confiée), `preuve-attendue` ;
 // toutes les tâches attendues fermées ; aucune PR ouverte ne la cite ; un « Fini quand » écrit.
 // Frein de quota (palier `frein` en tête du fichier) : retient les tâches non permises, état `frein` si c'est tout ce qui reste.
 // Capacité : DEUX travaux par dépôt au plus (décision de Marc, 21/10/2026), sur des fichiers disjoints (`capacite.mjs`). Un travail est une
-// tâche `en-cours` ou `jules` ouverte, une PR de tâche ouverte, ou un fil actif passé en option. Une tâche `preuve-attendue` n'occupe pas
+// tâche `en-cours` ouverte, une PR de tâche ouverte, ou un fil actif passé en option. Une tâche `jules` n'en est PAS un (décision de Marc,
+// 23/10/2026 22:45Z) : elle sort de `occupe_par` et de `places`, et se lit dans `jules_en_cours`. Une tâche `preuve-attendue` n'occupe pas
 // le dépôt, ni une tâche dont la PR ouverte n'attend plus qu'un geste de Marc (`pr_attend_marc` du dépôt dans le relevé, tâche #197) : elle
 // sort de `occupe_par`, reste dans `attend_marc`. Statut : `libre` (aucun travail), `partiel` (un travail et une tâche à fichiers disjoints
 // à lui associer), `occupe` (deux travaux, ou un seul sans tâche compatible : fichiers non déclarés ou communs = un seul). `suivantes` : les
@@ -506,10 +507,13 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
     const attend = new Set(enAttenteMarc);
     // Capacité : deux travaux à la fois, sur des fichiers disjoints. Un fil actif passé en option n'a pas de fichiers connus.
     const occupePar = [
-      ...taches.filter((n) => !attend.has(n) && (n.labels.includes('en-cours') || n.labels.includes('jules'))).map((n) => ({ ref: ref(depot.repo, n.n), motif: n.labels.includes('jules') ? 'jules' : 'en-cours', fichiers: fichiersDuTravail(n.fpl, n.pr?.state === 'open' ? n.pr.ff : null) })),
+      ...taches.filter((n) => !attend.has(n) && n.labels.includes('en-cours')).map((n) => ({ ref: ref(depot.repo, n.n), motif: 'en-cours', fichiers: fichiersDuTravail(n.fpl, n.pr?.state === 'open' ? n.pr.ff : null) })),
       ...taches.filter((n) => !attend.has(n) && n.pr?.state === 'open' && !n.labels.includes('en-cours') && !n.labels.includes('jules')).map((n) => ({ ref: ref(depot.repo, n.n), motif: 'pr-ouverte', fichiers: fichiersDuTravail(n.fpl, n.pr.ff) })),
       ...(actifs.has(minuscule(depot.repo)) || actifs.has(minuscule(depot.name)) || actifs.has(minuscule(depot.key)) ? [{ ref: null, motif: 'fil-actif', fichiers: null }] : []),
     ];
+    // Jules ne tient pas de place (décision de Marc, 23/10/2026 22:45Z : « il prend quand même ») : ses tâches sortent de `occupe_par`, mais restent
+    // lisibles ici pour le filet de Jules (`jules-auto.mjs` : au plus trois à la fois, jamais deux dans un même dépôt).
+    const julesEnCours = taches.filter((n) => !attend.has(n) && n.labels.includes('jules')).map((n) => ({ ref: ref(depot.repo, n.n), motif: 'jules', fichiers: fichiersDuTravail(n.fpl, n.pr?.state === 'open' ? n.pr.ff : null) }));
 
     const derniereTache = derniere(depot);
     const refDerniere = derniereTache ? ref(depot.repo, derniereTache.n) : null;
@@ -567,6 +571,7 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
       incidents: incidents.map((i) => ({ n: i.n, titre: i.t, url: i.url })),
       incidents_pc: incidentsPc.map((i) => ({ n: i.n, titre: i.t, url: i.url })),
       occupe_par: occupePar,
+      jules_en_cours: julesEnCours,
       attend_marc: enAttenteMarc.map((n) => ({ ref: ref(depot.repo, n.n), pr: n.pr.n })),
       derniere: refDerniere,
       file,
