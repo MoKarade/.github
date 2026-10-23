@@ -298,7 +298,7 @@ def calculer(repo, rl, i, pr):
         for b in flat(gh(f'repos/MoKarade/{repo}/issues/{i["number"]}/dependencies/blocked_by?per_page=100')):
             natives.append(f"{b['repository_url'].rsplit('/', 1)[1].lower()}#{b['number']}")
     n['deps'] = deps_mod.normaliser(deps + natives, f"{rl}#{i['number']}", PR_VERS_TACHE, PRS_FUSIONNEES)
-    n['attend_ligne'] = any(l.startswith('**Attend**') for l in (body or '').splitlines())   # la ligne existe, même « aucune » : prochaine-tache.mjs exige qu'elle soit écrite (19/10)
+    n['attend_ligne'] = any(deps_mod.reste_attend(l) is not None for l in (body or '').splitlines())   # la ligne existe, même « aucune » : prochaine-tache.mjs exige qu'elle soit écrite (19/10)
     n['deps_natives'] = sorted(set(natives))      # ceux que GitHub affiche en « Bloquée par » : prochaine-tache.mjs liste les liens qui manquent
     if lvl != 'tâche':
         # enfant du même dépôt : son numéro ; d'un autre dépôt (mission commune dans .github) : « dépôt#n »
