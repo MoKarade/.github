@@ -5,17 +5,18 @@
 // dont le CORPS est une consigne complète au gabarit `docs/jules-gabarit-issue.md`. Aucune IA, aucun jugement : une tâche est confiable
 // ou elle ne l'est pas, et la raison s'écrit. Règles : plan du fil Jules, `commun/plans/2026-10-19_jules-automatique.md`.
 //
-// Dépôt avec une place libre (deux places par dépôt, décision de Marc du 21/10/2026) : aucun incident et moins de deux travaux (issues `jules` ou
-// `en-cours` ouvertes, PR ouvertes hors robots et boîte du Réacteur ; une tâche et sa PR comptent pour un). Avec un travail déjà en cours, Jules ne
-// prend la deuxième place que si les fichiers de sa tâche (« Fichiers permis ») et ceux de ce travail sont DÉCLARÉS et disjoints (`capacite.mjs`) ;
-// vérifié EN DIRECT au moment de confier. Plafond : trois tâches Jules en même temps sur les dix dépôts (le quota de Jules est de 15 simultanées).
+// Jules part même dans un dépôt déjà occupé par un fil (décision de Marc, 23/10/2026 : « il prend quand même » ; ses tâches ne tiennent plus de
+// place, `places-depot.mjs`). Il évite seulement : un incident, un dépôt gelé (`DEPOTS_GELES`), et les fichiers déjà touchés par une PR ouverte
+// ou déclarés par une autre tâche en cours (« Fichiers permis » de la tâche contre les fichiers RÉELS de chaque PR ouverte, lus EN DIRECT au moment
+// de confier ; une PR dont les fichiers sont illisibles ou tronqués ne laisse rien passer : dans le doute, il attend). Plafond : trois tâches Jules
+// en même temps sur les dix dépôts (le quota de Jules est de 15 simultanées).
 // Confier = poser l'étiquette `jules` (le signal que Jules lit) + un commentaire d'une ligne. Le « ménage » du cycle de vie (§7) retire
 // l'étiquette après 24 h sans PR ; une tâche déjà confiée deux fois ne l'est plus (elle reste réservée : le silence de 24 h réveille alors le
 // Coordinateur, qui corrige le corps).
 //
 // Fonctions pures (`evaluerJules`, `choisirPourJules`), I/O injecté (`lireIssue`, `gh`) : les tests n'ont besoin ni de réseau ni de fichier.
 
-import { PLACES_PAR_DEPOT, fichiersDeclares, fichiersDuTravail, raisonIncompatible } from './capacite.mjs';
+import { fichiersDeclares, fichiersDuTravail, raisonIncompatible } from './capacite.mjs';
 import { extraireTaches } from './tache-liee.mjs';
 
 const ORG = 'MoKarade';
@@ -26,6 +27,8 @@ export const CANDIDATES_MAX = 8;
 export const FOIS_MAX = 2;
 export const SIMULTANEES_MAX = 3;
 const BOITE = { depot: 'app-template', pr: 58 };
+// Dépôts où Jules ne prend rien tant qu'on ne les dégèle pas (Marc, 23/10/2026 : MemoryAI est gelé). Retirer le dépôt de la liste = le dégeler.
+export const DEPOTS_GELES = new Set(['memoryai']);
 
 // Ce que Jules ne touche jamais (AGENTS.md, gabarit « Tâches à garder pour Claude »). Marc a levé cinq exclusions le 19/10/2026 (taille,
 // petits écrans, workflows de `.github/`, longs .md, dépendances mineures) : elles passent par les conditions de `evaluerJules`, qui
@@ -156,12 +159,10 @@ export function choisirPourJules(prochaines, lireIssue, etat = {}) {
   for (const d of depots) {
     if (!(d.reservees_jules ?? []).length) continue;
     resultat.depotsConcernes += 1;
-    // Deux travaux en cours, ou un incident : le dépôt attend. La tâche reste réservée.
-    // Le filet de Jules garde sa règle : il n'ajoute pas une tâche à un dépôt déjà occupé, par un fil ou par lui-même.
-    const occupants = [...(d.occupe_par ?? []).filter((o) => o.motif !== 'jules'), ...julesDe(d)];
-    if (occupants.length >= PLACES_PAR_DEPOT || (d.incidents ?? []).length) continue;
-    // Un seul travail en cours dont les fichiers ne sont pas déclarés : pas de deuxième place (dans le doute, un seul), sans rien lire.
-    if (occupants.some((o) => !Array.isArray(o.fichiers) || !o.fichiers.length)) continue;
+    // Un incident ou un dépôt gelé : le dépôt attend, la tâche reste réservée. Un travail en cours ne le retient plus (23/10/2026) : seuls comptent ses fichiers.
+    if (DEPOTS_GELES.has(String(d.repo).toLowerCase())) { resultat.pasPretes.push({ ref: d.reservees_jules[0].ref, raisons: ['dépôt gelé'] }); continue; }
+    if ((d.incidents ?? []).length) continue;
+    const occupants = [...(d.occupe_par ?? []).filter((o) => o.motif !== 'jules'), ...julesDe(d)].filter((o) => Array.isArray(o.fichiers) && o.fichiers.length);
     if (enCours + resultat.choix.length >= SIMULTANEES_MAX) continue;
     for (const c of d.reservees_jules.slice(0, CANDIDATES_MAX)) {
       if ((etat.confies?.[c.ref]?.fois ?? 0) >= FOIS_MAX) { resultat.pasPretes.push({ ref: c.ref, raisons: [`déjà confiée ${FOIS_MAX} fois`] }); continue; }
@@ -171,7 +172,7 @@ export function choisirPourJules(prochaines, lireIssue, etat = {}) {
       const verdict = evaluerJules({ repo: d.repo, n: c.n, labels: issue.labels, body: issue.body });
       if (!verdict.ok) { resultat.pasPretes.push({ ref: c.ref, raisons: verdict.raisons }); continue; }
       const gene = occupants.map((o) => raisonIncompatible(o.fichiers, fichiersDeclares(issue.body))).find(Boolean);
-      if (gene) { resultat.pasPretes.push({ ref: c.ref, raisons: [`place partagée refusée : ${gene} avec ${occupants.map((o) => o.ref ?? o.motif).join(', ')}`] }); continue; }
+      if (gene) { resultat.pasPretes.push({ ref: c.ref, raisons: [`fichiers déjà pris : ${gene} avec ${occupants.map((o) => o.ref ?? o.motif).join(', ')}`] }); continue; }
       resultat.choix.push({ repo: d.repo, ref: c.ref, n: c.n, titre: c.titre });
       break;
     }
@@ -180,8 +181,8 @@ export function choisirPourJules(prochaines, lireIssue, etat = {}) {
 }
 
 /**
- * Confie la tâche à Jules après une dernière vérification EN DIRECT : issue ouverte, aucune étiquette qui l'écarte, moins de deux travaux dans le
- * dépôt (issues `jules` ou `en-cours` ouvertes, PR ouvertes hors robots et boîte du Réacteur), et, avec un travail déjà en cours, des fichiers disjoints. `gh(methode, chemin, corps)` rend l'objet JSON ou lève.
+ * Confie la tâche à Jules après une dernière vérification EN DIRECT : issue ouverte, dépôt non gelé, aucune étiquette qui l'écarte, et aucun fichier
+ * déjà pris (PR ouvertes hors robots et boîte du Réacteur, tâches en cours sans PR). Un travail en cours ne la retient pas. `gh(methode, chemin, corps)` rend l'objet JSON ou lève.
  * @returns {{ statut: 'confiee'|'sautee', raison?: string }}
  */
 export function confierAJules({ repo, n }, gh, { aBlanc = false } = {}) {
@@ -189,10 +190,10 @@ export function confierAJules({ repo, n }, gh, { aBlanc = false } = {}) {
   const issue = gh('GET', `${base}/issues/${n}`);
   const etiquettes = (issue.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
   if (issue.state !== 'open') return { statut: 'sautee', raison: 'fermée' };
+  if (DEPOTS_GELES.has(repo.toLowerCase())) return { statut: 'sautee', raison: 'dépôt gelé' };
   const ecartee = ETIQUETTES_QUI_ECARTENT.find((l) => etiquettes.includes(l));
   if (ecartee) return { statut: 'sautee', raison: `étiquette « ${ecartee} »` };
-  // Les travaux du dépôt, lus EN DIRECT : issues `en-cours` ou `jules` ouvertes (avec leur corps, donc leurs fichiers), et PR ouvertes qui ne
-  // citent aucune de ces issues (une tâche et sa PR comptent pour un travail ; une PR seule a des fichiers inconnus).
+  // Les travaux du dépôt, lus EN DIRECT : issues `en-cours` ou `jules` ouvertes (avec leur corps, donc leurs fichiers) et PR ouvertes.
   const issuesTravail = new Map();
   for (const l of ETIQUETTES_QUI_OCCUPENT) {
     const ouvertes = gh('GET', `${base}/issues?labels=${encodeURIComponent(l)}&state=open&per_page=30`);
@@ -200,27 +201,27 @@ export function confierAJules({ repo, n }, gh, { aBlanc = false } = {}) {
   }
   const prs = gh('GET', `${base}/pulls?state=open&per_page=30`);
   const prsTravail = (Array.isArray(prs) ? prs : []).filter((p) => p.user?.type !== 'Bot' && !String(p.user?.login ?? '').endsWith('[bot]') && !(repo.toLowerCase() === BOITE.depot && p.number === BOITE.pr));
-  const prsSeules = prsTravail.filter((p) => !extraireTaches(p.body, repo).some((t) => t.depot.toLowerCase() === repo.toLowerCase() && issuesTravail.has(t.numero)));
-  const travaux = issuesTravail.size + prsSeules.length;
-  const nom = (i) => `issue #${i.number}`;
-  if (travaux >= PLACES_PAR_DEPOT) {
-    const premier = [...issuesTravail.values()].map(nom)[0] ?? `PR #${prsSeules[0]?.number} ouverte`;
-    return { statut: 'sautee', raison: `dépôt occupé (${premier}, ${travaux} travaux sur ${PLACES_PAR_DEPOT} places)` };
+  // Jules part même si le dépôt a un travail en cours : il évite seulement les fichiers déjà touchés par une PR ouverte (déclarés ∪ réels pour la PR
+  // d'une tâche en cours) ou déclarés par une tâche en cours sans PR. Fichiers de la PR illisibles ou tronqués : dans le doute, il attend.
+  const fichiersDe = (p) => {
+    try {
+      const fs = gh('GET', `${base}/pulls/${p.number}/files?per_page=100`);
+      return Array.isArray(fs) && fs.length < 100 ? fs.flatMap((f) => [f.filename, f.previous_filename].filter(Boolean)) : null; // 100 fichiers : liste tronquée, elle ne prouve rien
+    } catch { return null; }
+  };
+  const miens = fichiersDeclares(issue.body);
+  const tacheDe = (p) => extraireTaches(p.body, repo).filter((t) => t.depot.toLowerCase() === repo.toLowerCase()).map((t) => issuesTravail.get(t.numero)).find(Boolean);
+  for (const p of prsTravail) {
+    const autre = tacheDe(p);
+    const gene = raisonIncompatible(fichiersDuTravail(autre ? fichiersDeclares(autre.body) : null, fichiersDe(p)), miens);
+    if (gene) return { statut: 'sautee', raison: `fichiers déjà pris (PR #${p.number} ouverte : ${gene})` };
   }
-  if (travaux === 1) {
-    // Deuxième place : seulement si le seul autre travail a des fichiers connus (ceux qu'il déclare plus ceux de sa PR ouverte, lus en direct)
-    // et qu'ils sont disjoints de ceux de cette tâche.
-    const autre = [...issuesTravail.values()][0];
-    const fichiersDe = (p) => {
-      try {
-        const fs = gh('GET', `${base}/pulls/${p.number}/files?per_page=100`);
-        return Array.isArray(fs) && fs.length < 100 ? fs.flatMap((f) => [f.filename, f.previous_filename].filter(Boolean)) : null; // 100 fichiers : liste tronquée, elle ne prouve rien
-      } catch { return null; }
-    };
-    const prDeLAutre = autre ? prsTravail.find((p) => extraireTaches(p.body, repo).some((t) => t.depot.toLowerCase() === repo.toLowerCase() && t.numero === autre.number)) : prsSeules[0];
-    const fichiers = fichiersDuTravail(autre ? fichiersDeclares(autre.body) : null, prDeLAutre ? fichiersDe(prDeLAutre) : null);
-    const gene = raisonIncompatible(fichiers, fichiersDeclares(issue.body));
-    if (gene) return { statut: 'sautee', raison: `dépôt occupé (${autre ? `${nom(autre)} en cours` : `PR #${prDeLAutre.number} ouverte`} : ${gene})` };
+  const prisParUnePr = new Set(prsTravail.map((p) => tacheDe(p)?.number).filter(Boolean));
+  for (const t of issuesTravail.values()) {
+    if (prisParUnePr.has(t.number)) continue;
+    const declares = fichiersDeclares(t.body);
+    const gene = declares ? raisonIncompatible(declares, miens) : null; // une tâche sans fichiers déclarés ne dit rien : seule sa PR comptera
+    if (gene) return { statut: 'sautee', raison: `fichiers déjà pris (issue #${t.number} en cours : ${gene})` };
   }
   if (aBlanc) return { statut: 'confiee', raison: 'à blanc' };
   gh('POST', `${base}/issues/${n}/labels`, { 'labels[]': 'jules' });

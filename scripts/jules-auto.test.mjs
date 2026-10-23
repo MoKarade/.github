@@ -125,14 +125,15 @@ test('choisirPourJules prend la première réservée confiable, et dit pourquoi 
   assert.equal(r.depotsConcernes, 1);
 });
 
-test('choisirPourJules attend qu’un dépôt soit libre : travail en cours, PR ouverte ou incident', () => {
-  const lire = () => { throw new Error('ne doit pas être lu'); };
+test('choisirPourJules attend seulement un incident : un travail en cours, une PR ouverte ou une autre tâche Jules ne le retiennent plus', () => {
+  const lire = (repo, n) => ({ state: 'open', labels: ['faisable-jules'], body: corps(n, repo) });
   const r = (extra) => choisirPourJules(prochaines(depot('carai', [{ ref: 'carai#7', n: 7 }], extra)), lire);
-  assert.deepEqual(r({ occupe_par: [{ ref: 'carai#2', motif: 'en-cours' }] }).choix, []);
-  assert.deepEqual(r({ occupe_par: [{ ref: 'carai#2', motif: 'pr-ouverte' }] }).choix, []);
-  assert.deepEqual(r({ occupe_par: [{ ref: 'carai#2', motif: 'jules' }] }).choix, []);
-  // depuis le 23/10/2026 le relevé range les tâches Jules dans `jules_en_cours`, hors de `occupe_par` : le filet les lit toujours
-  assert.deepEqual(r({ jules_en_cours: [{ ref: 'carai#2', motif: 'jules', fichiers: ['a/x.ts'] }] }).choix, []);
+  assert.deepEqual(r({ occupe_par: [{ ref: 'carai#2', motif: 'en-cours' }] }).choix.map((c) => c.ref), ['carai#7']);
+  assert.deepEqual(r({ occupe_par: [{ ref: 'carai#2', motif: 'pr-ouverte' }] }).choix.map((c) => c.ref), ['carai#7']);
+  assert.deepEqual(r({ occupe_par: [{ ref: 'carai#2', motif: 'jules', fichiers: ['a/x.ts'] }] }).choix.map((c) => c.ref), ['carai#7']);
+  // depuis le 23/10/2026 le relevé range les tâches Jules dans `jules_en_cours`, hors de `occupe_par` : le filet les lit pour le plafond et les fichiers
+  assert.deepEqual(r({ jules_en_cours: [{ ref: 'carai#2', motif: 'jules', fichiers: ['a/x.ts'] }] }).choix.map((c) => c.ref), ['carai#7']);
+  assert.deepEqual(r({ jules_en_cours: [{ ref: 'carai#2', motif: 'jules', fichiers: ['lib/'] }] }).choix, [], 'fichiers communs');
   assert.deepEqual(r({ incidents: [{ n: 9 }] }).choix, []);
 });
 
@@ -183,10 +184,13 @@ test('confierAJules pose l’étiquette jules et un commentaire, après avoir v�
   assert.match(ecritures[1][2].body, /faisable-jules/);
 });
 
-test('confierAJules ne fait rien si le dépôt est occupé ou l’issue écartée, et rien à blanc', () => {
+test('confierAJules ne fait rien si le dépôt est gelé ou l’issue écartée, et rien à blanc ; un travail en cours ne l’arrête plus', () => {
+  // 23/10/2026 : Jules part même dans un dépôt occupé par un fil (seuls les fichiers déjà pris comptent)
   const occupe = ghFactice({ ouvertes: { 'en-cours': [{ number: 3 }] } });
-  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, occupe.gh).raison, /dépôt occupé/);
-  assert.equal(occupe.appels.some(([m]) => m === 'POST'), false);
+  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, occupe.gh).statut, 'confiee');
+  const gele = ghFactice();
+  assert.match(confierAJules({ repo: 'MemoryAI', n: 7 }, gele.gh).raison, /dépôt gelé/);
+  assert.equal(gele.appels.some(([m]) => m === 'POST'), false);
   const pr = ghFactice({ ouvertes: { 'en-cours': [{ number: 3, pull_request: {} }] } });
   assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, pr.gh).statut, 'confiee', 'une PR étiquetée n’est pas une issue de travail');
   const marc = ghFactice({ issue: { state: 'open', labels: [{ name: 'qui:marc' }] } });
@@ -208,7 +212,7 @@ test('confierAJules attend une PR ouverte, sauf celles des robots et la boîte d
 
 // ---- Deux places par dépôt (décision de Marc, 21/10/2026) --------------------------------------------------------------------------------
 
-test('choisirPourJules prend la 2e place d’un dépôt dont l’unique travail déclare des fichiers disjoints', () => {
+test('choisirPourJules part dans un dépôt occupé, sauf fichiers déjà pris', () => {
   const lire = (repo, n) => ({ state: 'open', labels: ['faisable-jules'], body: corps(n, repo) }); // fichiers : lib/format.test.ts
   const occupe = (fichiers, motif = 'en-cours') => ({ occupe_par: [{ ref: 'carai#2', motif, fichiers }] });
   const r = (extra) => choisirPourJules(prochaines(depot('carai', [{ ref: 'carai#7', n: 7 }], extra)), lire);
@@ -216,16 +220,19 @@ test('choisirPourJules prend la 2e place d’un dépôt dont l’unique travail 
   assert.deepEqual(r(occupe(['app/page.tsx'], 'pr-ouverte')).choix.map((c) => c.ref), ['carai#7']);
   const commun = r(occupe(['lib/']));
   assert.deepEqual(commun.choix, []);
-  assert.match(commun.pasPretes[0].raisons[0], /place partagée refusée : fichier-commun:lib\/ ~ lib\/format\.test\.ts avec carai#2/);
-  assert.deepEqual(r(occupe(null)).choix, [], 'fichiers du travail inconnus : un seul');
-  assert.deepEqual(r(occupe([])).choix, []);
+  assert.match(commun.pasPretes[0].raisons[0], /fichiers déjà pris : fichier-commun:lib\/ ~ lib\/format\.test\.ts avec carai#2/);
+  assert.deepEqual(r(occupe(null)).choix.map((c) => c.ref), ['carai#7'], 'fichiers du travail inconnus : la vérification en direct lit les PR');
+  assert.deepEqual(r(occupe([])).choix.map((c) => c.ref), ['carai#7']);
 });
 
-test('choisirPourJules : deux travaux en cours ou un incident gardent le dépôt, même à fichiers disjoints', () => {
-  const lire = () => { throw new Error('ne doit pas être lu'); };
-  const deux = [{ ref: 'carai#2', motif: 'en-cours', fichiers: ['a/x.ts'] }, { ref: 'carai#3', motif: 'jules', fichiers: ['b/y.ts'] }];
-  assert.deepEqual(choisirPourJules(prochaines(depot('carai', [{ ref: 'carai#7', n: 7 }], { occupe_par: deux })), lire).choix, []);
-  assert.deepEqual(choisirPourJules(prochaines(depot('carai', [{ ref: 'carai#7', n: 7 }], { occupe_par: [deux[0]], incidents: [{ n: 9 }] })), lire).choix, []);
+test('choisirPourJules : un incident ou un dépôt gelé gardent le dépôt, deux travaux à fichiers disjoints non', () => {
+  const lire = (repo, n) => ({ state: 'open', labels: ['faisable-jules'], body: corps(n, repo) });
+  const deux = [{ ref: 'carai#2', motif: 'en-cours', fichiers: ['a/x.ts'] }, { ref: 'carai#3', motif: 'en-cours', fichiers: ['b/y.ts'] }];
+  assert.deepEqual(choisirPourJules(prochaines(depot('carai', [{ ref: 'carai#7', n: 7 }], { occupe_par: deux })), lire).choix.map((c) => c.ref), ['carai#7']);
+  assert.deepEqual(choisirPourJules(prochaines(depot('carai', [{ ref: 'carai#7', n: 7 }], { occupe_par: [deux[0]], incidents: [{ n: 9 }] })), () => { throw new Error('ne doit pas être lu'); }).choix, []);
+  const gele = choisirPourJules(prochaines(depot('MemoryAI', [{ ref: 'memoryai#7', n: 7 }])), () => { throw new Error('ne doit pas être lu'); });
+  assert.deepEqual(gele.choix, []);
+  assert.deepEqual(gele.pasPretes, [{ ref: 'memoryai#7', raisons: ['dépôt gelé'] }]);
 });
 
 test('choisirPourJules : la 2e place compte dans le plafond des trois Jules', () => {
@@ -235,31 +242,31 @@ test('choisirPourJules : la 2e place compte dans le plafond des trois Jules', ()
   assert.equal(r.choix.length, 3);
 });
 
-test('confierAJules prend la 2e place si l’autre travail déclare des fichiers disjoints, rien sinon', () => {
+test('confierAJules part dans un dépôt occupé si les fichiers de l’autre travail sont disjoints, rien s’ils sont communs', () => {
   const travail = (corpsIssue, extra = {}) => ({ number: 3, body: corpsIssue, ...extra });
   const issue = { state: 'open', labels: [], body: corps(7, 'carai') }; // lib/format.test.ts
   const disjoint = ghFactice({ issue, ouvertes: { 'en-cours': [travail('**Fichiers touchés** :\n- `app/page.tsx`')] } });
   assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, disjoint.gh).statut, 'confiee');
   assert.equal(disjoint.appels.some(([m]) => m === 'POST'), true);
   const commun = ghFactice({ issue, ouvertes: { 'en-cours': [travail('**Fichiers permis** :\n- `lib/format.test.ts`')] } });
-  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, commun.gh).raison, /dépôt occupé \(issue #3 en cours : fichier-commun:lib\/format\.test\.ts\)/);
+  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, commun.gh).raison, /fichiers déjà pris \(issue #3 en cours : fichier-commun:lib\/format\.test\.ts\)/);
   const inconnu = ghFactice({ issue, ouvertes: { jules: [travail('sans gabarit')] } });
-  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, inconnu.gh).raison, /fichiers-inconnus/);
-  assert.equal(inconnu.appels.some(([m]) => m === 'POST'), false);
+  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, inconnu.gh).statut, 'confiee', 'une tâche sans fichiers déclarés ne dit rien : seule sa PR comptera');
+  assert.equal(inconnu.appels.some(([m]) => m === 'POST'), true);
 });
 
-test('confierAJules : deux travaux = dépôt occupé ; une tâche et sa PR comptent pour un ; une PR seule a des fichiers inconnus', () => {
+test('confierAJules : deux travaux ne l’arrêtent pas ; une tâche et sa PR sont lues ensemble ; une PR seule est lue par ses fichiers réels', () => {
   const issue = { state: 'open', labels: [], body: corps(7, 'carai') };
   const a = { number: 3, body: '**Fichiers touchés** :\n- `app/a.ts`' };
   const b = { number: 4, body: '**Fichiers touchés** :\n- `app/b.ts`' };
   const deux = ghFactice({ issue, ouvertes: { 'en-cours': [a], jules: [b] } });
-  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, deux.gh).raison, /2 travaux sur 2 places/);
+  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, deux.gh).statut, 'confiee');
   const prDeA = { number: 20, user: { login: 'MoKarade', type: 'User' }, body: 'Tâche : #3' };
-  const une = ghFactice({ issue, ouvertes: { 'en-cours': [a] }, prs: [prDeA] });
-  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, une.gh).statut, 'confiee', 'la PR de #3 ne compte pas en plus');
+  const une = ghFactice({ issue, ouvertes: { 'en-cours': [a] }, prs: [prDeA], fichiersPr: { 20: ['app/a.ts'] } });
+  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, une.gh).statut, 'confiee');
   const prSeule = { number: 21, user: { login: 'MoKarade', type: 'User' }, body: 'sans tâche' };
-  const avecPr = ghFactice({ issue, ouvertes: { 'en-cours': [a] }, prs: [prDeA, prSeule] });
-  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, avecPr.gh).raison, /2 travaux sur 2 places/);
+  const avecPr = ghFactice({ issue, ouvertes: { 'en-cours': [a] }, prs: [prDeA, prSeule], fichiersPr: { 20: ['app/a.ts'], 21: ['lib/format.test.ts'] } });
+  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, avecPr.gh).raison, /PR #21 ouverte : fichier-commun/);
 });
 
 test('confierAJules : les fichiers RÉELS de la PR ouverte de l’autre travail comptent, déclarés ou non', () => {
@@ -267,7 +274,7 @@ test('confierAJules : les fichiers RÉELS de la PR ouverte de l’autre travail 
   const prDeA = { number: 20, user: { login: 'MoKarade', type: 'User' }, body: 'Tâche : #3' };
   const a = { number: 3, body: '**Fichiers touchés** :\n- `app/a.ts`' };
   const deborde = ghFactice({ issue, ouvertes: { 'en-cours': [a] }, prs: [prDeA], fichiersPr: { 20: ['app/a.ts', { filename: 'lib/neuf.ts', previous_filename: 'lib/format.test.ts' }] } });
-  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, deborde.gh).raison, /dépôt occupé \(issue #3 en cours : fichier-commun:lib\/format\.test\.ts\)/, 'un renommage compte pour l’ancien chemin');
+  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, deborde.gh).raison, /fichiers déjà pris \(PR #20 ouverte : fichier-commun:lib\/format\.test\.ts\)/, 'un renommage compte pour l’ancien chemin');
   const sage = ghFactice({ issue, ouvertes: { 'en-cours': [a] }, prs: [prDeA], fichiersPr: { 20: ['app/a.ts', 'app/a.test.ts'] } });
   assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, sage.gh).statut, 'confiee');
   const sansDeclaration = ghFactice({ issue, ouvertes: { 'en-cours': [{ number: 3, body: 'sans gabarit' }] }, prs: [prDeA], fichiersPr: { 20: ['app/a.ts'] } });
@@ -278,13 +285,13 @@ test('confierAJules : les fichiers RÉELS de la PR ouverte de l’autre travail 
   assert.match(confierAJules({ repo: 'CarAI', n: 7 }, tronquee.gh).raison, /fichiers-inconnus/, '100 fichiers : liste tronquée');
 });
 
-test('confierAJules : une PR seule (sans tâche) dont les fichiers sont lisibles laisse la 2e place si disjoints, la garde sinon', () => {
+test('confierAJules : une PR seule (sans tâche) dont les fichiers sont lisibles laisse passer si disjoints, la garde sinon', () => {
   const issue = { state: 'open', labels: [], body: corps(7, 'carai') };
   const prSeule = { number: 21, user: { login: 'MoKarade', type: 'User' }, body: 'sans tâche' };
   const disjointe = ghFactice({ issue, prs: [prSeule], fichiersPr: { 21: ['app/z.ts'] } });
   assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, disjointe.gh).statut, 'confiee');
   const commune = ghFactice({ issue, prs: [prSeule], fichiersPr: { 21: ['lib/format.test.ts'] } });
-  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, commune.gh).raison, /dépôt occupé \(PR #21 ouverte : fichier-commun:lib\/format\.test\.ts\)/);
+  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, commune.gh).raison, /fichiers déjà pris \(PR #21 ouverte : fichier-commun:lib\/format\.test\.ts\)/);
   const inconnue = ghFactice({ issue, prs: [prSeule] });
   assert.match(confierAJules({ repo: 'CarAI', n: 7 }, inconnue.gh).raison, /PR #21 ouverte : fichiers-inconnus/);
 });
