@@ -1,16 +1,8 @@
-# Contrôle « gestes de Marc à jour » (tâche .github#478, choix « Signaler et retirer » de Marc, fil Gestes, 22/10/2026).
-# Constat (DriveAI, 22/10) : des issues `qui:marc` traînent après que le geste est fait ou devenu sans objet, et les deux listes
-# `gestes-de-marc.md` et `a-faire-maintenant.md` s'écrivaient à la main. Aucun appel d'API de plus, aucun coût IA : tout vient du relevé
-# (fetch.py lit déjà les commentaires des tâches `qui:marc` ouvertes ; il en garde les derniers de Marc dans `marc_com`).
-#
-# Cinq contrôles :
-#   1. un commentaire « fait / ok » CLAIR de Marc, plus récent que la dernière pose de `qui:marc`, retire l'étiquette avec le même commentaire
-#      que le bouton « Fait » (reponses.py) ; un « fait » AMBIGU (négation, question, « pas encore »…) est signalé, jamais retiré ;
-#   2. une ligne `Attend` vers une issue fermée ou introuvable est signalée ;
-#   3. `qui:marc` avec `preuve-attendue` ou `bloqué` est signalé (une preuve n'attend jamais Marc, cycle de vie §5 ter) ;
-#   4. plus de 7 jours sans activité est signalé ;
-#   5. `gestes-de-marc.md` et `a-faire-maintenant.md` sont générés par le relevé.
-# Fonctions pures d'un côté (`fait_clair`, `controler`, `listes_md`), écritures de l'autre (`retirer`, avec `appliquer` injecté).
+# Contrôle « gestes de Marc à jour » (tâche .github#478, choix « Signaler et retirer » de Marc, fil Gestes, 22/10/2026) : des issues `qui:marc`
+# traînaient après un geste fait ou périmé, et deux listes s'écrivaient à la main. Aucun appel d'API de plus, aucun coût IA : tout vient du relevé.
+# Cinq contrôles (détail : docs/cycle-de-vie-tache.md §13) : « fait » clair de Marc (étiquette retirée, même commentaire que le bouton « Fait »),
+# « fait » ambigu (signalé, jamais retiré), `Attend` vers une issue fermée ou introuvable, `qui:marc` avec `preuve-attendue` ou `bloqué`,
+# sept jours sans activité ; plus les deux listes générées. Fonctions pures d'un côté, écritures de l'autre (`retirer`, avec `appliquer` injecté).
 import datetime, re, unicodedata
 
 SANS_ACTIVITE_J = 7
