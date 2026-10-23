@@ -57,3 +57,16 @@ test('captures.yml : --with-deps (sudo) seulement en dépôt public', () => {
   assert.match(yaml, /VISIBILITE: \$\{\{ github\.event\.repository\.visibility \}\}/);
   assert.equal(yaml.match(/playwright install/g).length, 2, 'une seule installation par visibilité');
 });
+
+test('captures.yml : installe le CLI gh (binaire vérifié) avant de publier, seulement s\'il manque', () => {
+  const yaml = readFileSync(new URL('../.github/workflows/captures.yml', import.meta.url), 'utf8');
+  // Le robot du PC n'a pas gh : « gh: command not found » à `gh auth setup-git` (FinanceAI#1249, 22/10/2026).
+  const installe = yaml.indexOf("Installer le CLI gh s'il manque");
+  const publie = yaml.indexOf('gh auth setup-git');
+  assert.ok(installe > 0 && publie > installe, "l'installation de gh doit précéder gh auth setup-git");
+  const bloc = yaml.slice(installe, publie);
+  assert.match(bloc, /command -v gh/);
+  assert.match(bloc, /sha256sum -c/);
+  assert.match(bloc, /GH_VERSION: \d+\.\d+\.\d+/);
+  assert.match(bloc, /GITHUB_PATH/);
+});
