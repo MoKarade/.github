@@ -85,6 +85,14 @@ test('composerBloc : un écran porte captures et theme.test ; un .md porte fran�
   assert.doesNotMatch(bloc, /<[a-zA-ZÀ-ÿ][^>\n]*\s[^>\n]*>/);
 });
 
+test('composerBloc : « À ne pas faire » interdit de repousser un ancien arbre par-dessus main (incident FinanceAI#1269)', () => {
+  const bloc = composerBloc({ n: 31, titre: 'Corriger un libellé', depot: 'FinanceAI', fichiers: ['lib/a.ts', 'tests/a.test.ts'], nouveaux: [], manquantes: ['À ne pas faire'] });
+  assert.match(bloc, /pars de main à jour/);
+  assert.match(bloc, /fusionne-le en gardant sa version des fichiers hors liste/);
+  assert.match(bloc, /ne repousse jamais un ancien arbre/);
+  assert.match(bloc, /`git diff origin\/main --stat` ne montre que les fichiers permis/);
+});
+
 test('une tâche écrite pour Claude est complétée : bloc ajouté APRÈS le texte existant, rien d\'autre modifié, commentaire posé', () => {
   const t = tache(30);
   const g = github({ issues: [t] });
