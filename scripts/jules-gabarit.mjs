@@ -134,6 +134,7 @@ export function composerBloc({ n, titre, depot, fichiers, nouveaux = [], manquan
     'À ne pas faire': `**À ne pas faire** :\n${[
       'Toucher à un fichier hors de « Fichiers permis », même pour « bien faire » : si la tâche l\'exige, arrête-toi et écris-le dans la PR.',
       'Élargir au-delà de l\'« Après » : aucun refactor ni renommage qui n\'est pas demandé.',
+      'Repousser un ancien arbre : pars de main à jour ; si main avance, fusionne-le en gardant sa version des fichiers hors liste, ne repousse jamais un ancien arbre. Avant de pousser, `git diff origin/main --stat` ne montre que les fichiers permis.',
       'Désactiver, sauter ou affaiblir un test.',
       'Écrire `Fixes`, `Closes` ou `Resolves`.',
       'Mettre une donnée personnelle de Marc dans le code, les tests ou la PR : données fictives seulement.',
