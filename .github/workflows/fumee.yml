@@ -43,6 +43,9 @@ on:
       hub-token:
         description: 'Jeton du hub (HUB_TOKEN de l’app). Obligatoire quand chemin-summary est renseigné.'
         required: false
+      HUB_DISPATCH_TOKEN:
+        description: 'Jeton étroit (dépôt MoKarade/.github) qui lui permet de demander le retour en arrière quand la fumée est rouge. Un appelant en `secrets: inherit` le reçoit sans le déclarer ; un appelant qui liste ses secrets le passe ici.'
+        required: false
 
 permissions:
   contents: read
