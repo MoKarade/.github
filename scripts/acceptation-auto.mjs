@@ -15,6 +15,10 @@
 //   - aucun contrôle de la tête de la PR n'est rouge ;
 //   - si la PR change du code servi, un déploiement de production réussi existe sur le commit fusionné (attente bornée) ;
 //   - le commentaire passe `evaluer` (le garde-fou de preuve, scripts/preuve.mjs) AVANT d'être posé : jamais de réouverture ensuite.
+// Depuis la refonte (décision 1 du 26/10/2026, « ok pour recos ») la tâche peut aussi porter la ligne
+// `**Fini quand exécutable** : GET https://<nom>.hubperso.com/chemin → 200, contient « texte »` : après le déploiement, la sonde ci-dessous
+// lit CETTE URL et le commentaire copie ce qui a été lu. Hôte `*.hubperso.com` seulement, https, sans port ni identifiant, aucune
+// redirection suivie : le texte d'une tâche est une donnée, jamais une adresse libre pour le robot (qui peut être le PC de Marc).
 // Sinon rien ne change : le Coordinateur est réveillé comme avant (« preuve à poser sur D#n ») et un fil prouve.
 //
 // Le commentaire est écrit par `github-actions[bot]` et porte un marqueur ; le garde-fou de preuve n'accepte un robot QUE dans ce cas
@@ -42,6 +46,81 @@ export const ecran = (fichiers) => fichiers.some((f) => ECRAN.test(f));
 const noms = (issue) => (issue?.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
 export const veutAuto = (issue) => LIGNE_AUTO.test(String(issue?.body ?? ''));
 
+// « **Fini quand exécutable** : GET https://nom.hubperso.com/chemin → 200, contient « texte » » (même grammaire que `**Attend**`).
+export const LIGNE_SONDE = /^[\s>*_-]*\*{0,2}\s*Fini quand exécutable\s*\*{0,2}\s*:\s*(.+?)\s*$/im;
+const FORME_SONDE = /^GET\s+(https:\/\/\S+)\s*(?:→|->)\s*(\d{3})(?:\s*,\s*contient\s*[«"“]\s*(.+?)\s*[»"”])?$/;
+const HOTE_SONDE = /^(?:[a-z0-9-]+\.)*hubperso\.com$/;
+export const ESSAIS_SONDE = 3;
+export const PAUSE_SONDE_MS = 20_000;
+export const DELAI_SONDE_MS = 10_000;
+export const OCTETS_SONDE = 65_536;
+
+/**
+ * Lit la ligne « Fini quand exécutable » d'une tâche. Rend { sonde: null } (pas de ligne), { sonde: { url, statut, contient } }
+ * ou { erreur } (ligne présente mais refusée : la tâche ne s'accepte pas seule, un fil prouvera).
+ */
+export function lireSonde(issue) {
+  const ligne = LIGNE_SONDE.exec(String(issue?.body ?? ''));
+  if (!ligne) return { sonde: null };
+  const m = FORME_SONDE.exec(ligne[1]);
+  if (!m) return { erreur: 'la ligne « Fini quand exécutable » doit être « GET https://… → 200, contient « texte » »' };
+  let url;
+  try {
+    url = new URL(m[1]);
+  } catch {
+    return { erreur: 'l’adresse de la ligne « Fini quand exécutable » n’est pas valide' };
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || url.port || !HOTE_SONDE.test(url.hostname) || m[1].length > 300) {
+    return { erreur: 'la sonde ne lit que du https sur hubperso.com ou un de ses sous-domaines, sans port ni identifiant (300 caractères au plus)' };
+  }
+  const statut = Number(m[2]);
+  if (statut < 200 || statut > 599) return { erreur: 'le statut attendu de la sonde est hors de 200 à 599' };
+  return { sonde: { url: url.href, statut, contient: m[3] || '' } };
+}
+
+async function lireCorps(reponse, max = OCTETS_SONDE) {
+  if (!reponse.body?.getReader) return String(await reponse.text()).slice(0, max);
+  const lecteur = reponse.body.getReader();
+  const decodeur = new TextDecoder();
+  let texte = '';
+  let octets = 0;
+  while (octets < max) {
+    const { done, value } = await lecteur.read();
+    if (done) break;
+    octets += value.length;
+    texte += decodeur.decode(value, { stream: true });
+  }
+  await lecteur.cancel().catch(() => {});
+  return texte.slice(0, max);
+}
+
+/**
+ * Lit la production : `essais` tentatives espacées de `pause` (le temps que le réseau de diffusion serve la nouvelle version).
+ * Rend { ok, detail } ; `detail` dit ce qui a été lu, il est copié dans le commentaire de preuve. Jamais d'exception.
+ */
+export async function lireProduction({ sonde, fetchImpl = fetch, essais = ESSAIS_SONDE, pause = PAUSE_SONDE_MS, dormir = (ms) => new Promise((r) => setTimeout(r, ms)), maintenant = () => new Date() }) {
+  let dernier = 'aucune tentative';
+  for (let i = 0; i < essais; i += 1) {
+    try {
+      const reponse = await fetchImpl(sonde.url, {
+        method: 'GET',
+        redirect: 'manual',
+        headers: { 'user-agent': 'MoKarade-preuve/1', 'cache-control': 'no-cache' },
+        signal: AbortSignal.timeout(DELAI_SONDE_MS),
+      });
+      const corps = sonde.contient ? await lireCorps(reponse) : '';
+      const lu = `GET ${sonde.url} → ${reponse.status}`;
+      if (reponse.status !== sonde.statut) dernier = `${lu}, attendu ${sonde.statut}`;
+      else if (sonde.contient && !corps.includes(sonde.contient)) dernier = `${lu}, mais le texte « ${sonde.contient} » est absent des ${OCTETS_SONDE / 1024} premiers Ko`;
+      else return { ok: true, detail: `${lu}${sonde.contient ? `, contient « ${sonde.contient} » : oui` : ''}, lu le ${maintenant().toISOString()}` };
+    } catch (erreur) {
+      dernier = `GET ${sonde.url} : ${erreur.name === 'TimeoutError' ? `pas de réponse en ${DELAI_SONDE_MS / 1000} s` : erreur.message}`;
+    }
+    if (i < essais - 1) await dormir(pause);
+  }
+  return { ok: false, detail: dernier };
+}
+
 /**
  * La tâche peut-elle s'accepter seule ? Rend { ok, motifs }.
  * `autresPr` : les PR ouvertes du dépôt (autres que celle qui vient de fusionner) ; `controles` : check-runs de la tête de la PR.
@@ -51,7 +130,9 @@ export function evaluerEligibilite({ issue, numeroTache, pr, fichiers, controles
   const defaut = defautDeLaTache(issue);
   if (defaut) motifs.push(`la tâche ${defaut}`);
   else {
-    if (!veutAuto(issue)) motifs.push('la tâche ne porte pas la ligne « **Acceptation automatique** : oui — … »');
+    const { sonde, erreur } = lireSonde(issue);
+    if (erreur) motifs.push(erreur);
+    else if (!veutAuto(issue) && !sonde) motifs.push('la tâche ne porte pas la ligne « **Acceptation automatique** : oui — … » ni « **Fini quand exécutable** : GET … »');
     const attente = noms(issue).filter((n) => LABELS_ATTENTE.includes(n));
     if (attente.length) motifs.push(`la tâche attend quelque chose (${attente.join(', ')})`);
   }
@@ -84,13 +165,15 @@ export function derniersParNom(controles) {
 const court = (sha) => String(sha ?? '').slice(0, 7);
 
 /** Le commentaire de preuve : commence par « **Acceptée** », dit ce qui a été vérifié, porte le marqueur. */
-export function corpsAcceptee({ pr, controles, fichiers, deploiement, servie, sansDeploiement }) {
+export function corpsAcceptee({ pr, controles, fichiers, deploiement, servie, sansDeploiement, sonde = null }) {
   const verifies = controles.filter((c) => c.conclusion === 'success').length;
   const depl = servie && deploiement?.ok ? `déploiement READY (${deploiement.detail})` : `sans déploiement : ${sansDeploiement}`;
   return [
     `**Acceptée** — PR #${pr.number} fusionnée (${court(pr.merge_commit_sha)}), ${depl}, preuve : contrôles réussis sur la tête ${court(pr.head?.sha)} de la PR (${verifies}), aucun rouge ; ` +
-      `${fichiers.length} fichiers touchés, aucun écran ; acceptation automatique demandée par la ligne « Acceptation automatique » de la tâche, ` +
-      'la production n’a pas été lue par une personne.',
+      `${fichiers.length} fichiers touchés, aucun écran ; ` +
+      (sonde
+        ? `acceptation automatique demandée par la ligne « Fini quand exécutable » de la tâche, production lue par la sonde : ${sonde.detail}.`
+        : 'acceptation automatique demandée par la ligne « Acceptation automatique » de la tâche, la production n’a pas été lue par une personne.'),
     '',
     MARQUEUR_AUTO,
   ].join('\n');
@@ -111,7 +194,7 @@ const pages = async (api, chemin) => {
  * `acceptee` | `ignoree` (les motifs disent pourquoi ; rien n'a changé).
  * `config` : { deploiement: 'vercel' | 'aucun', workflows: [] }, comme le garde-fou de preuve.
  */
-export async function accepterApresFusion({ api, depot, numeroPr, config = {}, maintenant = () => new Date(), dormir = (ms) => new Promise((r) => setTimeout(r, ms)), essais = ESSAIS_DEPLOIEMENT, pause = PAUSE_DEPLOIEMENT_MS }) {
+export async function accepterApresFusion({ api, depot, numeroPr, config = {}, maintenant = () => new Date(), dormir = (ms) => new Promise((r) => setTimeout(r, ms)), essais = ESSAIS_DEPLOIEMENT, pause = PAUSE_DEPLOIEMENT_MS, sonde: reglagesSonde = {} }) {
   const ignoree = (...motifs) => ({ statut: 'ignoree', motifs });
   const pr = await api('GET', `/repos/${depot}/pulls/${numeroPr}`);
   if (!pr?.merged) return ignoree('la PR n’est pas fusionnée');
@@ -120,7 +203,7 @@ export async function accepterApresFusion({ api, depot, numeroPr, config = {}, m
   const numero = taches[0].numero;
   const issue = await api('GET', `/repos/${depot}/issues/${numero}`);
   // Question la moins chère d'abord : la plupart des tâches ne demandent pas l'acceptation automatique, rien d'autre n'est lu.
-  if (!issue || !veutAuto(issue)) return ignoree('la tâche ne demande pas l’acceptation automatique');
+  if (!issue || !(veutAuto(issue) || LIGNE_SONDE.test(String(issue.body ?? '')))) return ignoree('la tâche ne demande pas l’acceptation automatique');
 
   const fichiers = (await pages(api, `/repos/${depot}/pulls/${numeroPr}/files`)).map((f) => f.filename);
   const controles = derniersParNom(((await api('GET', `/repos/${depot}/commits/${pr.head?.sha}/check-runs?per_page=100`))?.check_runs ?? []).filter((c) => c.status === 'completed'));
@@ -141,7 +224,16 @@ export async function accepterApresFusion({ api, depot, numeroPr, config = {}, m
     if (!deploiement.ok) return ignoree(`la PR change du code servi et aucun déploiement de production réussi n’est trouvé (${deploiement.detail}) : un fil prouvera`);
   }
 
+  // « Fini quand exécutable » : la production est lue APRÈS le déploiement prêt ; une réponse différente ne ferme rien, un fil prouve.
+  let lue = null;
+  const { sonde } = lireSonde(issue);
+  if (sonde) {
+    lue = await lireProduction({ sonde, maintenant, dormir, ...reglagesSonde });
+    if (!lue.ok) return ignoree(`la sonde de la tâche n’a pas lu ce qui était attendu (${lue.detail}) : un fil prouvera`);
+  }
+
   const corps = corpsAcceptee({
+    sonde: lue,
     pr,
     controles,
     fichiers,
