@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { LABEL_ATTEND_MARC, TITRE_ATTEND_MARC, prAttendantMarc } from './attend-marc.mjs';
-import { DEPOT_BOITE, DEPOT_GITHUB, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, WORKFLOWS_BALAYAGE, WORKFLOWS_PR_OUVERTE, construireMotif, decider, estPanneRunner, heureQuebec, occupations, travaux, signeLibre, preuveAPoser, rougeDepuis, traiter } from './reveil-reacteur.mjs';
+import { DEPOT_BOITE, DEPOT_GITHUB, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, TYPES_BALAYAGE, WORKFLOWS_BALAYAGE, WORKFLOWS_GARDE_FOU_ROUGE, WORKFLOWS_PR_OUVERTE, construireMotif, decider, estPanneRunner, heureQuebec, occupations, travaux, signeLibre, preuveAPoser, rougeDepuis, traiter } from './reveil-reacteur.mjs';
 
 // Fausse API GitHub en mémoire : les lectures viennent de `donnees`, les écritures sont gardées.
 function faux(donnees = {}) {
@@ -482,6 +482,37 @@ test('pr_ouverte : lance seulement le commentaire tâche liée, ne commente rien
   assert.deepEqual(ecritures, [{ methode: 'POST', chemin: `/repos/${DEPOT_GITHUB}/actions/workflows/commentaire-tache-liee.yml/dispatches`, corps: { ref: 'main' }, jeton: 'jeton' }]);
   assert.ok(!ecritures.some((e) => e.chemin.includes(DEPOT_BOITE) || e.chemin.includes(WORKFLOW_BOITE)));
   assert.ok(!lignes.some((l) => l.includes('Coordinateur réveillé')));
+});
+
+// MoKarade/.github#633 : le Garde-fou d'une PR qui finit en échec lance la relecture IA, et seulement elle (plus de minuteur, #626).
+test('garde_fou_rouge : lance seulement relecture-ia.yml, ne commente rien sur la boîte et ne réveille personne', async () => {
+  const { api, ecritures } = faux();
+  const lignes = [];
+  const r = await traiter({ api, evt: { type: 'garde_fou_rouge', depot: 'MoKarade/CarAI', pr: '12', evenement: 'pull_request_target' }, jetonReveil: 'jeton', journal: (l) => lignes.push(l) });
+  assert.equal(r.action, 'balayer');
+  assert.notEqual(r.reveille, true);
+  assert.deepEqual(r.balayages, WORKFLOWS_GARDE_FOU_ROUGE);
+  assert.deepEqual(ecritures, [{ methode: 'POST', chemin: `/repos/${DEPOT_GITHUB}/actions/workflows/relecture-ia.yml/dispatches`, corps: { ref: 'main' }, jeton: 'jeton' }]);
+  assert.ok(!ecritures.some((e) => e.chemin.includes(DEPOT_BOITE) || e.chemin.includes(WORKFLOW_BOITE) || e.chemin.includes('commentaire-tache-liee')));
+  assert.ok(!lignes.some((l) => l.includes('Coordinateur réveillé')));
+});
+
+test('garde_fou_rouge : sans jeton un avertissement et aucune écriture ; le type CI rouge garde son comportement', async () => {
+  const sansJeton = faux();
+  const lignes = [];
+  await traiter({ api: sansJeton.api, evt: { type: 'garde_fou_rouge', depot: 'MoKarade/CarAI', pr: '12' }, jetonReveil: '', journal: (l) => lignes.push(l) });
+  assert.deepEqual(sansJeton.ecritures, []);
+  assert.ok(lignes.some((l) => l.startsWith('::warning::') && l.includes('REVEIL_TOKEN')));
+  assert.deepEqual(WORKFLOWS_GARDE_FOU_ROUGE, ['relecture-ia.yml']);
+  assert.ok(!TYPES_BALAYAGE.has('garde_fou_rouge'), 'garde_fou_rouge ne passe pas par le balayage des deux workflows');
+});
+
+test('garde_fou_rouge : reacteur.yml écoute le Garde-fou et le commun reveil-reacteur.yml envoie le type', () => {
+  const lire = (f) => readFileSync(new URL(`../.github/workflows/${f}`, import.meta.url), 'utf8');
+  const reacteur = lire('reacteur.yml');
+  assert.match(reacteur, /workflow_run:\s*\n(?:\s*#[^\n]*\n)*\s*workflows: \[CI, Garde-fou\]/);
+  assert.match(reacteur, /github\.event\.workflow_run\.name == 'Garde-fou' && 'garde_fou_rouge' \|\| 'ci_rouge'/);
+  assert.match(lire('reveil-reacteur.yml'), /pr_fusionnee \| pr_ouverte \| tache_fermee \| ci_rouge \| garde_fou_rouge \| filet/);
 });
 
 test('pr_ouverte : sans jeton un avertissement, aucune écriture ; balayage qui échoue = avertissement, jamais d’exception', async () => {
