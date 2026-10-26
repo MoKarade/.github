@@ -80,6 +80,8 @@ test('securite.yml : zizmor tourne sans bloquer, version fixée, installation v�
   assert.match(job, /--require-hashes/);
   // Non bloquant (tâche #585) : passer en bloquant se décide dans une tâche à part, après la correction des trouvailles.
   assert.match(job, /--no-exit-codes/);
+  // Le runner lance l'étape avec `bash -e` : sans `set +e`, une panne de l'outil ferait échouer le job au lieu d'être dite dans le résumé.
+  assert.match(job, /set \+e/);
   assert.match(job, /--offline/);
   assert.match(job, /--config \.securite-commune\/securite\/zizmor\.yml/);
   assert.doesNotMatch(job, /uses:\s*(docker:\/\/|zizmorcore\/)/, 'aucune action Docker : le robot du PC n\'a pas Docker');

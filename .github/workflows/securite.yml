@@ -148,7 +148,9 @@ jobs:
           ZIZMOR_HASH_MANYLINUX: 58e878eb2dbd2c6183c105e1ac28c14f7dd1eca44a783f1fe2a69647d012c410
           ZIZMOR_HASH_MUSLLINUX: e7fdf82d31cc67eb1d5030bf2372b25ee2a1c3ad05017e18da70ed138c4accd6
         run: |
-          set -uo pipefail
+          # Le shell des étapes est lancé avec -e : sans `set +e`, une panne de zizmor arrêterait l'étape avant le message ci-dessous.
+          set +e
+          set -u
           resume="${GITHUB_STEP_SUMMARY:-/dev/null}"
           if ! command -v python3 >/dev/null 2>&1; then
             echo "::notice::python3 absent de cette machine : zizmor n'a pas tourné."
