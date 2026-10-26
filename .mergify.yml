@@ -1,3 +1,4 @@
+# Essai jetable de la relecture sans minuteur (.github#626), PR #639 jamais fusionnée.
 # Fusion automatique par Mergify pour MoKarade/.github (oui écrit de Marc, 15/10/2026, fil « fusion automatique »).
 # Une PR prête (pas en brouillon, sans l'étiquette « hold ») est fusionnée en squash quand le contrôle
 # « Garde-fou » et les tests du garde-fou sont verts. Hors chemins protégés (docs/, README) le garde-fou
