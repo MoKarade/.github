@@ -20,6 +20,11 @@ name: Surveillance des apps
 # le retour en arrière est aussi exercé pour de vrai sur ce seul projet. Pour l'échec de déploiement : choisir
 # `echec` puis `succes` dans « deploiement-essai » (un déploiement simulé, rien n'est lu chez Vercel).
 on:
+  # Événement `fumee-rouge` : envoyé par le workflow commun fumee.yml quand la fumée de production d'une app est
+  # rouge (scripts/demander-retour.mjs, secret HUB_DISPATCH_TOKEN des dépôts d'apps). Le retour en arrière ne
+  # traite alors que l'app de l'URL reçue ; sa propre sonde décide encore.
+  repository_dispatch:
+    types: [fumee-rouge]
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
@@ -103,4 +108,5 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_EQUIPE: mokarades-projects
           RETOUR_CONTROLE: ${{ inputs.retour-controle }}
+          RETOUR_URL_BASE: ${{ github.event.client_payload.url_base }}
         run: node scripts/retour-arriere.mjs

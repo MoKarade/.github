@@ -150,7 +150,8 @@ const ghReel = (args) =>
 
 /**
  * Les apps à traiter : celles de surveillance/apps.json qui ont une sonde et un projet Vercel, ou, pour un
- * lancement d'essai, une seule app simulée (nom, URL de santé et projet Vercel donnés à la main). Une URL
+ * lancement d'essai, une seule app simulée (nom, URL de santé et projet Vercel donnés à la main), ou, sur un
+ * événement `fumee-rouge`, l'app de l'URL reçue (`RETOUR_URL_BASE`). Une URL
  * d'essai sans projet Vercel d'essai ne touche à rien : la preuve du retour ne passe jamais par une vraie app.
  */
 export function appsRetour(env, liste) {
@@ -159,7 +160,18 @@ export function appsRetour(env, liste) {
     if (!/^[a-z0-9-]+$/.test(vercel)) return [];
     return [{ nom: env.SURVEILLANCE_ESSAI_NOM || 'essai', depot: env.GITHUB_REPOSITORY || 'MoKarade/.github', sante: env.SURVEILLANCE_ESSAI_URL, vercel }];
   }
-  return liste.filter((a) => a.sante && a.vercel);
+  const avecProjet = liste.filter((a) => a.sante && a.vercel);
+  // Événement `fumee-rouge` : seule l'app dont l'URL de production est celle de l'événement (sa sonde décide encore).
+  if (env.RETOUR_URL_BASE) {
+    let origine = '';
+    try {
+      origine = new URL(env.RETOUR_URL_BASE).origin;
+    } catch {
+      return [];
+    }
+    return avecProjet.filter((a) => new URL(a.sante).origin === origine);
+  }
+  return avecProjet;
 }
 
 async function main() {
