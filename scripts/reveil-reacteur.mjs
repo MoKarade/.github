@@ -22,6 +22,9 @@
 // et `relecture-ia.yml` de `.github` : leurs horloges ne tournent presque pas, l'événement les remplace (tâche #148). Si
 // `REVEIL_TOKEN` n'a pas encore le droit sur `.github`, un avertissement le dit et le réveil, déjà parti, n'est pas touché.
 //
+// Sur la fin en échec du Garde-fou d'une PR (garde_fou_rouge) il ne réveille PERSONNE non plus : il lance seulement `relecture-ia.yml`
+// (MoKarade/.github#633), qui n'a plus de minuteur toutes les 10 minutes (#626).
+//
 // Sur l'ouverture d'une PR (pr_ouverte) il ne réveille PERSONNE et ne commente rien sur app-template#58 : il lance seulement
 // `commentaire-tache-liee.yml`, qui marque la tâche citée `en-cours` en quelques minutes (tâche MoKarade/.github#157).
 //
@@ -63,6 +66,9 @@ export const WORKFLOWS_BALAYAGE = ['commentaire-tache-liee.yml', 'relecture-ia.y
 export const TYPES_BALAYAGE = new Set(['pr_fusionnee', 'ci_rouge', 'tache_fermee']);
 // Une PR qui s'ouvre ne lance que le commentaire tâche liée (et la marque `en-cours`) : la relecture IA a son propre déclencheur.
 export const WORKFLOWS_PR_OUVERTE = ['commentaire-tache-liee.yml'];
+// Le Garde-fou d'une PR vient de finir en échec (`workflow_run`, MoKarade/.github#633) : la relecture IA est la seule à lancer, sans minuteur
+// (#626). Elle ne relit que les PR dont le Garde-fou est rouge sur leur dernier commit et qui n'ont pas déjà de verdict.
+export const WORKFLOWS_GARDE_FOU_ROUGE = ['relecture-ia.yml'];
 // Ce qui occupe un dépôt (une chose à la fois par app, docs/cycle-de-vie-tache.md) : une issue ouverte portant l'une de ces
 // étiquettes, ou une PR ouverte (brouillon compris) qui n'est pas celle d'un robot. `preuve-attendue` ne l'occupe pas, ni `jules` : une tâche
 // confiée à Jules (et sa PR) ne tient pas de place (décision de Marc, 23/10/2026 22:45Z : « il prend quand même »).
@@ -239,6 +245,7 @@ export async function decider({ api, evt, maintenant = new Date(), accepter = ac
   const { type, depot } = evt;
   if (type === 'filet') return filet({ api, evt, maintenant });
   if (type === 'pr_ouverte') return { action: 'balayer' };
+  if (type === 'garde_fou_rouge') return { action: 'balayer', workflows: WORKFLOWS_GARDE_FOU_ROUGE };
   if (type === 'tache_fermee') {
     const abandon = evt.raison === 'not_planned' ? ' (abandonnée : vérifier la raison)' : '';
     const en = await travaux({ api, depot });
@@ -321,7 +328,7 @@ export async function traiter({ api, evt, jetonReveil, journal = console.log, ma
       journal('::warning::Réacteur : balayage impossible, le secret REVEIL_TOKEN est absent (PR d’un fork, ou secret pas encore posé).');
       return { ...d, balayages: [] };
     }
-    return { ...d, balayages: await lancerBalayages({ api, jetonReveil, journal, workflows: WORKFLOWS_PR_OUVERTE }) };
+    return { ...d, balayages: await lancerBalayages({ api, jetonReveil, journal, workflows: d.workflows ?? WORKFLOWS_PR_OUVERTE }) };
   }
   if (!jetonReveil) {
     journal('::warning::Réacteur : réveil impossible, le secret REVEIL_TOKEN est absent (PR d’un fork, ou secret pas encore posé).');

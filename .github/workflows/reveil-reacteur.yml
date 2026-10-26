@@ -13,13 +13,17 @@ name: Réveil du Coordinateur (workflow commun)
 #     secrets: inherit
 #     with:
 #       runner: ${{ github.event.repository.visibility == 'public' && '"ubuntu-latest"' || '["self-hosted","pc-marc"]' }}
-#       type: ${{ github.event_name == 'pull_request' && 'pr_fusionnee' || github.event_name == 'issues' && 'tache_fermee' || github.event_name == 'workflow_run' && 'ci_rouge' || 'filet' }}
+#       type: ${{ github.event_name == 'pull_request' && 'pr_fusionnee' || github.event_name == 'issues' && 'tache_fermee' || github.event_name == 'workflow_run' && (github.event.workflow_run.name == 'Garde-fou' && 'garde_fou_rouge' || 'ci_rouge') || 'filet' }}
 #       ...
 #
 # `pr_fusionnee` tente d'abord l'acceptation automatique de la tâche citée (scripts/acceptation-auto.mjs, cycle de vie §10 ter) : elle
 # écrit sur l'issue et sur la PR et lit les déploiements, donc le `reacteur.yml` appelant doit donner `issues: write`,
 # `pull-requests: write` (le commentaire « Fusionnée et acceptée automatiquement » de la PR) et `deployments: read` (sans les
 # deux premiers : un avertissement, jamais un échec, et un fil prouve la tâche comme avant ; MoKarade/.github#418).
+#
+# `garde_fou_rouge` (le workflow `Garde-fou` de la PR vient de finir en échec) ne réveille personne non plus : il lance seulement
+# `relecture-ia.yml` de `.github`, qui n'a plus de minuteur (MoKarade/.github#633). Le `reacteur.yml` appelant écoute alors
+# `workflow_run: workflows: [CI, Garde-fou]` et envoie ce type quand `github.event.workflow_run.name == 'Garde-fou'`.
 #
 # `pr_ouverte` (PR ouverte, rouverte, sortie du brouillon ou dont le corps change) ne réveille personne : elle lance seulement le
 # commentaire tâche liée, qui marque la tâche citée `en-cours` (MoKarade/.github#157).
@@ -38,7 +42,7 @@ on:
         type: string
         default: '"ubuntu-latest"'
       type:
-        description: 'pr_fusionnee | pr_ouverte | tache_fermee | ci_rouge | filet'
+        description: 'pr_fusionnee | pr_ouverte | tache_fermee | ci_rouge | garde_fou_rouge | filet'
         type: string
         required: true
       depot:
