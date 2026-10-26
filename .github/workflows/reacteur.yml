@@ -19,7 +19,8 @@ on:
   pull_request:
     types: [closed, opened, reopened, ready_for_review, edited]
   workflow_run:
-    workflows: [CI]
+    # `Garde-fou` : un échec lance la relecture IA (type garde_fou_rouge, MoKarade/.github#633), sans réveiller personne.
+    workflows: [CI, Garde-fou]
     types: [completed]
   issues:
     types: [closed]
@@ -78,7 +79,7 @@ jobs:
     secrets: inherit
     with:
       runner: ${{ github.event.repository.visibility == 'public' && '"ubuntu-latest"' || '["self-hosted","pc-marc"]' }}
-      type: ${{ github.event_name == 'pull_request' && (github.event.action == 'closed' && 'pr_fusionnee' || 'pr_ouverte') || github.event_name == 'issues' && 'tache_fermee' || github.event_name == 'workflow_run' && 'ci_rouge' || 'filet' }}
+      type: ${{ github.event_name == 'pull_request' && (github.event.action == 'closed' && 'pr_fusionnee' || 'pr_ouverte') || github.event_name == 'issues' && 'tache_fermee' || github.event_name == 'workflow_run' && (github.event.workflow_run.name == 'Garde-fou' && 'garde_fou_rouge' || 'ci_rouge') || 'filet' }}
       depot: ${{ github.repository }}
       pr: ${{ format('{0}', github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number) }}
       issue: ${{ format('{0}', github.event.issue.number) }}
