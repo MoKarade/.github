@@ -62,6 +62,25 @@ class Relever(unittest.TestCase):
         self.assertEqual((liste, len(err)), ([], 1))
 
 
+class Exceptions(unittest.TestCase):
+    def test_le_run_fantome_nomme_n_est_pas_un_defaut_mais_reste_visible(self):
+        fantome = {'repo': 'driveai', 'run': 29254315500, 'wf': 'CI', 'event': 'pull_request', 'h': 2521.0, 'u': 'https://x/1'}
+        autre = {'repo': 'driveai', 'run': 1, 'wf': 'CI', 'event': 'pull_request', 'h': 9.0, 'u': 'https://x/2'}
+        defauts, exceptions = w.separer([fantome, autre])
+        self.assertEqual([x['run'] for x in defauts], [1])
+        self.assertEqual([x['run'] for x in exceptions], [29254315500])
+        self.assertIn('non actionnable', exceptions[0]['raison'])
+
+    def test_ce_n_est_pas_un_filtre_general(self):
+        # même dépôt, autre lancement ; même numéro, autre dépôt : rien n'est écarté
+        defauts, exceptions = w.separer([{'repo': 'carai', 'run': 29254315500}, {'repo': 'DriveAI', 'run': 2}])
+        self.assertEqual((len(defauts), exceptions), (2, []))
+
+    def test_liste_vide_ou_absente(self):
+        self.assertEqual(w.separer([]), ([], []))
+        self.assertEqual(w.separer(None), ([], []))
+
+
 class Branchement(unittest.TestCase):
     """build.py et fetch.py font du travail à l'import : on vérifie le branchement dans leur texte."""
     def test_le_controle_est_liste_et_alimente_par_le_releve(self):
@@ -69,7 +88,7 @@ class Branchement(unittest.TestCase):
         b = open(os.path.join(d, 'build.py'), encoding='utf-8').read()
         f = open(os.path.join(d, 'fetch.py'), encoding='utf-8').read()
         self.assertIn("'workflow en file sans robot']", b)
-        self.assertIn("gh.get('en_file')", b)
+        self.assertIn("separer(gh.get('en_file'))", b)
         self.assertIn("res['en_file']", f)
 
 

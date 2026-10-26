@@ -177,9 +177,13 @@ def sante(gh):
             for n in fils:
                 add("plus d'un fil en cours sur un dépôt", r, n, f"{len(fils)} tâches en cours dans {r['name']} (limite : {PLACES_PAR_DEPOT})")
     # workflows qui attendent un robot (workflows_en_file.py, tâche #532) : lus par fetch.py, signalés ici, jamais corrigés ici
-    for w in gh.get('en_file') or []:
+    import workflows_en_file
+    en_file, exceptions = workflows_en_file.separer(gh.get('en_file'))
+    for w in en_file:
         pb.append({'k': 'workflow en file sans robot', 'ref': f"{w['repo']}#{w['run']}", 't': f"{w['wf']} en file depuis {w['h']} h",
                    'u': w['u'], 'm': f"lancement {w['event'] or '?'} dans {w['repo']}"})
+    # exceptions nommées (workflows_en_file.EXCEPTIONS) : affichées avec leur raison, hors du compte des défauts
+    exceptions = [{'ref': f"{w['repo']}#{w['run']}", 't': f"{w['wf']} en file depuis {w['h']} h", 'u': w['u'], 'm': w['raison']} for w in exceptions]
     G = {k: [d for d in n.get('deps', []) if d in REF and REF[d]['state'] == 'open'] for k, n in REF.items() if n['state'] == 'open'}
     color, seen_cyc = {}, set()
     def dfs(u, path):
@@ -200,7 +204,7 @@ def sante(gh):
     # le nombre de la pastille, écrit une fois : défauts du relevé + tâches rouvertes par le garde-fou (« preuve-manquante ») qui n'y figurent pas déjà
     vu = {p['ref'].lower() for p in pb}
     pm = [1 for r in gh['repos'] for n in r['nodes'].values() if n['lvl'] == 'tâche' and n['state'] == 'open' and 'preuve-manquante' in n['labels'] and f"{r['repo'].lower()}#{n['n']}" not in vu]
-    return {'ctrl': CTRL, 'pb': pb, 'hors': hors, 'n': len(pb) + len(pm)}
+    return {'ctrl': CTRL, 'pb': pb, 'hors': hors, 'exceptions': exceptions, 'n': len(pb) + len(pm)}
 comp['sante'] = sante(gh)
 
 # Gestes de Marc à jour (gestes.py, tâche .github#478) : signalements pour l'onglet « À toi » et etat.json, plus les deux listes générées.

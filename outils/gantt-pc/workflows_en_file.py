@@ -29,6 +29,23 @@ def en_file(runs, maintenant):
     return sorted(out, key=lambda x: -x['h'])
 
 
+# Exceptions nommées (Marc, 26/10/2026) : un lancement que GitHub garde « en file » sans qu'on puisse l'annuler (409 « not queued yet »), le supprimer ni forcer
+# son annulation ne se corrige pas : il reste affiché, avec sa raison, mais ne compte plus parmi les défauts. Une entrée = un lancement précis, jamais un filtre.
+EXCEPTIONS = {
+    ('driveai', 29254315500): 'run fantôme GitHub, non actionnable (CI du 13/07/2026 sur une branche sans PR : insupprimable, annulation refusée)',
+}
+
+
+def separer(liste):
+    """liste : sortie de `relever`. -> (défauts, exceptions) ; chaque exception porte sa `raison`."""
+    defauts, exceptions = [], []
+    for x in liste or []:
+        raison = EXCEPTIONS.get((str(x.get('repo', '')).lower(), x.get('run')))
+        if raison: exceptions.append({**x, 'raison': raison})
+        else: defauts.append(x)
+    return defauts, exceptions
+
+
 def relever(repos, lire, maintenant):
     """repos : [(nom_du_depot, cle)] ; lire(chemin) -> JSON (peut lever). -> (liste, erreurs) ; la liste est [{'repo', 'run', 'wf', 'event', 'h', 'u'}].
     Un dépôt illisible est dit dans `erreurs` et ne bloque pas les autres."""
