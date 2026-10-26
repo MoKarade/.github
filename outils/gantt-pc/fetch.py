@@ -19,6 +19,7 @@ from reponses import options as reponses_options     # réponses préfaites d'un
 from concurrent.futures import ThreadPoolExecutor
 import deps as deps_mod     # dépendances vers une PR : ramenées à la tâche qu'elle cite, ou levées si elle est fusionnée
 import completude
+from acteurs import acteurs as acteurs_de    # qui a travaillé sur la tâche (Copilot, Jules, Claude, Marc), lu dans les commits de sa PR
 from acceptation import est_preuve    # même règle que le garde-fou : une personne, ou l'acceptation automatique marquée du robot
 import gestes     # contrôle des gestes de Marc à jour (.github#478) : fetch.py y garde les derniers commentaires de Marc (`marc_com`)
 from ci import resume_ci     # fin de CI et CI rouge d'une PR fusionnée (onglet Rythme)
@@ -281,7 +282,7 @@ def calculer(repo, rl, i, pr):
             # None = liste tronquée (la page des fichiers ne rend que 100 entrées) : elle ne prouve rien. Un renommage compte pour l'ancien chemin aussi.
             pr['ff'] = None if len(fs) >= 100 else sorted({c for f in fs for c in (f['filename'], f.get('previous_filename')) if c and not JOURNAUX.search(c)})
         pr['jf'] = portee_jules(fs)
-    if pr and lvl == 'tâche' and 'c0' not in pr:
+    if pr and lvl == 'tâche' and ('c0' not in pr or 'acteurs' not in pr):
         # le travail réel : première et dernière modification (commits) de la PR
         cs = flat(gh(f"repos/MoKarade/{pr['repo']}/pulls/{pr['n']}/commits?per_page=100"))
         da = sorted(c['commit']['author']['date'] for c in cs if c.get('commit'))
@@ -289,6 +290,7 @@ def calculer(repo, rl, i, pr):
         if da: pr['c0'], pr['c1'], pr['nc'] = da[0], max(dc[-1], da[-1]), len(cs)
         # heures exactes de chaque modification (auteur) : le Gantt en tire les plages de travail réel
         pr['cs'] = sorted(set(da + dc))[-60:]
+        pr['acteurs'] = acteurs_de(cs)     # [{qui, debut, fin, commits}] ; la page l'affiche au survol
     n['pr'] = pr
     n['upd'] = i.get('updated_at')
     # dépendances : ligne « **Attend** : #12, MoKarade/x#3 — raison » + dépendances natives GitHub (« Blocked by »)
@@ -367,7 +369,7 @@ def traiter(rk):
         pr = pr_gardee(pr, ancien)
         sig = signature(i, pr, i.get('body') or '')
         pr_a = ancien.get('pr') if ancien else None
-        if LEGER and ancien and sig is not None and ancien.get('sig') == sig and 'fpl' in ancien and 'ft_ligne' in ancien and not (pr_a and pr_a.get('state') == 'open' and 'ff' not in pr_a) and not ('qui:marc' in ancien['labels'] and ancien['lvl'] == 'tâche' and ancien['state'] == 'open' and 'marc_com' not in ancien):   # 'fpl', 'ft_ligne', 'ff' ou 'marc_com' absent = relevé d'avant les deux places ou d'avant #478 : recalculé
+        if LEGER and ancien and sig is not None and ancien.get('sig') == sig and 'fpl' in ancien and 'ft_ligne' in ancien and not (pr_a and pr_a.get('state') == 'open' and 'ff' not in pr_a) and not ('qui:marc' in ancien['labels'] and ancien['lvl'] == 'tâche' and ancien['state'] == 'open' and 'marc_com' not in ancien) and not (ancien['lvl'] == 'tâche' and pr_a and pr_a.get('c0') and 'acteurs' not in pr_a):   # 'fpl', 'ft_ligne', 'ff' ou 'marc_com' absent = relevé d'avant les deux places ou d'avant #478 : recalculé
             # non-tâche : ses sous-issues ont-elles changé ? (les enfants disent qui est leur parent)
             if ancien['lvl'] == 'tâche' or refs_enfants(rl, ancien['kids']) == ENFANTS.get(f'{rl}#{i["number"]}', set()):
                 nodes[i['number']] = ancien; reutilises += 1

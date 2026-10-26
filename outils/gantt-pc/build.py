@@ -98,6 +98,7 @@ for r in gh['repos']:
             if n.get(src): c[dst] = n[src]
         d = DERIVE.get(f"{r['repo'].lower()}#{n['n']}")
         if d: c.update({k: v for k, v in d.items() if v is not None})
+        if (n.get('pr') or {}).get('acteurs'): c['acteurs'] = n['pr']['acteurs']      # qui a travaillé : [{qui, debut, fin, commits}], lu dans les commits de la PR (acteurs.py)
         if n.get('jules'): c['j'] = 1
         if n.get('jules_at'): c['ja'] = n['jules_at']
         pa = preuve_attendue(n.get('pa'))
