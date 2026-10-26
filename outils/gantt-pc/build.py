@@ -1,5 +1,6 @@
 import json, os, re, sys, datetime, subprocess, shutil
 import defauts_preuve      # preuves en retard pour le filet du PC (tâche .github#513)
+import couts_manuels      # registre des dépenses lu dans un fichier privé du PC (.github#636)
 # v5 gardée dans fetch_v5.py / build_v5.py + page5.html
 # v6 (15/10/2026) : cahier des charges du §13 de MoKarade/.github docs/cycle-de-vie-tache.md.
 # v7 (16/10/2026) : la file « tâche suivante » n'est plus calculée par la page : build.py fait tourner le script de MoKarade/.github
@@ -251,6 +252,10 @@ except (OSError, ValueError): comp['reponses'] = []
 # quotas : mesure faite par quota.py ; absente = l'onglet le dit
 try: comp['quota'] = json.load(open(D + 'quota.json'))
 except Exception: comp['quota'] = None
+# registre des dépenses : fichier PRIVÉ du PC (couts_manuels.py), jamais dans le dépôt ni dans la page HTML publiée ; absent = clé omise
+_cm, _cm_raison = couts_manuels.lire()
+if _cm is not None: comp['couts_manuels'] = _cm
+else: print('couts_manuels omis :', _cm_raison, file=sys.stderr)
 
 # la file du script : écrite à chaque construction, pour la routine (prochaines.json) et pour la page (embarquée)
 pro, err = prochaines(D + 'prochaines' + OUT + '.json')
@@ -274,7 +279,7 @@ if os.path.exists(D + 'page7.html'):
     page = re.sub(r'/\*@INCLUDE ([\w.-]+)\*/', lambda m: open(D + 'p7/' + m.group(1), encoding='utf-8').read(), page)
     assert page.count('/*DONNEES*/null') == 1
     # « </ » échappé : un titre d'issue ne peut pas fermer la balise <script>
-    page = page.replace('/*DONNEES*/null', json.dumps(comp, ensure_ascii=False).replace('</', '<\\/'))
+    page = page.replace('/*DONNEES*/null', json.dumps({k: v for k, v in comp.items() if k != 'couts_manuels'}, ensure_ascii=False).replace('</', '<\\/'))
     tmp = D + 'chantier-apps' + OUT + '.html.tmp'
     open(tmp, 'w', encoding='utf-8').write(page)
     os.replace(tmp, D + 'chantier-apps' + OUT + '.html')
