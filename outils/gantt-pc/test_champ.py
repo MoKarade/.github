@@ -9,8 +9,28 @@ ESPACE['LEGER'] = True
 exec(SRC[SRC.index('def pr_gardee'):SRC.index('ATTEND_MARC =')], ESPACE)
 pr_gardee = ESPACE['pr_gardee']
 exec(SRC[SRC.index('FP = re.compile'):SRC.index("# Étapes d'une tâche")], ESPACE)
+exec(SRC[SRC.index('def du_backlog'):SRC.index('ATTEND_MARC =')], ESPACE)
+du_backlog = ESPACE['du_backlog']
 fichiers_declares = ESPACE['fichiers_declares']
 fichiers_permis = ESPACE['fichiers_permis']
+
+
+def issue(*etiquettes, **extra):
+    return {'number': 1, 'labels': [{'name': e} for e in etiquettes], **extra}
+
+
+class TestDuBacklog(unittest.TestCase):
+    # Le cycle de vie dit que le Gantt ignore les issues `essai` ; fetch.py ne filtrait que sur `niveau:*` (.github#571, #572, tâche #576).
+    def test_une_tache_normale_entre(self):
+        self.assertTrue(du_backlog(issue('niveau:tâche', 'prio:1')))
+
+    def test_une_issue_essai_avec_niveau_est_ecartee(self):
+        self.assertFalse(du_backlog(issue('niveau:tâche', 'essai')))
+        self.assertFalse(du_backlog(issue('essai', 'niveau:mission')))
+
+    def test_une_pr_ou_une_issue_sans_niveau_est_ecartee(self):
+        self.assertFalse(du_backlog(issue('niveau:tâche', pull_request={})))
+        self.assertFalse(du_backlog(issue('prio:1')))
 
 
 class TestChamp(unittest.TestCase):
