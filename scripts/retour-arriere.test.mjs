@@ -172,6 +172,16 @@ test('appsRetour : lancement d\u2019essai = une seule app simulée, jamais une v
   assert.deepEqual(appsRetour({ ...env, RETOUR_ESSAI_VERCEL: '../x' }, [app]), []);
 });
 
+test('appsRetour : événement fumee-rouge = seulement l’app de l’URL reçue', () => {
+  const autre = { nom: 'autre', depot: 'x/z', sante: 'https://autre.example/api/sante', vercel: 'p2' };
+  const liste = [app, autre];
+  const origine = new URL(app.sante).origin;
+  assert.deepEqual(appsRetour({ RETOUR_URL_BASE: `${origine}/login` }, liste), [app]);
+  // URL inconnue ou illisible : rien n'est traité (jamais « toutes les apps » par défaut).
+  assert.deepEqual(appsRetour({ RETOUR_URL_BASE: 'https://inconnue.example' }, liste), []);
+  assert.deepEqual(appsRetour({ RETOUR_URL_BASE: 'pas une url' }, liste), []);
+});
+
 test('clientVercel : un corps vide (retour en arrière) n’est pas une erreur', async () => {
   const api = clientVercel({ jeton: 'J', appel: async () => ({ ok: true, status: 200, text: async () => '' }) });
   assert.deepEqual(await api('POST', '/v1/projects/p/rollback/d'), {});

@@ -75,3 +75,13 @@ jobs:
           FUMEE_CONNEXION: ${{ inputs.chemin-connexion }}
           HUB_TOKEN: ${{ secrets.hub-token }}
         run: node .fumee/scripts/fumee.mjs
+
+      # Fumée rouge : demander le retour en arrière tout de suite (événement `fumee-rouge` vers MoKarade/.github),
+      # sans attendre le passage de la surveillance. Sans le secret HUB_DISPATCH_TOKEN (appel sans `secrets: inherit`),
+      # l'étape le dit et ne fait rien.
+      - name: Demander le retour en arrière
+        if: ${{ failure() }}
+        env:
+          DISPATCH_TOKEN: ${{ secrets.HUB_DISPATCH_TOKEN }}
+          FUMEE_BASE: ${{ inputs.url-base }}
+        run: node .fumee/scripts/demander-retour.mjs
