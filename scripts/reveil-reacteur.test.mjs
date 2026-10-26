@@ -513,6 +513,28 @@ test('horloges du filet : une minute fixe, ni ronde (0, 15, 30, 45), deux passag
   }
 });
 
+// MoKarade/.github#625 : le commentaire tâche liée part sur l'événement de la PR ; il ne garde qu'un filet quotidien.
+// Une PR modifiée (corps) ou rouverte lance le même balayage qu'une PR ouverte, et l'ancienne horloge toutes les 10 minutes ne revient pas.
+test('commentaire tâche liée : une PR modifiée (corps) lance le balayage, et le workflow n’a plus qu’un filet quotidien hors minute ronde', () => {
+  const lire = (f) => readFileSync(new URL(`../.github/workflows/${f}`, import.meta.url), 'utf8');
+
+  const reacteur = lire('reacteur.yml');
+  const types = /pull_request:\s*\n\s*types:\s*\[([^\]]+)\]/.exec(reacteur);
+  assert.ok(types, 'types de pull_request introuvables dans reacteur.yml');
+  const actions = types[1].split(',').map((x) => x.trim());
+  for (const a of ['opened', 'reopened', 'ready_for_review', 'edited']) assert.ok(actions.includes(a), `reacteur.yml ne réveille pas sur « ${a} »`);
+  // Tout ce qui n'est pas « closed » devient `pr_ouverte`, donc lance le commentaire tâche liée.
+  assert.match(reacteur, /github\.event\.action == 'closed' && 'pr_fusionnee' \|\| 'pr_ouverte'/);
+
+  const crons = [...lire('commentaire-tache-liee.yml').matchAll(/^\s*- cron: '([^']+)'/gm)].map((m) => m[1].split(' '));
+  assert.equal(crons.length, 1, 'un seul cron attendu');
+  const [minute, heure, jour, mois, semaine] = crons[0];
+  assert.match(minute, /^\d+$/);
+  assert.ok(!['0', '15', '30', '45'].includes(minute), `minute ronde « ${minute} »`);
+  assert.match(heure, /^\d+$/);
+  assert.deepEqual([jour, mois, semaine], ['*', '*', '*']);
+});
+
 // scripts/attend-marc.mjs (tâche #216) : testé ici, car ce fichier est celui que lance le contrôle `tests-reveil-reacteur`.
 const issueGeste = (extra = {}) => ({ number: 1, state: 'open', title: 'Garde-fou : la PR #12 attend un geste de Marc', labels: [{ name: 'qui:marc' }], ...extra });
 
