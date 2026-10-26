@@ -6,28 +6,20 @@ name: Relecture IA
 # PR et le Garde-fou est rejoué : il passe au vert, Mergify fusionne. Sinon la PR attend Marc.
 # Détail, limites et pose des deux secrets : docs/relecture-ia.md.
 #
-# DÉCLENCHEURS (MoKarade/.github#626) : la relecture part sur l'événement, plus sur un minuteur toutes les 10 minutes (GitHub
+# DÉCLENCHEURS (MoKarade/.github#626 et #633) : la relecture part sur l'événement, plus sur un minuteur toutes les 10 minutes (GitHub
 # espaçait ces passages : aucun en 73 min le 16/10/2026).
-# - `workflow_run` : quand le Garde-fou de CE dépôt se termine en échec sur une PR du dépôt, le job « Lancer la relecture » lance
-#   `relecture-ia.yml` par `workflow_dispatch`. La relecture n'a pas lieu dans l'exécution `workflow_run` : le Garde-fou
-#   (scripts/garde-fou.mjs, `relectureApprouvee`) n'accepte un verdict que d'une exécution de `main` lancée par `schedule` ou
-#   `workflow_dispatch`, et une exécution `workflow_run` porte la branche de la PR et l'événement `workflow_run`.
-#   Ce déclencheur ne voit que les PR de `.github` ; pour les neuf autres dépôts il reste le Réacteur (PR fusionnée, CI rouge,
-#   tâche fermée) et le filet quotidien.
-# - `workflow_dispatch` : le Réacteur (scripts/reveil-reacteur.mjs) et « Run workflow ».
+# - `workflow_dispatch` : le Réacteur (scripts/reveil-reacteur.mjs) la lance quand le Garde-fou d'une PR finit en échec (type
+#   `garde_fou_rouge`, dans les dix dépôts) et à chaque PR fusionnée, CI rouge ou tâche fermée ; et « Run workflow ».
+#   Le verdict doit venir d'une exécution de `main` lancée par `workflow_dispatch` ou `schedule` (scripts/garde-fou.mjs,
+#   `relectureApprouvee`) : un déclencheur `workflow_run` ici porterait la branche de la PR et serait refusé.
 # - un filet quotidien, minute décalée (jamais ronde : GitHub retarde surtout les minutes rondes).
 #
 # SÛRETÉ :
 # - trois étapes, deux jetons qui ne se croisent jamais : l'étape « Relire » n'a QUE le jeton Claude
 #   et l'IA n'a aucun outil (--tools ""), l'étape qui touche GitHub n'a QUE le jeton GitHub ;
 # - le script vient de la branche main de ce dépôt, jamais du code d'une PR ;
-# - le job lancé par `workflow_run` n'utilise aucune donnée de l'événement hors des conditions de son `if`, n'extrait rien de la PR
-#   et n'a ni RELECTURE_PAT ni jeton Claude : il ne fait que lancer ce même workflow sur `main` avec le jeton du job ;
 # - ce fichier et scripts/relecture* font partie de ce que le garde-fou refuse de laisser modifier seul.
 on:
-  workflow_run:
-    workflows: [Garde-fou]
-    types: [completed]
   schedule:
     - cron: '47 9 * * *'
   workflow_dispatch:
@@ -36,35 +28,13 @@ on:
 permissions:
   contents: read
 
-jobs:
-  declencher:
-    name: Lancer la relecture
-    # Une PR du dépôt dont le Garde-fou vient d'échouer (le Garde-fou de .github tourne sur `pull_request_target`). Une PR d'un fork
-    # n'est jamais relue (scripts/relecture-ia.mjs ne prend que les branches du dépôt) : on ne lance rien pour elle.
-    if: >-
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'failure' &&
-      github.event.workflow_run.event == 'pull_request_target' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
-    permissions:
-      actions: write
-    timeout-minutes: 2
-    runs-on: ubuntu-latest # dépôt public : machines GitHub (gratuites)
-    steps:
-      - name: Lancer relecture-ia.yml sur main
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: gh workflow run relecture-ia.yml --ref main
+concurrency:
+  group: relecture-ia
+  cancel-in-progress: false
 
+jobs:
   relecture:
     name: Relecture IA
-    # Pas dans l'exécution `workflow_run` : le verdict doit venir d'une exécution `schedule` ou `workflow_dispatch` sur `main`.
-    if: github.event_name != 'workflow_run'
-    # Une seule relecture à la fois ; le job « Lancer la relecture » n'entre pas dans ce groupe (il finit en quelques secondes).
-    concurrency:
-      group: relecture-ia
-      cancel-in-progress: false
     # Plafond : une passe relit au plus 5 PR ; un job figé ne doit pas tourner six heures.
     timeout-minutes: 20
     runs-on: ubuntu-latest # dépôt public : machines GitHub (gratuites)
