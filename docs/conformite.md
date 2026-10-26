@@ -48,6 +48,10 @@ Le tableau ligne par ligne s'écrit dans le résumé du job. Le workflow « Essa
 
 Une app qui reste en sombre seul sur décision de Marc (Hubperso, JobAI) le déclare par `color-scheme: dark` dans une règle de premier niveau sur `:root`, `html` ou `body` de `app/globals.css`. Les variables CSS et le verrou `tests/theme.test.*` restent exigés. Une instruction de premier niveau en tête de fichier (`@import "tailwindcss";`, `@charset`, `@plugin`) ne gêne pas la lecture. Ne comptent pas : `color-scheme: light dark`, la même déclaration sur un composant, dans un `@media` ou en commentaire.
 
+## Analyse des workflows (zizmor, tâche #585)
+
+Le contrôle de sécurité commun (`securite.yml`, job « Workflows (zizmor) ») lit les workflows du dépôt appelant : injection par modèle `${{ }}`, droits trop larges, jeton laissé dans `.git` (`persist-credentials`), cache empoisonnable. **Il ne bloque pas** : les trouvailles s'écrivent dans le résumé du job, le temps de corriger les vrais défauts dépôt par dépôt ; le passage en bloquant est une tâche à part. Outil gratuit, version fixée, installé depuis la roue PyPI dont pip vérifie l'empreinte SHA-256 ; hors ligne, donc sans jeton. Une machine sans `python3` saute l'analyse en le disant dans le résumé. Les exceptions voulues (Garde-fou en `pull_request_target`, Réacteur en `workflow_run`, appels `@main` à nos propres workflows) sont dans `securite/zizmor.yml`, chacune avec sa raison. Ce contrôle complète la ligne 13 (SHA) sans la remplacer.
+
 ## Limites connues
 
 - Le contrôle lit des fichiers et l'API publique avec `github.token` : les réglages réservés aux administrateurs (scan de secrets, protection au push) peuvent sortir « à relire » en CI alors qu'ils sont actifs.

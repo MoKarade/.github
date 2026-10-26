@@ -1,0 +1,18 @@
+# Configuration de zizmor pour le contrôle de sécurité commun (workflow .github/workflows/securite.yml, tâche #585).
+# Lue depuis CE dépôt par les dix dépôts : une exception se discute ici, jamais dans un dépôt appelant.
+# Chaque exception dit pourquoi ; ce qui n'est pas listé ici reste une trouvaille.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # Nos propres workflows communs suivent `main` : voulu (même propriétaire, une seule version à jour partout,
+        # `main` protégée). Tout le reste doit être épinglé par SHA (déjà contrôlé par la ligne 13 de la grille de conformité).
+        "MoKarade/.github/*": ref-pin
+        "*": hash-pin
+  dangerous-triggers:
+    ignore:
+      # Garde-fou : `pull_request_target` voulu. Le script vient de la branche par défaut du dépôt, jamais du code de la PR
+      # (voir l'en-tête de chaque garde-fou.yml et docs/relecture-ia.md).
+      - garde-fou.yml
+      # Réacteur : `workflow_run` voulu. Il réveille le Coordinateur à la fin d'un workflow, sans exécuter le code de la PR.
+      - reacteur.yml

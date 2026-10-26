@@ -70,3 +70,28 @@ test('captures.yml : installe le CLI gh (binaire vérifié) avant de publier, se
   assert.match(bloc, /GH_VERSION: \d+\.\d+\.\d+/);
   assert.match(bloc, /GITHUB_PATH/);
 });
+
+test('securite.yml : zizmor tourne sans bloquer, version fixée, installation vérifiée par empreinte, configuration commune', () => {
+  const yaml = readFileSync(new URL('../.github/workflows/securite.yml', import.meta.url), 'utf8');
+  const job = yaml.slice(yaml.indexOf('\n  workflows:'), yaml.indexOf('\n  codeql:'));
+  assert.ok(job.length > 0, 'le job « workflows » (zizmor) a disparu');
+  assert.match(job, /ZIZMOR_VERSION: \d+\.\d+\.\d+/);
+  assert.equal([...job.matchAll(/ZIZMOR_HASH_\w+: ([0-9a-f]{64})\b/g)].length, 2, 'deux empreintes SHA-256 (manylinux et musllinux)');
+  assert.match(job, /--require-hashes/);
+  // Non bloquant (tâche #585) : passer en bloquant se décide dans une tâche à part, après la correction des trouvailles.
+  assert.match(job, /--no-exit-codes/);
+  // Le runner lance l'étape avec `bash -e` : sans `set +e`, une panne de l'outil ferait échouer le job au lieu d'être dite dans le résumé.
+  assert.match(job, /set \+e/);
+  assert.match(job, /--offline/);
+  assert.match(job, /--config \.securite-commune\/securite\/zizmor\.yml/);
+  assert.doesNotMatch(job, /uses:\s*(docker:\/\/|zizmorcore\/)/, 'aucune action Docker : le robot du PC n\'a pas Docker');
+});
+
+test('securite/zizmor.yml : chaque exception porte sa raison, nos workflows communs suivent main, le reste est épinglé', () => {
+  const lignes = readFileSync(new URL('../securite/zizmor.yml', import.meta.url), 'utf8').split('\n');
+  assert.ok(lignes.some((l) => /"MoKarade\/\.github\/\*": ref-pin/.test(l)));
+  assert.ok(lignes.some((l) => /"\*": hash-pin/.test(l)));
+  const ignorees = lignes.map((l, i) => [l, i]).filter(([l]) => /^\s+- \S+\.yml\s*$/.test(l));
+  assert.ok(ignorees.length > 0, 'aucune exception lue : le test ne vérifie rien');
+  for (const [l, i] of ignorees) assert.match(lignes[i - 1] ?? '', /^\s+#/, `exception « ${l.trim()} » sans raison écrite juste au-dessus`);
+});
