@@ -2,6 +2,7 @@
 // Chaque règle a un cas qui passe ET un cas refusé. Ce qui compte le plus : ce que l'IA ne peut
 // JAMAIS lever, et le fait qu'une réponse douteuse est un refus.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { estPrFileMergify, evaluer, rapport, relectureApprouvee, relectureDeLaFile } from './garde-fou.mjs';
 import { dejaJugee, gardeFouRouge, lireProteges } from './relecture-ia.mjs';
@@ -216,11 +217,45 @@ test('relecture refusée : pas de verdict, mauvais auteur, mauvais commit, refus
     { ...RUN_OK, path: '.github/workflows/autre.yml' },
     { ...RUN_OK, head_branch: 'claude/x' },
     { ...RUN_OK, event: 'pull_request' },
+    { ...RUN_OK, event: 'workflow_run' }, // l'exécution lancée par la fin du Garde-fou ne vaut pas verdict (#626)
     { ...RUN_OK, conclusion: 'failure' },
     { ...RUN_OK, repository: { full_name: 'MoKarade/Hubperso' } },
   ]) {
     assert.equal((await lire([verdict()], faux)).ok, false);
   }
+});
+
+// MoKarade/.github#626 : la relecture part sur la fin du Garde-fou au lieu d'un minuteur toutes les 10 minutes.
+test('relecture-ia.yml : un filet quotidien hors minute ronde, un job workflow_run qui ne fait que lancer le workflow sur main', () => {
+  const yml = readFileSync(new URL('../.github/workflows/relecture-ia.yml', import.meta.url), 'utf8');
+  const actifs = yml.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
+
+  const crons = [...actifs.matchAll(/^\s*- cron: '([^']+)'/gm)].map((m) => m[1].split(' '));
+  assert.equal(crons.length, 1, 'un seul cron attendu');
+  assert.match(crons[0][0], /^\d+$/);
+  assert.ok(!['0', '15', '30', '45'].includes(crons[0][0]), 'minute ronde');
+  assert.deepEqual(crons[0].slice(2), ['*', '*', '*']);
+
+  assert.match(actifs, /workflow_run:\s*\n\s*workflows: \[Garde-fou\]\s*\n\s*types: \[completed\]/);
+  assert.match(actifs, /^\s*workflow_dispatch:/m);
+
+  // Le job lancé par workflow_run : seulement sur un échec du Garde-fou d'une PR du dépôt, sans secret, sans extraction d'une donnée de la PR.
+  const declencher = /\n {2}declencher:\n([\s\S]*?)\n {2}relecture:/.exec(actifs)?.[1] ?? '';
+  assert.ok(declencher, 'job declencher introuvable');
+  assert.match(declencher, /github\.event\.workflow_run\.conclusion == 'failure'/);
+  assert.match(declencher, /github\.event\.workflow_run\.head_repository\.full_name == github\.repository/);
+  assert.match(declencher, /actions: write/);
+  assert.match(declencher, /run: gh workflow run relecture-ia\.yml --ref main\s*$/);
+  assert.ok(!/secrets\./.test(declencher), 'le job declencher ne lit aucun secret');
+  assert.ok(!/actions\/checkout/.test(declencher), 'le job declencher ne récupère aucun code');
+  const donneesEvenement = [...declencher.matchAll(/github\.event\.[\w.]+/g)].map((m) => m[0]);
+  assert.ok(donneesEvenement.every((d) => d.startsWith('github.event.workflow_run.') || d === 'github.event_name'), donneesEvenement.join(' '));
+  assert.ok(!/\$\{\{\s*github\.event[^}]*\}\}/.test(declencher.split('steps:')[1] ?? ''), 'aucune donnée de l’événement dans les étapes');
+
+  // La relecture elle-même n'a pas lieu dans l'exécution workflow_run (le verdict doit venir de schedule ou workflow_dispatch sur main).
+  const relecture = actifs.slice(actifs.indexOf('\n  relecture:'));
+  assert.match(relecture, /if: github\.event_name != 'workflow_run'/);
+  assert.match(relecture, /group: relecture-ia/);
 });
 
 test('relecture lue : le verdict le plus récent compte', async () => {
