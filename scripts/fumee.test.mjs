@@ -75,6 +75,12 @@ test('santé : 200 mais ok:false est une panne', () =>
 test('santé : 503 est une panne', () =>
   avec({ '/api/sante': (q, s) => s.writeHead(503).end() }, {}, (e) => assert.equal(e.sante, 'HTTP 503')));
 
+test('santé : 503 avec une cause courte la nomme (la base ne répond pas)', () =>
+  avec({ '/api/sante': (q, s) => s.writeHead(503).end('{"ok":false,"cause":"base"}') }, {}, (e) => assert.equal(e.sante, 'HTTP 503 (base)')));
+
+test('santé : une cause qui n\u2019est pas un mot court n\u2019entre pas dans le journal', () =>
+  avec({ '/api/sante': (q, s) => s.writeHead(503).end('{"ok":false,"cause":"Erreur: mot de passe x"}') }, {}, (e) => assert.equal(e.sante, 'HTTP 503')));
+
 test('summary sans jeton qui répond 200 : faille, rouge', () =>
   avec({ '/hub/summary': (q, s) => s.writeHead(200, { 'cache-control': 'no-store' }).end(JSON.stringify(SUMMARY)) }, {}, (e) =>
     assert.match(e['summary-ferme'], /HTTP 200 sans jeton/)));
