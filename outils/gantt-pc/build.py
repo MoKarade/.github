@@ -107,9 +107,9 @@ CTRL = ['niveau:plan à retirer', 'tâche orpheline', 'corps hors gabarit', 'dé
         'jules sans PR depuis 24 h', 'bloquée depuis plus de 7 jours', 'PR de plus de 400 lignes', 'incident ouvert',
         "plus d'un fil en cours sur un dépôt", 'ménage en retard', 'fichiers illisibles', 'workflow en file sans robot']
 
-# Le contrôle « plus d'un fil » (nom gardé : la page le connaît) ne signale qu'AU-DELÀ des places du dépôt : deux travaux à la fois depuis le 21/10/2026
-# (scripts/capacite.mjs, PLACES_PAR_DEPOT). Avant ce changement, 7 des 25 défauts du 21/10 n'étaient que des dépôts à deux fils, permis par la règle.
-PLACES_PAR_DEPOT = 2
+# Le contrôle « plus d'un fil » (nom gardé : la page le connaît) ne signale qu'AU-DELÀ des places du dépôt : trois travaux à la fois depuis le 26/10/2026
+# (décision de Marc ; scripts/capacite.mjs, PLACES_PAR_DEPOT, à garder égal). Avant ce changement, 7 des 25 défauts du 21/10 n'étaient que des dépôts à deux fils, permis par la règle.
+PLACES_PAR_DEPOT = 3
 
 def chemin_illisible(c):
     # Un « fichier » déclaré qui n'en est pas un : une ligne en gras prise pour une puce (« *Attend** », .github#374 et #375, 21/10/2026), un libellé avec deux-points ou une espace.
