@@ -1,4 +1,5 @@
 name: Réacteur
+# Essai de la relecture sans minuteur (.github#626) : PR jetable, jamais fusionnée.
 
 # Réveille le Coordinateur (projet Apps de Marc), sans IA, quand une PR est
 # fusionnée, quand la CI d'une branche devient rouge ou quand une tâche (issue `niveau:tâche`) est
