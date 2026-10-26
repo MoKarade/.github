@@ -34,6 +34,9 @@ const AGE_MAX_MIN = 120;
 
 export const titreIncident = (nom, sha) => `Incident : ${nom} remis sur la version précédente (${sha})`;
 
+/** La sonde dit que la base ne répond pas (`HTTP 503 (base)`) : remettre l'ancien code ne la répare pas. */
+export const causeHorsDeploiement = (cause) => /\(base\)$/.test(String(cause ?? ''));
+
 const court = (sha) => String(sha ?? '').slice(0, 7);
 
 /** Un déploiement Vercel normalisé : { id, cree (ms), sha, message }. */
@@ -195,6 +198,10 @@ async function main() {
     const sonde = await sonder(app, config);
     // En contrôle, on lit Vercel pour toutes les apps (preuve que le branchement marche) sans rien changer.
     if (sonde.ok && !controle) continue;
+    if (!sonde.ok && !controle && causeHorsDeploiement(sonde.cause)) {
+      lignes.push({ nom: app.nom, etat: 'rien fait : la base ne répond pas, un retour en arrière ne la répare pas' });
+      continue;
+    }
     try {
       lignes.push(await traiter(app, { api, sondeApres: (a) => sonder(a, { ...config, essais: 5 }), gh: ghReel, maintenant: new Date(), controle }));
     } catch (err) {
