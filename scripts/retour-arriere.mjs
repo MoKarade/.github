@@ -4,7 +4,7 @@
 //
 // Pourquoi ici et pas dans le workflow de fumée : le retour en arrière demande un jeton Vercel. Il est rangé
 // UNE seule fois, dans les secrets de ce dépôt (secret VERCEL_TOKEN), jamais dans les dix dépôts d'apps.
-// La surveillance tourne déjà ici toutes les 15 minutes et sonde la santé de chaque app : c'est elle qui déclenche.
+// La surveillance tourne déjà ici (une fois par jour et à chaque événement `fumee-rouge`) et sonde la santé de chaque app : c'est elle qui déclenche.
 //
 // Pour chaque app qui a un projet Vercel déclaré (`vercel` dans surveillance/apps.json) et dont la sonde est ROUGE :
 //   1. lire chez Vercel le déploiement de production courant et les versions précédentes (état READY) ;

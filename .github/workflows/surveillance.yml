@@ -1,7 +1,8 @@
 name: Surveillance des apps
 
-# Alerte quand une app tombe (plan de standardisation, décision 11). Toutes les 15 minutes, sonde `/api/sante`
-# de chaque app listée dans surveillance/apps.json. Une app muette après 3 essais ouvre UNE issue `panne`
+# Alerte quand une app tombe (plan de standardisation, décision 11). Un passage par jour (filet) et à chaque
+# événement `fumee-rouge`, sonde `/api/sante` de chaque app listée dans surveillance/apps.json (l'état courant est mesuré
+# toutes les 5 minutes par UptimeRobot, tâche .github#617). Une app muette après 3 essais ouvre UNE issue `panne`
 # dans ce dépôt (notification GitHub) ; son retour la ferme avec un commentaire. Les journaux Vercel Hobby
 # ne vivent qu'1 h : cette sonde externe est la seule trace d'une panne de nuit.
 # Le jeton du job (github.token, droits limités à ce dépôt) sert au seul CLI `gh` ; aucun secret du dépôt.
@@ -26,7 +27,7 @@ on:
   repository_dispatch:
     types: [fumee-rouge]
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '23 9 * * *'
   workflow_dispatch:
     inputs:
       nom-essai:
