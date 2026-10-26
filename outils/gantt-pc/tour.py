@@ -19,7 +19,7 @@
 # Lancer : python -X utf8 tour.py --drive "G:\Mon disque\_Gantt"   (un tour, puis sortie ; code 0 = OK ou tour sauté, 1 = échec)
 import argparse, datetime, gzip, json, os, shutil, socket, subprocess, sys, time
 import pousser_hub
-import gestes, reponses      # gestes de Marc à jour (.github#478) ; reponses.appliquer écrit le commentaire « Fait » et retire qui:marc
+import gestes, missions, reponses      # gestes de Marc à jour (.github#478) ; reponses.appliquer écrit le commentaire « Fait » et retire qui:marc
 
 D = os.path.dirname(os.path.abspath(__file__)) + os.sep
 ENV = dict(os.environ, PYTHONUTF8='1')
@@ -158,6 +158,14 @@ def releve(econome=False, quota_complet=True, drive=None):
             ges = ' · ' + ligne
     except Exception as e: ges = f' · gestes : ÉCHEC {type(e).__name__} : {str(e)[:160]}'
     rep += ges
+    # 3 ter. missions finies (missions.py, .github#591) : toutes leurs tâches fermées depuis 24 h, la mission se ferme avec un commentaire « Acceptée ».
+    try:
+        m = lire('donnees.json').get('missions') or {}
+        if m.get('erreur') or 'a_fermer' not in m: rep += f' · missions : non calculées ({m.get("erreur", "absentes du relevé")})'
+        elif m['a_fermer']:
+            fermees, refus = missions.fermer(m['a_fermer'], lire('backlog.json')['asof'], reponses.gh)
+            rep += f' · missions fermées : {", ".join(fermees) or "aucune"}' + (f' ; refus : {" ; ".join(refus)}' if refus else '')
+    except Exception as e: rep += f' · missions : ÉCHEC {type(e).__name__} : {str(e)[:160]}'
     p = lire('prochaines.json')
     file = ' '.join(d['depot'] + '=' + (d['suivante']['ref'] if d.get('suivante') else d['statut']) for d in p['depots'])
     # La mesure du quota Claude écrite par la tâche « Quota-Claude » : trop vieille, elle ne dit plus rien (le frein garde alors son palier ou,

@@ -81,6 +81,14 @@ def compacter_prochaines(p):
             'etats': {r: {k: e.get(k) for k in ('etat', 'attend', 'proprietaire', 'depuis', 'cause')} for r, e in (p.get('etats') or {}).items()}}
 
 comp = {'asof': gh['asof'], 'built': iso(datetime.datetime.now(UTC)), 'v': 7, 'repos': []}
+# Durée d'une mission ou d'un chantier = celle de ses tâches (missions.py, .github#591) : `deb` première tâche commencée, `fin` dernière fermeture
+# (seulement si tout est fermé), `nt` / `nf` tâches et tâches fermées, `inc` enfants absents du relevé. Un échec ne bloque pas : la page garde les dates de l'issue.
+try:
+    import missions
+    DERIVE = missions.deriver(gh['repos'])
+except Exception as _e:
+    DERIVE = {}
+    print('missions.deriver a échoué :', _e, file=sys.stderr)
 for r in gh['repos']:
     nodes = []
     for n in r['nodes'].values():
@@ -88,6 +96,8 @@ for r in gh['repos']:
              'c': n['created'], 'x': n['closed'], 's': n['start'], 'k': n['kids'], 'pr': pr_c(n['pr']), 'd': n.get('deps', [])}
         for src, dst in (('reason', 'r'), ('av', 'av'), ('ap', 'ap'), ('fq', 'fq'), ('res', 'res'), ('pa', 'pa'), ('pa_u', 'pu'), ('geste', 'g'), ('preuve', 'pv'), ('bloque_depuis', 'bs'), ('upd', 'u'), ('et', 'et'), ('fp', 'fp'), ('rp', 'rp')):
             if n.get(src): c[dst] = n[src]
+        d = DERIVE.get(f"{r['repo'].lower()}#{n['n']}")
+        if d: c.update({k: v for k, v in d.items() if v is not None})
         if n.get('jules'): c['j'] = 1
         if n.get('jules_at'): c['ja'] = n['jules_at']
         pa = preuve_attendue(n.get('pa'))
@@ -221,6 +231,14 @@ try:
 except Exception as _e:
     comp['gestes'] = {'erreur': f'{type(_e).__name__} : {str(_e)[:160]}'}
     print('gestes a échoué :', _e, file=sys.stderr)
+
+# Missions finies à fermer (missions.py) : tour.py les ferme avec le jeton du PC, comme il retire `qui:marc` pour gestes.py. Un échec se dit, il ne bloque pas.
+try:
+    import missions
+    comp['missions'] = {'a_fermer': missions.a_fermer(gh['repos'], datetime.datetime.now(UTC))}
+except Exception as _e:
+    comp['missions'] = {'erreur': f'{type(_e).__name__} : {str(_e)[:160]}'}
+    print('missions.a_fermer a échoué :', _e, file=sys.stderr)
 
 # Preuves en retard, pour le filet du PC (scripts/preuves-retard.mjs, tâche .github#513) : il les redit au Coordinateur toutes les 4 h.
 _dp = D + 'defauts-preuve' + OUT + '.json'
