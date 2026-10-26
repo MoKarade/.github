@@ -6,15 +6,16 @@ name: Commentaire tâche liée
 # seul fichier remplace dix PR sur des chemins protégés. Ce workflow ne change jamais le verdict : le contrôle requis
 # reste le « Garde-fou ».
 #
-# Horloge : GitHub espace fortement les planifications `*/10` de ce dépôt (aucun passage en 73 min le 16/10/2026, alors
-# que ses lancements manuels marchent) et retarde surtout celles qui tombent aux minutes rondes. Minutes décalées
-# (3, 13, 23, ...) en essai ; à garder si les passages deviennent réguliers, sinon passer à un déclencheur par événement.
-#
+# Déclencheurs : le Réacteur (reacteur.yml des dix dépôts, workflow commun reveil-reacteur.yml) le lance à l'ouverture, à la
+# réouverture, à la sortie du brouillon et à la modification du corps d'une PR (type `pr_ouverte`), puis à chaque PR fusionnée,
+# CI rouge ou tâche fermée. Il ne reste qu'un filet quotidien : GitHub espaçait fortement l'ancienne planification toutes les
+# 10 minutes de ce dépôt (aucun passage en 73 min le 16/10/2026) et elle coûtait 144 passages par jour pour presque rien
+# (MoKarade/.github#625). Minute décalée, jamais ronde : GitHub retarde surtout les planifications des minutes rondes.
 # SÛRETÉ : le script vient de la branche main de ce dépôt et ne lit que le corps des PR (une donnée) ; ce fichier
 # fait partie de ce que le garde-fou refuse de laisser modifier seul.
 on:
   schedule:
-    - cron: '3,13,23,33,43,53 * * * *'
+    - cron: '41 9 * * *'
   workflow_dispatch:
 
 # Aucun `paths:` : la règle vaut partout ici.
