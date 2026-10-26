@@ -44,7 +44,11 @@ export function controles({ base, sante, summary, connexion, jeton, appel }) {
     nom: 'sante',
     async verifier() {
       const r = await appel(url(sante));
-      if (r.status !== 200) return `HTTP ${r.status}`;
+      if (r.status !== 200) {
+        // Les apps disent la cause d'une panne dans `{ ok:false, cause }` ; on ne garde qu'un mot court (journal public).
+        const cause = (await jsonDe(r))?.cause;
+        return typeof cause === 'string' && /^[a-z-]{1,20}$/.test(cause) ? `HTTP ${r.status} (${cause})` : `HTTP ${r.status}`;
+      }
       const corps = await jsonDe(r);
       if (corps?.ok !== true) return 'ok:true absent de la réponse';
       return null;

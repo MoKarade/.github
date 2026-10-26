@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { lireApps } from './surveillance.mjs';
-import { appsRetour, choisirCible, clientVercel, corpsIncident, lireProjet, normaliser, tableau, titreIncident, traiter } from './retour-arriere.mjs';
+import { appsRetour, causeHorsDeploiement, choisirCible, clientVercel, corpsIncident, lireProjet, normaliser, tableau, titreIncident, traiter } from './retour-arriere.mjs';
 
 const MAINTENANT = new Date('2026-10-16T12:00:00Z');
 const dep = (id, minutes, sha, message = 'feat: truc (#12)') => ({
@@ -187,4 +187,11 @@ test('clientVercel : un corps vide (retour en arrière) n’est pas une erreur',
   assert.deepEqual(await api('POST', '/v1/projects/p/rollback/d'), {});
   const api204 = clientVercel({ jeton: 'J', appel: async () => ({ ok: true, status: 204, text: async () => '' }) });
   assert.deepEqual(await api204('POST', '/x'), {});
+});
+
+test('causeHorsDeploiement : la base en panne n\u2019est pas un déploiement fautif', () => {
+  assert.equal(causeHorsDeploiement('HTTP 503 (base)'), true);
+  assert.equal(causeHorsDeploiement('HTTP 503'), false);
+  assert.equal(causeHorsDeploiement('connexion impossible'), false);
+  assert.equal(causeHorsDeploiement(undefined), false);
 });
