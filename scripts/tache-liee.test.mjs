@@ -202,15 +202,18 @@ test('Garde-fou de bout en bout : 3000 lignes en brouillon ou avec la dérogatio
 });
 
 test('Garde-fou de bout en bout : dépôt plein (un autre travail en cours), rouge avec un commentaire « places » ; tâche déjà en cours, vert', async () => {
-  const autre = { number: 130, title: 'autre', labels: [{ name: 'niveau:tâche' }, { name: 'en-cours' }] };
-  const plein = await lancerGardeFou({ corps: 'Tâche : #120', enCours: [autre] });
+  const unAutre = (number) => ({ number, title: 'autre', labels: [{ name: 'niveau:tâche' }, { name: 'en-cours' }] });
+  const autre = [unAutre(130), unAutre(131), unAutre(132)]; // trois places depuis le 26/10/2026
+  const deux = await lancerGardeFou({ corps: 'Tâche : #120', enCours: autre.slice(0, 2) });
+  assert.equal(deux.code, 0, deux.texte);
+  const plein = await lancerGardeFou({ corps: 'Tâche : #120', enCours: autre });
   assert.equal(plein.code, 1, plein.texte);
   assert.match(plein.texte, /Places : \*\*rouge\*\*/);
   assert.equal(plein.ecritures.length, 1);
   assert.match(plein.ecritures[0], /^POST \/repos\/MoKarade\/depot\/issues\/7\/comments .*garde-fou-places/);
-  const tient = await lancerGardeFou({ corps: 'Tâche : #120', enCours: [autre], tache: { ...tacheOuverte, labels: [{ name: 'niveau:tâche' }, { name: 'en-cours' }] } });
+  const tient = await lancerGardeFou({ corps: 'Tâche : #120', enCours: autre, tache: { ...tacheOuverte, labels: [{ name: 'niveau:tâche' }, { name: 'en-cours' }] } });
   assert.equal(tient.code, 0, tient.texte);
-  const brouillon = await lancerGardeFou({ corps: 'Tâche : #120', enCours: [autre], brouillon: true });
+  const brouillon = await lancerGardeFou({ corps: 'Tâche : #120', enCours: autre, brouillon: true });
   assert.equal(brouillon.code, 0, brouillon.texte);
 });
 
