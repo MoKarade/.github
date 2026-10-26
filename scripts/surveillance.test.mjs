@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
-import { LABEL, appliquer, appsAControler, corpsOuverture, decider, lireApps, sonder, tableau, titrePanne } from './surveillance.mjs';
+import { LABEL, appliquer, appsAControler, corpsOuverture, decider, lireApps, lireMoniteurs, resultatsUptimeRobot, sonder, tableau, titrePanne } from './surveillance.mjs';
 
 const CFG = { essais: 2, delaiMs: 5, timeoutMs: 1000, appel: (u, init = {}) => fetch(u, { ...init, signal: AbortSignal.timeout(1000) }) };
 
@@ -144,4 +144,71 @@ test('lancement d\'essai : une seule app simulée, valide pour lireApps (régres
 test('sans essai : la liste du dépôt est lue', () => {
   const liste = JSON.stringify([{ nom: 'a', depot: 'MoKarade/A', sante: 'https://a.example/api/sante' }]);
   assert.equal(lireApps(appsAControler({}, () => liste))[0].nom, 'a');
+});
+
+// --- Sonde externe UptimeRobot ---
+
+const APPS_UR = [
+  { nom: 'a', depot: 'MoKarade/A', sante: 'https://a.example/api/sante' },
+  { nom: 'b', depot: 'MoKarade/B', sante: 'https://b.example/api/sante' },
+  { nom: 'c', depot: 'MoKarade/C', sante: 'https://c.example/api/sante' },
+  { nom: 'd', depot: 'MoKarade/D', sante: 'https://d.example/api/sante' },
+  { nom: 'e', depot: 'MoKarade/E', sante: 'https://e.example/api/sante' },
+];
+
+test('resultatsUptimeRobot : 2 = répond, 8 et 9 = panne, le reste est non mesuré (jamais un faux vert)', () => {
+  const { resultats, nonMesures } = resultatsUptimeRobot(APPS_UR, [
+    { url: 'https://a.example/api/sante', status: 2 },
+    { url: 'https://b.example/api/sante', status: 9 },
+    { url: 'https://c.example/api/sante', status: 8 },
+    { url: 'https://d.example/api/sante', status: 0 },
+    // e : aucun moniteur
+  ]);
+  assert.deepEqual(resultats, [
+    { nom: 'a', ok: true, cause: '' },
+    { nom: 'b', ok: false, cause: 'UptimeRobot : hors service' },
+    { nom: 'c', ok: false, cause: 'UptimeRobot : semble hors service' },
+  ]);
+  assert.deepEqual(nonMesures, [
+    { nom: 'd', raison: 'moniteur en pause' },
+    { nom: 'e', raison: 'aucun moniteur UptimeRobot sur cette URL' },
+  ]);
+});
+
+test('resultatsUptimeRobot : un moniteur pas encore mesuré (1) est non mesuré', () => {
+  const { resultats, nonMesures } = resultatsUptimeRobot([APPS_UR[0]], [{ url: 'https://a.example/api/sante', status: 1 }]);
+  assert.deepEqual(resultats, []);
+  assert.deepEqual(nonMesures, [{ nom: 'a', raison: 'moniteur pas encore mesuré' }]);
+});
+
+test('une panne UptimeRobot ouvre l’issue, son retour la ferme, un non mesuré ne change rien', () => {
+  const panne = resultatsUptimeRobot([APPS_UR[1]], [{ url: 'https://b.example/api/sante', status: 9 }]).resultats;
+  assert.deepEqual(decider({ resultats: panne, ouvertes: [] }), [{ type: 'ouvrir', nom: 'b', cause: 'UptimeRobot : hors service' }]);
+  const retour = resultatsUptimeRobot([APPS_UR[1]], [{ url: 'https://b.example/api/sante', status: 2 }]).resultats;
+  assert.deepEqual(decider({ resultats: retour, ouvertes: [{ number: 7, title: titrePanne('b') }] }), [{ type: 'fermer', nom: 'b', numero: 7 }]);
+  const rien = resultatsUptimeRobot([APPS_UR[1]], [{ url: 'https://b.example/api/sante', status: 0 }]);
+  assert.deepEqual(decider({ resultats: rien.resultats, ouvertes: [{ number: 7, title: titrePanne('b') }] }), []);
+});
+
+test('tableau : les moniteurs non mesurés sont dits « non mesuré »', () => {
+  const t = tableau({ resultats: [], aBrancher: [], actions: [], nonMesures: [{ nom: 'd', raison: 'moniteur en pause' }] });
+  assert.match(t, /\| d \| non mesuré \| moniteur en pause \|/);
+});
+
+test('lireMoniteurs : envoie la clé en POST, rend les moniteurs, ne met jamais la clé dans une erreur', async () => {
+  let vu;
+  const appel = async (url, init) => {
+    vu = { url, init };
+    return { ok: true, json: async () => ({ stat: 'ok', monitors: [{ url: 'https://a.example/api/sante', status: 2 }] }) };
+  };
+  const m = await lireMoniteurs({ cle: 'ro-secrete', appel });
+  assert.equal(m.length, 1);
+  assert.equal(vu.url, 'https://api.uptimerobot.com/v2/getMonitors');
+  assert.equal(vu.init.method, 'POST');
+  assert.match(vu.init.body, /api_key=ro-secrete/);
+
+  const refus = async () => ({ ok: true, json: async () => ({ stat: 'fail', error: { type: 'invalid_parameter', message: 'ro-secrete' } }) });
+  await assert.rejects(lireMoniteurs({ cle: 'ro-secrete', appel: refus }), (e) => /invalid_parameter/.test(e.message) && !e.message.includes('ro-secrete'));
+  const http = async () => ({ ok: false, status: 429, json: async () => ({}) });
+  await assert.rejects(lireMoniteurs({ cle: 'ro-secrete', appel: http }), /HTTP 429/);
 });

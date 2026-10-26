@@ -81,6 +81,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           SURVEILLANCE_ESSAI_NOM: ${{ inputs.nom-essai }}
           SURVEILLANCE_ESSAI_URL: ${{ inputs.url-essai }}
+          UPTIMEROBOT_API_KEY: ${{ secrets.UPTIMEROBOT_API_KEY }}
         run: node scripts/surveillance.mjs
 
       - name: Relever les déploiements de production et tenir les issues d'échec

@@ -7,6 +7,11 @@
 // route de santé n'existe pas encore est listée avec `sante: null` et sa raison : elle n'est pas sondée,
 // et le résumé du job la dit « à brancher » (jamais un faux vert).
 //
+// Sonde externe (refonte du workflow, phase 2) : si UPTIMEROBOT_API_KEY est présente, l'état vient des
+// moniteurs UptimeRobot (lecture seule, un moniteur par URL de santé) au lieu d'une sonde lancée ici. Un
+// moniteur absent, en pause ou pas encore mesuré est « non mesuré » : jamais un faux vert, jamais d'issue.
+// Si UptimeRobot ne répond pas, le script sonde lui-même comme avant et le dit.
+//
 // Fonctions pures d'un côté (`decider`, `lireApps`, `tableau`), I/O de l'autre : `gh` est injecté, les tests
 // n'ont besoin ni de réseau GitHub ni de jeton. Le jeton n'est jamais lu ici : le CLI `gh` le prend
 // dans l'environnement du job.
@@ -59,6 +64,49 @@ export async function sonder(app, { essais, delaiMs, timeoutMs, appel }) {
   return { nom: app.nom, ok: r.ok, cause: r.cause };
 }
 
+const URL_UPTIMEROBOT = 'https://api.uptimerobot.com/v2/getMonitors';
+// Codes d'état UptimeRobot : 0 en pause, 1 pas encore mesuré, 2 répond, 8 semble hors service, 9 hors service.
+const URL_NORMALISEE = (u) => {
+  try {
+    return new URL(u).href;
+  } catch {
+    return u;
+  }
+};
+
+/** Lit les moniteurs UptimeRobot ; rend la liste brute ou lève (le message ne contient jamais la clé). */
+export async function lireMoniteurs({ cle, appel }) {
+  const r = await appel(URL_UPTIMEROBOT, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', 'cache-control': 'no-cache' },
+    body: new URLSearchParams({ api_key: cle, format: 'json', logs: '0' }).toString(),
+  });
+  if (!r.ok) throw new Error(`UptimeRobot a répondu HTTP ${r.status}`);
+  const corps = await r.json();
+  if (corps?.stat !== 'ok' || !Array.isArray(corps.monitors)) {
+    throw new Error(`UptimeRobot a refusé la lecture (${corps?.error?.type ?? 'réponse inattendue'})`);
+  }
+  return corps.monitors;
+}
+
+/**
+ * Traduit les moniteurs en résultats pour `decider`. Une app est lue par l'URL de son moniteur (égale à
+ * `sante`). `resultats` = apps dont l'état est connu ; `nonMesures` = les autres, avec la raison.
+ */
+export function resultatsUptimeRobot(apps, moniteurs) {
+  const resultats = [];
+  const nonMesures = [];
+  for (const app of apps) {
+    const m = moniteurs.find((x) => URL_NORMALISEE(x.url) === URL_NORMALISEE(app.sante));
+    if (!m) nonMesures.push({ nom: app.nom, raison: 'aucun moniteur UptimeRobot sur cette URL' });
+    else if (m.status === 2) resultats.push({ nom: app.nom, ok: true, cause: '' });
+    else if (m.status === 8 || m.status === 9) {
+      resultats.push({ nom: app.nom, ok: false, cause: `UptimeRobot : ${m.status === 9 ? 'hors service' : 'semble hors service'}` });
+    } else nonMesures.push({ nom: app.nom, raison: m.status === 0 ? 'moniteur en pause' : 'moniteur pas encore mesuré' });
+  }
+  return { resultats, nonMesures };
+}
+
 /**
  * Décide quoi faire de chaque app sondée. `ouvertes` = les issues `panne` ouvertes ({ number, title }).
  * Une app en panne avec une issue déjà ouverte ne déclenche rien de plus (pas de bruit à chaque passage).
@@ -99,11 +147,12 @@ export async function appliquer(actions, apps, gh, date = new Date()) {
   }
 }
 
-export function tableau({ resultats, aBrancher, actions }) {
+export function tableau({ resultats, aBrancher, actions, nonMesures = [] }) {
   const fait = (nom) => actions.find((a) => a.nom === nom)?.type;
   const libelle = { ouvrir: 'issue ouverte', fermer: 'issue fermée' };
   const lignes = [
     ...resultats.map((r) => `| ${r.nom} | ${r.ok ? 'répond' : 'PANNE'} | ${r.ok ? '' : r.cause} | ${libelle[fait(r.nom)] ?? ''} |`),
+    ...nonMesures.map((a) => `| ${a.nom} | non mesuré | ${a.raison} | |`),
     ...aBrancher.map((a) => `| ${a.nom} | à brancher | ${a.raison} | |`),
   ];
   return ['### Surveillance des apps', '', '| App | État | Détail | Suite |', '|---|---|---|---|', ...lignes, ''].join('\n');
@@ -129,8 +178,21 @@ async function main() {
     appel: (u, init = {}) => fetch(u, { ...init, signal: AbortSignal.timeout(Number(env.SURVEILLANCE_TIMEOUT_MS || 10_000)) }),
   };
   const sondees = apps.filter((a) => a.sante);
-  const resultats = [];
-  for (const a of sondees) resultats.push(await sonder(a, config));
+  let resultats = [];
+  let nonMesures = [];
+  let source = 'sonde lancée ici';
+  // Lancement d'essai : toujours la sonde d'ici (l'app simulée n'a pas de moniteur).
+  if (env.UPTIMEROBOT_API_KEY && !env.SURVEILLANCE_ESSAI_URL) {
+    try {
+      const lu = resultatsUptimeRobot(sondees, await lireMoniteurs({ cle: env.UPTIMEROBOT_API_KEY, appel: config.appel }));
+      resultats = lu.resultats;
+      nonMesures = lu.nonMesures;
+      source = 'moniteurs UptimeRobot';
+    } catch (e) {
+      console.log(`::warning title=UptimeRobot::${e.message} ; sonde lancée ici à la place`);
+    }
+  }
+  if (source === 'sonde lancée ici') for (const a of sondees) resultats.push(await sonder(a, config));
 
   // `--force` crée l'étiquette si elle manque et la laisse telle quelle sinon.
   await ghReel(['label', 'create', LABEL, '--color', 'B60205', '--description', 'App en panne (surveillance automatique)', '--force']);
@@ -138,7 +200,7 @@ async function main() {
   const actions = decider({ resultats, ouvertes });
   await appliquer(actions, apps, ghReel);
 
-  const texte = tableau({ resultats, aBrancher: apps.filter((a) => !a.sante), actions });
+  const texte = `${tableau({ resultats, aBrancher: apps.filter((a) => !a.sante), actions, nonMesures })}\nSource de l'état : ${source}.\n`;
   console.log(texte);
   for (const r of resultats.filter((x) => !x.ok)) console.log(`::warning title=Panne::${r.nom} — ${r.cause}`);
   if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, `${texte}\n`);
