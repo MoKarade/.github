@@ -15,6 +15,8 @@ Mise en place : MoKarade/.github#76. Proposition d'origine : `commun/plans/2026-
 
 **Fini quand** : <une commande à lancer ou un comptage à montrer, avec le résultat attendu>
 
+**Fini quand exécutable** : GET https://<nom>.hubperso.com/<chemin> → 200[, contient « <texte> »] (facultatif, pour une réponse HTTP)
+
 **Fichiers permis** (aucun autre) :
 - `chemin/exact/un.ext`
 - `chemin/exact/deux.ext`
@@ -33,6 +35,10 @@ Mise en place : MoKarade/.github#76. Proposition d'origine : `commun/plans/2026-
 
 **À citer dans la PR** : `Tâche : #<numéro de CETTE issue>` ; sujet de commit : `<préfixe permis>: <type>: <verbe et objet>`
 ```
+
+La ligne **Fini quand exécutable** est facultative. Elle accepte seulement un `GET` en https vers `hubperso.com` ou un sous-domaine, sans port ni identifiant, et une adresse de 300 caractères au plus. Aucune redirection n'est suivie : une réponse `302` est lue comme `302`. Chaque essai dure au plus 10 s, lit au plus 64 Ko ; trois essais espacés laissent arriver la nouvelle version. Aucun jeton ni cookie. Une ligne hors de ces limites, ou une réponse qui ne correspond pas, se prouve par un fil. Si la PR touche un écran, l'écran se prouve en le regardant, par un fil avec les captures du §8 : la sonde ne l'accepte pas automatiquement.
+
+Exemple : `**Fini quand exécutable** : GET https://exemple.hubperso.com/sante → 200, contient « service prêt »`
 
 ## Règles de rédaction
 
