@@ -23,7 +23,7 @@
 // `REVEIL_TOKEN` n'a pas encore le droit sur `.github`, un avertissement le dit et le réveil, déjà parti, n'est pas touché.
 //
 // Sur l'ouverture d'une PR (pr_ouverte) il ne réveille PERSONNE et ne commente rien sur app-template#58 : il lance seulement
-// `commentaire-tache-liee.yml`, qui marque la tâche citée `en-cours` en moins de 10 minutes (tâche MoKarade/.github#157).
+// `commentaire-tache-liee.yml`, qui marque la tâche citée `en-cours` en quelques minutes (tâche MoKarade/.github#157).
 //
 // « D libre » n'est écrit que si D est VRAIMENT libre (`travaux`) : sans cela, chaque fusion dans un dépôt encore occupé
 // réveillait le Coordinateur pour rien, une quarantaine de fois par heure (tâche MoKarade/.github#164). Deux places par dépôt (décision de
