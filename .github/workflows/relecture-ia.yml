@@ -6,6 +6,14 @@ name: Relecture IA
 # PR et le Garde-fou est rejoué : il passe au vert, Mergify fusionne. Sinon la PR attend Marc.
 # Détail, limites et pose des deux secrets : docs/relecture-ia.md.
 #
+# DÉCLENCHEURS (MoKarade/.github#626 et #633) : la relecture part sur l'événement, plus sur un minuteur toutes les 10 minutes (GitHub
+# espaçait ces passages : aucun en 73 min le 16/10/2026).
+# - `workflow_dispatch` : le Réacteur (scripts/reveil-reacteur.mjs) la lance quand le Garde-fou d'une PR finit en échec (type
+#   `garde_fou_rouge`, dans les dix dépôts) et à chaque PR fusionnée, CI rouge ou tâche fermée ; et « Run workflow ».
+#   Le verdict doit venir d'une exécution de `main` lancée par `workflow_dispatch` ou `schedule` (scripts/garde-fou.mjs,
+#   `relectureApprouvee`) : un déclencheur `workflow_run` ici porterait la branche de la PR et serait refusé.
+# - un filet quotidien, minute décalée (jamais ronde : GitHub retarde surtout les minutes rondes).
+#
 # SÛRETÉ :
 # - trois étapes, deux jetons qui ne se croisent jamais : l'étape « Relire » n'a QUE le jeton Claude
 #   et l'IA n'a aucun outil (--tools ""), l'étape qui touche GitHub n'a QUE le jeton GitHub ;
@@ -13,7 +21,7 @@ name: Relecture IA
 # - ce fichier et scripts/relecture* font partie de ce que le garde-fou refuse de laisser modifier seul.
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '47 9 * * *'
   workflow_dispatch:
 
 # Aucun `paths:` : ce n'est pas un contrôle requis, mais la règle vaut partout ici.

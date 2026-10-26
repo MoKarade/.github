@@ -2,6 +2,7 @@
 // Chaque règle a un cas qui passe ET un cas refusé. Ce qui compte le plus : ce que l'IA ne peut
 // JAMAIS lever, et le fait qu'une réponse douteuse est un refus.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { estPrFileMergify, evaluer, rapport, relectureApprouvee, relectureDeLaFile } from './garde-fou.mjs';
 import { dejaJugee, gardeFouRouge, lireProteges } from './relecture-ia.mjs';
@@ -216,11 +217,27 @@ test('relecture refusée : pas de verdict, mauvais auteur, mauvais commit, refus
     { ...RUN_OK, path: '.github/workflows/autre.yml' },
     { ...RUN_OK, head_branch: 'claude/x' },
     { ...RUN_OK, event: 'pull_request' },
+    { ...RUN_OK, event: 'workflow_run' }, // l'exécution lancée par la fin du Garde-fou ne vaut pas verdict (#626)
     { ...RUN_OK, conclusion: 'failure' },
     { ...RUN_OK, repository: { full_name: 'MoKarade/Hubperso' } },
   ]) {
     assert.equal((await lire([verdict()], faux)).ok, false);
   }
+});
+
+// MoKarade/.github#626 et #633 : plus de minuteur toutes les 10 minutes ; le Réacteur lance la relecture (type garde_fou_rouge).
+test('relecture-ia.yml : un seul filet quotidien hors minute ronde, aucun déclencheur workflow_run (le verdict doit venir de main)', () => {
+  const yml = readFileSync(new URL('../.github/workflows/relecture-ia.yml', import.meta.url), 'utf8');
+  const actifs = yml.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
+
+  const crons = [...actifs.matchAll(/^\s*- cron: '([^']+)'/gm)].map((m) => m[1].split(' '));
+  assert.equal(crons.length, 1, 'un seul cron attendu');
+  assert.match(crons[0][0], /^\d+$/);
+  assert.ok(!['0', '15', '30', '45'].includes(crons[0][0]), 'minute ronde');
+  assert.deepEqual(crons[0].slice(2), ['*', '*', '*']);
+
+  assert.match(actifs, /^\s*workflow_dispatch:/m, 'le Réacteur la lance par workflow_dispatch');
+  assert.ok(!/^\s*workflow_run:/m.test(actifs), 'une exécution workflow_run porte la branche de la PR : le Garde-fou refuserait son verdict');
 });
 
 test('relecture lue : le verdict le plus récent compte', async () => {
