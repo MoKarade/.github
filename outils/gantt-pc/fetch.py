@@ -345,12 +345,16 @@ def pr_gardee(pr, ancien):
     if LEGER and pr is None and ancien and ancien.get('pr') and ancien['pr'].get('state') != 'open' and ancien['pr'].get('kind') != 'corps': return ancien['pr']
     return pr
 
+def du_backlog(i):
+    # Une issue entre dans le backlog si elle n'est pas une PR, porte un `niveau:*` et n'est PAS une issue d'essai (cycle de vie : le Gantt ignore `essai`, .github#576).
+    return 'pull_request' not in i and any(l['name'].startswith('niveau:') for l in i['labels']) and not any(l['name'] == 'essai' for l in i['labels'])
+
 ATTEND_MARC = re.compile(r'^Garde-fou : la PR #(\d+) attend un geste de Marc$')
 def traiter(rk):
     repo, key, name = rk
     rl = repo.lower()
     ouvertes, fermees, _, issues_all, incidents_all = LISTES[repo]
-    issues = [i for i in issues_all if 'pull_request' not in i and any(l['name'].startswith('niveau:') for l in i['labels'])]
+    issues = [i for i in issues_all if du_backlog(i)]
     incidents = [{'n': i['number'], 't': i['title'], 'url': i['html_url']} for i in incidents_all if 'pull_request' not in i]
     # PR dont le seul obstacle est un geste de Marc : le Garde-fou (.github, scripts/garde-fou.mjs) ouvre alors « Garde-fou : la PR #n attend un geste
     # de Marc » en `qui:marc`. Lu dans la liste déjà chargée, sans appel de plus ; prochaine-tache.mjs ne compte plus ces PR comme occupant le dépôt (#197).
