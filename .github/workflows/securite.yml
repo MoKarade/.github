@@ -11,12 +11,15 @@ name: Sécurité (workflow commun)
 #         security-events: write
 #         actions: read
 #
-# Trois contrôles, trois jobs :
+# Quatre contrôles, quatre jobs :
 #   - secrets : gitleaks sur tous les commits de la PR (ou du push) ; rouge si un secret y est.
 #   - osv     : OSV-Scanner sur le fichier de verrouillage npm ; rouge si une faille connue y est. Le binaire officiel (somme SHA-256 vérifiée), jamais
 #             l'action Docker : le robot du PC (dépôts privés) n'a pas Docker.
 #             Un risque accepté s'écrit dans un `osv-scanner.toml` du dépôt (ignore + raison + date).
 #   - codeql  : analyse statique du code ; dépôt PUBLIC seulement (privé : sauté, GitHub l'exige payant).
+#   - workflows : zizmor lit les workflows du dépôt (injection par modèle `${{ }}`, droits trop larges, jeton laissé dans `.git`,
+#             cache empoisonnable). NE BLOQUE PAS (tâche #585) : il écrit ses trouvailles dans le résumé du job. Passer en bloquant
+#             viendra après la correction des trouvailles, dépôt par dépôt. Exceptions voulues : securite/zizmor.yml, avec leur raison.
 # Toutes les actions sont épinglées par empreinte SHA (jamais `@v4`). Les versions sont dans les
 # commentaires ; Dependabot les met à jour, sauf gitleaks (binaire vérifié par somme SHA-256, voir plus bas).
 on:
@@ -117,6 +120,65 @@ jobs:
           echo "${OSV_SHA256}  $RUNNER_TEMP/osv-scanner" | sha256sum -c -
           chmod +x "$RUNNER_TEMP/osv-scanner"
           "$RUNNER_TEMP/osv-scanner" scan source --lockfile="${DOSSIER}/package-lock.json"
+
+  workflows:
+    name: Workflows (zizmor)
+    timeout-minutes: 10
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || fromJSON('["self-hosted","pc-marc"]') }} # dépôt public : machines GitHub (gratuites) ; privé : robot du PC
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Récupérer la configuration commune de zizmor
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: MoKarade/.github
+          ref: main
+          path: .securite-commune
+          sparse-checkout: securite
+          persist-credentials: false
+
+      # Version fixée, installée depuis la roue PyPI dont l'empreinte SHA-256 est vérifiée par pip (--require-hashes) : même
+      # exigence que gitleaks et OSV-Scanner, sans action Docker (le robot du PC n'a pas Docker). zizmor n'a aucune dépendance.
+      # Pas de python3 sur la machine : la trouvaille manquante est dite dans le résumé, le job reste vert (il ne bloque pas).
+      - name: Analyser les workflows (zizmor, hors ligne, sans bloquer)
+        env:
+          ZIZMOR_VERSION: 1.31.1
+          ZIZMOR_HASH_MANYLINUX: 58e878eb2dbd2c6183c105e1ac28c14f7dd1eca44a783f1fe2a69647d012c410
+          ZIZMOR_HASH_MUSLLINUX: e7fdf82d31cc67eb1d5030bf2372b25ee2a1c3ad05017e18da70ed138c4accd6
+        run: |
+          set -uo pipefail
+          resume="${GITHUB_STEP_SUMMARY:-/dev/null}"
+          if ! command -v python3 >/dev/null 2>&1; then
+            echo "::notice::python3 absent de cette machine : zizmor n'a pas tourné."
+            echo "zizmor n'a pas tourné : python3 absent de cette machine." >> "$resume"
+            exit 0
+          fi
+          printf 'zizmor==%s --hash=sha256:%s --hash=sha256:%s\n' "$ZIZMOR_VERSION" "$ZIZMOR_HASH_MANYLINUX" "$ZIZMOR_HASH_MUSLLINUX" > "$RUNNER_TEMP/zizmor-exigences.txt"
+          if ! python3 -m venv "$RUNNER_TEMP/zizmor-venv" || ! "$RUNNER_TEMP/zizmor-venv/bin/pip" install --quiet --require-hashes -r "$RUNNER_TEMP/zizmor-exigences.txt"; then
+            echo "::notice::installation de zizmor impossible sur cette machine : rien n'a été analysé."
+            echo "zizmor n'a pas tourné : installation impossible sur cette machine." >> "$resume"
+            exit 0
+          fi
+          # --no-exit-codes : une trouvaille ne fait jamais échouer le job (tâche #585).
+          "$RUNNER_TEMP/zizmor-venv/bin/zizmor" --offline --no-progress --no-exit-codes --format plain \
+            --config .securite-commune/securite/zizmor.yml .github/workflows > "$RUNNER_TEMP/zizmor.txt" 2> "$RUNNER_TEMP/zizmor-journal.txt"
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            # Avec --no-exit-codes, un code non nul est une panne de l'outil (configuration illisible...), pas une trouvaille.
+            echo "::warning::zizmor a échoué (code $code) : voir le résumé."
+            { echo "### zizmor a échoué (code $code), rien n'est conclu"; echo '```'; head -n 40 "$RUNNER_TEMP/zizmor-journal.txt"; echo '```'; } >> "$resume"
+            exit 0
+          fi
+          trouvailles="$(grep -cE '^(error|warning|note|help)\[' "$RUNNER_TEMP/zizmor.txt" || true)"
+          echo "zizmor ${ZIZMOR_VERSION} : ${trouvailles} trouvaille(s) (non bloquant)."
+          {
+            echo "### zizmor ${ZIZMOR_VERSION} : ${trouvailles} trouvaille(s), non bloquant"
+            echo '```'
+            head -n 200 "$RUNNER_TEMP/zizmor.txt"
+            echo '```'
+          } >> "$resume"
 
   codeql:
     name: Analyse du code (CodeQL)
