@@ -14,9 +14,9 @@
 #   fusionner : fusion squash d'une PR ouverte, hors brouillon
 #
 # Depuis le hub (Hubperso#556, étape 4c) : la page du hub dépose la même demande au hub, qui la garde jusqu'à ce que le PC l'accuse.
-# Chaque tour lit `GET /api/chantier/gestes` (secret GANTT_SECRET, le fichier de pousser_hub.py), applique avec le même chemin que Drive
-# (`lire_demande` revalide tout : le hub n'est pas cru sur parole), puis accuse `POST /api/chantier/gestes/accuse` (appliqué ou refusé,
-# avec le message). Drive reste lu en secours ; une panne du hub (secret absent, 401, 503, réseau) se dit sur la ligne du tour et
+# Chaque tour lit `GET /api/chantier/gestes/pc` (secret GANTT_SECRET, le fichier de pousser_hub.py), applique avec le même chemin que Drive
+# (`lire_demande` revalide tout : le hub n'est pas cru sur parole), puis accuse `POST` au même chemin, corps `{ids:[…]}` (appliqué ou refusé : le hub ne garde que « pris »,
+# le résultat se lit dans le journal du PC). Drive reste lu en secours ; une panne du hub (secret absent, 401, 503, réseau) se dit sur la ligne du tour et
 # n'arrête jamais le traitement des fichiers Drive. Une demande déjà dans le journal n'est jamais rejouée, seulement ré-accusée.
 #
 # Un fichier est traité une seule fois (journal `reponses-journal.json`, par id), puis supprimé du dossier, réussi ou non :
@@ -35,8 +35,8 @@ DEPOT_BOITE, WORKFLOW_BOITE = 'MoKarade/app-template', 'boite-reacteur.yml'   # 
 REPONSES = re.compile(r'^\s*\*\*\s*Réponses\s*(?:\*\*\s*:?|:\s*\*\*)\s*$(.*?)(?=^\s*\*\*[^*\n]{1,40}?(?:\*\*\s*:|:\s*\*\*)|\Z)', re.M | re.S | re.I)
 GARDE_FOU = re.compile(r'^\s*Garde-fou\s*:\s*la PR\b', re.I)   # « Garde-fou : la PR #n attend un geste de Marc » (fil Gantt, 19/10)
 PUCE = re.compile(r'^\s*(?:[-*+]|\d+[.)])\s+(.+?)\s*$')
-URL_HUB = 'https://www.hubperso.com/api/chantier/gestes'     # www, pas l'apex : urllib ne rejoue pas un POST sur une redirection
-URL_ACCUSE = URL_HUB + '/accuse'
+URL_HUB = 'https://www.hubperso.com/api/chantier/gestes/pc'   # www, pas l'apex : urllib ne rejoue pas un POST sur une redirection
+URL_ACCUSE = URL_HUB                                            # même chemin : GET lit les gestes non pris, POST {ids} les marque pris
 DELAI_S, PAR_TOUR = 30, 20
 ID_VALIDE = re.compile(r'[A-Za-z0-9-]{6,40}')
 
@@ -167,16 +167,20 @@ def lire_hub(secret, requete=_requete):
     return [json.dumps(g, ensure_ascii=False) for g in gestes[:PAR_TOUR]], ''
 
 
-def corps_accuse(resultats):
-    """Le corps de l'accusé : (id, ok, msg) -> {v:1, accuses:[…]}. Ne garde que les identifiants valides, message coupé à 200. Pure."""
-    return {'v': 1, 'accuses': [{'id': i, 'ok': bool(ok), 'msg': str(msg or '')[:200]} for i, ok, msg in resultats if ID_VALIDE.fullmatch(str(i or ''))]}
+def corps_accuse(ids):
+    """Le corps de l'accusé : {"ids": [...]}, 1 à 50 identifiants valides, sans doublon, ordre gardé. Pure. `None` si rien à accuser."""
+    vus, propres = set(), []
+    for i in ids:
+        if isinstance(i, str) and ID_VALIDE.fullmatch(i) and i not in vus: vus.add(i); propres.append(i)
+    return {'ids': propres[:50]} if propres else None
 
 
-def accuser(secret, resultats, requete=_requete):
-    """Accuse au hub les demandes traitées. Rend '' si tout va bien, sinon la raison en une phrase. Ne lève jamais."""
-    corps = corps_accuse(resultats)
-    if not corps['accuses']: return ''
-    try: code, texte = requete('POST', URL_ACCUSE, secret, json.dumps(corps, ensure_ascii=False, separators=(',', ':')).encode('utf-8'))
+def accuser(secret, ids, requete=_requete):
+    """Marque « pris » au hub les gestes traités (appliqués OU refusés). Rend '' si tout va bien, sinon la raison en une phrase.
+    Ne lève jamais. Sans accusé le geste revient au tour suivant, mais le journal empêche de le rejouer."""
+    corps = corps_accuse(ids)
+    if corps is None: return ''
+    try: code, texte = requete('POST', URL_ACCUSE, secret, json.dumps(corps, separators=(',', ':')).encode('utf-8'))
     except (OSError, ValueError) as x: return f'accusé impossible ({type(x).__name__})'
     if code != 200: return f'accusé refusé : {RAISONS_HUB.get(code, "réponse inattendue")} (HTTP {code})'
     return ''
@@ -213,7 +217,7 @@ def tour(drive, a_blanc=False, chemin_secret=pousser_hub.SECRET_PAR_DEFAUT, requ
             if not ident: ko += 1; continue                  # demande du hub sans identifiant lisible : rien à journaliser ni à accuser
             if ident in vus:                                 # déjà traité (fichier resté après une coupure, ou accusé perdu)
                 if f: os.remove(f)
-                else: accuses.append((ident, vus[ident].get('ok'), vus[ident].get('msg')))
+                else: accuses.append(ident)
                 continue
             e = {'id': ident or '?', 'ref': (dem or {}).get('ref'), 'geste': (dem or {}).get('geste'),
                  'quand': (dem or {}).get('quand'), 'traite': maintenant.strftime('%Y-%m-%dT%H:%M:%SZ'), 'ok': False, 'msg': err}
@@ -222,7 +226,7 @@ def tour(drive, a_blanc=False, chemin_secret=pousser_hub.SECRET_PAR_DEFAUT, requ
                 except (RuntimeError, ValueError, subprocess.TimeoutExpired) as x: e['msg'] = 'GitHub : ' + str(x)[:160]
             journal.append(e); ecrire_journal(journal); vus[e['id']] = e
             if f: os.remove(f)
-            else: accuses.append((ident, e['ok'], e['msg']))
+            else: accuses.append(ident)
             if e['ok']: ok += 1; faits.append((e['ref'], e['geste']))
             else: ko += 1
         reveil = ''

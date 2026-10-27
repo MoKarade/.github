@@ -121,29 +121,30 @@ class Hub(unittest.TestCase):
         self.assertEqual(ap.call_count, 1)
         self.assertIn('1 appliquée(s), 0 refusée(s)', ligne)
         self.assertNotIn('hub :', ligne)
-        self.assertEqual(self.accuses(), [{'v': 1, 'accuses': [{'id': 'hub-0001', 'ok': True, 'msg': 'appliqué'}]}])
+        self.assertEqual(self.accuses(), [{'ids': ['hub-0001']}])
         self.assertEqual([a[:3] for a in self.appels], [('GET', R.URL_HUB, SECRET), ('POST', R.URL_ACCUSE, SECRET)])
 
     def test_refus_accuse_avec_son_message(self):
         with mock.patch.object(R, 'appliquer', return_value=(False, 'tâche déjà fermée')):
             ligne = R.tour(self.d, chemin_secret=self.secret, requete=self.requete([geste()]))
         self.assertIn('0 appliquée(s), 1 refusée(s)', ligne)
-        self.assertEqual(self.accuses()[0]['accuses'], [{'id': 'hub-0001', 'ok': False, 'msg': 'tâche déjà fermée'}])
+        self.assertEqual(self.accuses(), [{'ids': ['hub-0001']}])      # refusé = pris aussi : le hub ne garde que « pris »
 
     def test_demande_hors_contrat_refusee_et_accusee_sans_toucher_github(self):
         with mock.patch.object(R, 'appliquer') as ap:
             R.tour(self.d, chemin_secret=self.secret, requete=self.requete([geste(ref='autre#1')]))
         ap.assert_not_called()
-        a = self.accuses()[0]['accuses'][0]
-        self.assertEqual((a['id'], a['ok']), ('hub-0001', False))
-        self.assertTrue(a['msg'].startswith('référence inconnue'))
+        self.assertEqual(self.accuses(), [{'ids': ['hub-0001']}])
+        with open(self.journal, encoding='utf-8') as f: e = json.load(f)[0]
+        self.assertEqual((e['id'], e['ok']), ('hub-0001', False))
+        self.assertTrue(e['msg'].startswith('référence inconnue'))
 
     def test_id_deja_journalise_jamais_rejoue_mais_reaccuse(self):
         with open(self.journal, 'w', encoding='utf-8') as f: json.dump([{'id': 'hub-0001', 'ok': True, 'msg': 'appliqué'}], f)
         with mock.patch.object(R, 'appliquer') as ap:
             R.tour(self.d, chemin_secret=self.secret, requete=self.requete([geste()]))
         ap.assert_not_called()
-        self.assertEqual(self.accuses()[0]['accuses'], [{'id': 'hub-0001', 'ok': True, 'msg': 'appliqué'}])
+        self.assertEqual(self.accuses(), [{'ids': ['hub-0001']}])
 
     def test_secret_absent_dit_et_drive_continue(self):
         with open(os.path.join(self.d, 'reponse-1.json'), 'w', encoding='utf-8') as f: json.dump(geste(id='drive-0001'), f)
@@ -180,10 +181,10 @@ class Hub(unittest.TestCase):
         textes, _ = R.lire_hub(SECRET, self.requete([geste(id=f'hub-{i:04d}') for i in range(30)]))
         self.assertEqual(len(textes), R.PAR_TOUR)
 
-    def test_corps_accuse_filtre_les_ids_et_coupe_le_message(self):
-        c = R.corps_accuse([('hub-0001', True, 'x' * 500), ('', True, 'sans id'), ('court', True, 'id invalide')])
-        self.assertEqual(len(c['accuses']), 1)
-        self.assertEqual(len(c['accuses'][0]['msg']), 200)
+    def test_corps_accuse_garde_les_ids_valides_sans_doublon_et_50_au_plus(self):
+        self.assertEqual(R.corps_accuse(['hub-0001', 'hub-0001', '', 'court', None, 'hub-0002']), {'ids': ['hub-0001', 'hub-0002']})
+        self.assertEqual(len(R.corps_accuse([f'hub-{i:04d}' for i in range(80)])['ids']), 50)
+        self.assertIsNone(R.corps_accuse(['court']))
 
     def test_a_blanc_n_accuse_rien(self):
         with mock.patch.object(R, 'appliquer') as ap:
