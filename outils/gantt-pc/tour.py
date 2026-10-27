@@ -8,7 +8,7 @@
 #   3. fiabilité (verif-fidelite.mjs de MoKarade/.github) : mesure complète si la précédente a plus de 55 min, sinon instantané de file seul
 #   4. filet (filet-pc.mjs de MoKarade/.github, tâche #196) : un dépôt libre avec une tâche prenable et sans lancement depuis plus de
 #      30 min réveille le Coordinateur (boite-reacteur.yml d'app-template, avec le jeton gh du PC) ; aucun appel Claude
-#   0. réponses de Marc (reponses.py) : ce qu'il a coché dans l'onglet « À toi », déposé par la page dans le même dossier Drive, appliqué sur
+#   0. réponses de Marc (reponses.py) : ce qu'il a coché dans l'onglet « À toi », déposé par la page au hub (Hubperso#556) ou dans le dossier Drive, appliqué sur
 #      GitHub avec le jeton gh du PC, puis réveil du Coordinateur ; avant le relevé, pour qu'il en voie déjà l'effet
 #   5. dépôt dans le dossier Google Drive synchronisé (--drive DOSSIER) : donnees.json.gz (lu par la page), prochaines.json,
 #      fiabilite.json, quota.json, etat.json. Les fichiers sont RÉÉCRITS SUR PLACE : Drive garde alors le même identifiant.
