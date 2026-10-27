@@ -13,10 +13,17 @@
 #               section `**Réponses**` du corps de l'issue, relue ici : un fichier ne peut pas faire écrire un texte libre
 #   fusionner : fusion squash d'une PR ouverte, hors brouillon
 #
+# Depuis le hub (Hubperso#556, étape 4c) : la page du hub dépose la même demande au hub, qui la garde jusqu'à ce que le PC l'accuse.
+# Chaque tour lit `GET /api/chantier/gestes` (secret GANTT_SECRET, le fichier de pousser_hub.py), applique avec le même chemin que Drive
+# (`lire_demande` revalide tout : le hub n'est pas cru sur parole), puis accuse `POST /api/chantier/gestes/accuse` (appliqué ou refusé,
+# avec le message). Drive reste lu en secours ; une panne du hub (secret absent, 401, 503, réseau) se dit sur la ligne du tour et
+# n'arrête jamais le traitement des fichiers Drive. Une demande déjà dans le journal n'est jamais rejouée, seulement ré-accusée.
+#
 # Un fichier est traité une seule fois (journal `reponses-journal.json`, par id), puis supprimé du dossier, réussi ou non :
 # un échec se lit dans le journal, que build.py embarque pour la page. Rien ici ne fait échouer le tour.
 # Lancer seul : python -X utf8 reponses.py --drive "G:\Mon disque\_Gantt" [--a-blanc]
-import argparse, datetime, glob, json, os, re, subprocess, sys
+import argparse, datetime, glob, json, os, re, subprocess, sys, urllib.error, urllib.request
+import pousser_hub
 
 D = os.path.dirname(os.path.abspath(__file__)) + os.sep
 JOURNAL = D + 'reponses-journal.json'
@@ -28,6 +35,10 @@ DEPOT_BOITE, WORKFLOW_BOITE = 'MoKarade/app-template', 'boite-reacteur.yml'   # 
 REPONSES = re.compile(r'^\s*\*\*\s*Réponses\s*(?:\*\*\s*:?|:\s*\*\*)\s*$(.*?)(?=^\s*\*\*[^*\n]{1,40}?(?:\*\*\s*:|:\s*\*\*)|\Z)', re.M | re.S | re.I)
 GARDE_FOU = re.compile(r'^\s*Garde-fou\s*:\s*la PR\b', re.I)   # « Garde-fou : la PR #n attend un geste de Marc » (fil Gantt, 19/10)
 PUCE = re.compile(r'^\s*(?:[-*+]|\d+[.)])\s+(.+?)\s*$')
+URL_HUB = 'https://www.hubperso.com/api/chantier/gestes'     # www, pas l'apex : urllib ne rejoue pas un POST sur une redirection
+URL_ACCUSE = URL_HUB + '/accuse'
+DELAI_S, PAR_TOUR = 30, 20
+ID_VALIDE = re.compile(r'[A-Za-z0-9-]{6,40}')
 
 
 def options(body):
@@ -130,36 +141,99 @@ def ecrire_journal(j):
     os.replace(JOURNAL + '.tmp', JOURNAL)
 
 
-def tour(drive, a_blanc=False):
-    """Traite les fichiers déposés. Rend la ligne à afficher ; ne lève jamais."""
+def _requete(methode, url, secret, octets=None):
+    """Rend (code HTTP, corps texte) ; lève OSError (réseau, délai). `methode` GET ou POST, jeton en en-tête seulement."""
+    en_tetes = {'Authorization': 'Bearer ' + secret, 'User-Agent': 'gantt-pc/reponses.py'}
+    if octets is not None: en_tetes['Content-Type'] = 'application/json; charset=utf-8'
+    req = urllib.request.Request(url, data=octets, method=methode, headers=en_tetes)
     try:
-        fichiers = sorted(glob.glob(os.path.join(drive, 'reponse-*.json')))
-        if not fichiers: return 'réponses : aucune'
-        journal = lire_journal(); vus = {e.get('id') for e in journal}
-        ok, ko, faits = 0, 0, []
-        for f in fichiers[:20]:
+        with urllib.request.urlopen(req, timeout=DELAI_S) as r: return r.status, r.read(400_000).decode('utf-8', 'replace')
+    except urllib.error.HTTPError as e: return e.code, e.read(4000).decode('utf-8', 'replace')
+
+
+RAISONS_HUB = {401: 'secret refusé (GANTT_SECRET différent ?)', 404: 'adresse inconnue du hub (pas encore déployée ?)',
+               429: 'trop de demandes', 503: 'pas encore actif côté hub'}
+
+
+def lire_hub(secret, requete=_requete):
+    """Les demandes que le hub garde pour le PC. Rend (liste de textes JSON, '') ou ([], raison). Ne lève jamais.
+    Chaque élément est remis en texte pour passer par `lire_demande`, comme un fichier Drive."""
+    try: code, texte = requete('GET', URL_HUB, secret)
+    except (OSError, ValueError) as x: return [], f'envoi impossible ({type(x).__name__})'
+    if code != 200: return [], f'{RAISONS_HUB.get(code, "réponse inattendue")} (HTTP {code})'
+    try: gestes = json.loads(texte).get('gestes')
+    except (ValueError, AttributeError): return [], 'réponse illisible'
+    if not isinstance(gestes, list): return [], 'réponse sans liste de gestes'
+    return [json.dumps(g, ensure_ascii=False) for g in gestes[:PAR_TOUR]], ''
+
+
+def corps_accuse(resultats):
+    """Le corps de l'accusé : (id, ok, msg) -> {v:1, accuses:[…]}. Ne garde que les identifiants valides, message coupé à 200. Pure."""
+    return {'v': 1, 'accuses': [{'id': i, 'ok': bool(ok), 'msg': str(msg or '')[:200]} for i, ok, msg in resultats if ID_VALIDE.fullmatch(str(i or ''))]}
+
+
+def accuser(secret, resultats, requete=_requete):
+    """Accuse au hub les demandes traitées. Rend '' si tout va bien, sinon la raison en une phrase. Ne lève jamais."""
+    corps = corps_accuse(resultats)
+    if not corps['accuses']: return ''
+    try: code, texte = requete('POST', URL_ACCUSE, secret, json.dumps(corps, ensure_ascii=False, separators=(',', ':')).encode('utf-8'))
+    except (OSError, ValueError) as x: return f'accusé impossible ({type(x).__name__})'
+    if code != 200: return f'accusé refusé : {RAISONS_HUB.get(code, "réponse inattendue")} (HTTP {code})'
+    return ''
+
+
+def _id_brut(texte):
+    """L'identifiant d'une demande du hub, même hors contrat ('' s'il n'est pas lisible). Pure."""
+    try: ident = json.loads(texte).get('id')
+    except (ValueError, AttributeError): return ''
+    return ident if isinstance(ident, str) and ID_VALIDE.fullmatch(ident) else ''
+
+
+def tour(drive, a_blanc=False, chemin_secret=pousser_hub.SECRET_PAR_DEFAUT, requete=_requete):
+    """Traite les demandes du hub puis les fichiers Drive. Rend la ligne à afficher ; ne lève jamais."""
+    try:
+        fichiers = sorted(glob.glob(os.path.join(drive, 'reponse-*.json')))[:PAR_TOUR]
+        secret, raison_secret = pousser_hub.lire_secret(chemin_secret)
+        depuis_hub, panne_hub = lire_hub(secret, requete) if secret else ([], raison_secret)
+        # (nom, texte, fichier Drive ou None) : le hub d'abord, Drive ensuite
+        entrees = [('hub', t, None) for t in depuis_hub]
+        for f in fichiers:
             try:
-                with open(f, encoding='utf-8') as fh: texte = fh.read()
+                with open(f, encoding='utf-8') as fh: entrees.append((os.path.basename(f), fh.read(), f))
             except OSError: continue                      # pas encore fini de se recopier : au tour suivant
+        if not entrees: return 'réponses : aucune' + (f' (hub : {panne_hub})' if panne_hub else '')
+        journal = lire_journal(); vus = {e.get('id'): e for e in journal}
+        ok, ko, faits, accuses = 0, 0, [], []
+        for nom, texte, f in entrees:
             dem, err = lire_demande(texte)
             maintenant = datetime.datetime.now(datetime.timezone.utc)
             if a_blanc:
-                print(os.path.basename(f), dem or err); continue
-            if dem and dem['id'] in vus: os.remove(f); continue          # déjà traité (fichier resté après une coupure)
-            e = {'id': (dem or {}).get('id') or os.path.basename(f), 'ref': (dem or {}).get('ref'), 'geste': (dem or {}).get('geste'),
+                print(nom, dem or err); continue
+            ident = (dem or {}).get('id') or (nom if f else _id_brut(texte))      # le hub accuse par SON id, même hors contrat
+            if not ident: ko += 1; continue                  # demande du hub sans identifiant lisible : rien à journaliser ni à accuser
+            if ident in vus:                                 # déjà traité (fichier resté après une coupure, ou accusé perdu)
+                if f: os.remove(f)
+                else: accuses.append((ident, vus[ident].get('ok'), vus[ident].get('msg')))
+                continue
+            e = {'id': ident or '?', 'ref': (dem or {}).get('ref'), 'geste': (dem or {}).get('geste'),
                  'quand': (dem or {}).get('quand'), 'traite': maintenant.strftime('%Y-%m-%dT%H:%M:%SZ'), 'ok': False, 'msg': err}
             if dem:
                 try: e['ok'], e['msg'] = appliquer(dem, maintenant)
                 except (RuntimeError, ValueError, subprocess.TimeoutExpired) as x: e['msg'] = 'GitHub : ' + str(x)[:160]
-            journal.append(e); ecrire_journal(journal); vus.add(e['id'])
-            os.remove(f)
+            journal.append(e); ecrire_journal(journal); vus[e['id']] = e
+            if f: os.remove(f)
+            else: accuses.append((ident, e['ok'], e['msg']))
             if e['ok']: ok += 1; faits.append((e['ref'], e['geste']))
             else: ko += 1
         reveil = ''
         if faits:
             try: gh('workflow', 'run', WORKFLOW_BOITE, '--repo', DEPOT_BOITE, '--ref', 'main', '-f', f'texte={motif(faits)}'); reveil = ', réveil envoyé'
             except (RuntimeError, subprocess.TimeoutExpired) as x: reveil = f', réveil en ÉCHEC ({str(x)[:80]})'
-        return f'réponses : {ok} appliquée(s), {ko} refusée(s){reveil}'
+        pannes = [f'hub : {panne_hub}'] if panne_hub else []
+        if secret and accuses and not a_blanc:
+            raison = accuser(secret, accuses, requete)
+            if raison: pannes.append(f'hub : {raison}')
+        return f'réponses : {ok} appliquée(s), {ko} refusée(s){reveil}' + (' · ' + ' · '.join(pannes) if pannes else '')
     except Exception as x:
         return f'réponses : ÉCHEC ({str(x)[:160]})'
 
@@ -168,6 +242,7 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--drive', required=True)
     ap.add_argument('--a-blanc', action='store_true')
+    ap.add_argument('--secret', default=pousser_hub.SECRET_PAR_DEFAUT, help='fichier du GANTT_SECRET (le même que pousser_hub.py)')
     o = ap.parse_args()
-    print(tour(o.drive, o.a_blanc))
+    print(tour(o.drive, o.a_blanc, o.secret))
     sys.exit(0)
