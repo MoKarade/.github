@@ -26,6 +26,11 @@ le PC, le relevé tourne sans Claude.
    le Coordinateur (`boite-reacteur.yml`). Une réponse préfaite n'est acceptée que si elle figure, mot pour mot, dans la section
    `**Réponses**` de l'issue (une puce par option). Le fichier est supprimé une fois traité ; le résultat va dans
    `reponses-journal.json`, que la page lit. Tests : `python -X utf8 -m unittest test_reponses.py`.
+   Depuis le hub (27/10/2026, Hubperso#556 étape 4c) : la page du hub dépose la même demande au hub (`chantier_gestes`). À chaque tour
+   `reponses.py` lit `GET https://www.hubperso.com/api/chantier/gestes` (en-tête `Authorization: Bearer` + le `GANTT_SECRET` de
+   `pousser_hub.py`, aucun nouveau secret), applique avec le même code que Drive (chaque demande est revalidée : le hub n'est pas cru sur
+   parole), puis accuse `POST …/gestes/accuse` (`{v:1, accuses:[{id, ok, msg}]}`). Drive reste lu en secours ; une panne du hub se dit sur la
+   ligne du tour (`hub : …`) sans arrêter Drive ; un `id` déjà au journal n'est jamais rejoué, seulement ré-accusé.
 6. Les sorties sont déposées dans le Drive, dossier `_Gantt` : `donnees.json.gz` (lu par la page avec le connecteur Google Drive),
    `prochaines.json`, `fiabilite.json`, `quota.json`, `etat.json` (résultat du dernier tour).
 

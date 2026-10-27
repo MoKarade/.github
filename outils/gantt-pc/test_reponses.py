@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Tests des décisions pures de reponses.py : python -X utf8 -m unittest test_reponses.py (depuis outils/gantt-pc)
-import datetime, json, unittest
+import datetime, json, os, tempfile, unittest
+from unittest import mock
 import reponses as R
 
 T = datetime.datetime(2026, 10, 19, 15, 0, tzinfo=datetime.timezone.utc)
@@ -80,6 +81,114 @@ class Plan(unittest.TestCase):
     def test_motif_sans_texte_de_reponse(self):
         self.assertEqual(R.motif([('jobai#109', 'reponse'), ('hubperso#242', 'fusionner')]),
                          'RÉACTEUR : Marc depuis la page : répondu jobai#109 ; fusionné hubperso#242')
+
+
+SECRET = 'a' * 24      # valeur fictive, volontairement sans entropie (gitleaks)
+
+
+def geste(**k):
+    d = {'v': 1, 'id': 'hub-0001', 'ref': 'jobai#109', 'geste': 'fait', 'quand': '2026-10-27T05:00:00Z'}; d.update(k)
+    return d
+
+
+class Hub(unittest.TestCase):
+    """Le chemin hub de tour() : lecture, application par le même code que Drive, accusé. Aucun réseau, aucun gh."""
+    def setUp(self):
+        self._d = tempfile.TemporaryDirectory(); self.d = self._d.name
+        self.secret = os.path.join(self.d, 'secret.txt')
+        with open(self.secret, 'w', encoding='utf-8') as f: f.write(SECRET)
+        self.journal = os.path.join(self.d, 'journal.json')
+        for p in (mock.patch.object(R, 'JOURNAL', self.journal), mock.patch.object(R, 'gh', return_value='')):
+            p.start(); self.addCleanup(p.stop)
+        self.appels = []
+
+    def tearDown(self): self._d.cleanup()
+
+    def requete(self, gestes=None, code=200, code_accuse=200):
+        def f(methode, url, secret, octets=None):
+            self.appels.append((methode, url, secret, octets))
+            if methode == 'GET': return code, json.dumps({'ok': True, 'gestes': gestes or []})
+            return code_accuse, '{"ok":true}'
+        return f
+
+    def accuses(self):
+        posts = [a for a in self.appels if a[0] == 'POST']
+        return [json.loads(a[3]) for a in posts]
+
+    def test_demande_du_hub_appliquee_puis_accusee(self):
+        with mock.patch.object(R, 'appliquer', return_value=(True, 'appliqué')) as ap:
+            ligne = R.tour(self.d, chemin_secret=self.secret, requete=self.requete([geste()]))
+        self.assertEqual(ap.call_count, 1)
+        self.assertIn('1 appliquée(s), 0 refusée(s)', ligne)
+        self.assertNotIn('hub :', ligne)
+        self.assertEqual(self.accuses(), [{'v': 1, 'accuses': [{'id': 'hub-0001', 'ok': True, 'msg': 'appliqué'}]}])
+        self.assertEqual([a[:3] for a in self.appels], [('GET', R.URL_HUB, SECRET), ('POST', R.URL_ACCUSE, SECRET)])
+
+    def test_refus_accuse_avec_son_message(self):
+        with mock.patch.object(R, 'appliquer', return_value=(False, 'tâche déjà fermée')):
+            ligne = R.tour(self.d, chemin_secret=self.secret, requete=self.requete([geste()]))
+        self.assertIn('0 appliquée(s), 1 refusée(s)', ligne)
+        self.assertEqual(self.accuses()[0]['accuses'], [{'id': 'hub-0001', 'ok': False, 'msg': 'tâche déjà fermée'}])
+
+    def test_demande_hors_contrat_refusee_et_accusee_sans_toucher_github(self):
+        with mock.patch.object(R, 'appliquer') as ap:
+            R.tour(self.d, chemin_secret=self.secret, requete=self.requete([geste(ref='autre#1')]))
+        ap.assert_not_called()
+        a = self.accuses()[0]['accuses'][0]
+        self.assertEqual((a['id'], a['ok']), ('hub-0001', False))
+        self.assertTrue(a['msg'].startswith('référence inconnue'))
+
+    def test_id_deja_journalise_jamais_rejoue_mais_reaccuse(self):
+        with open(self.journal, 'w', encoding='utf-8') as f: json.dump([{'id': 'hub-0001', 'ok': True, 'msg': 'appliqué'}], f)
+        with mock.patch.object(R, 'appliquer') as ap:
+            R.tour(self.d, chemin_secret=self.secret, requete=self.requete([geste()]))
+        ap.assert_not_called()
+        self.assertEqual(self.accuses()[0]['accuses'], [{'id': 'hub-0001', 'ok': True, 'msg': 'appliqué'}])
+
+    def test_secret_absent_dit_et_drive_continue(self):
+        with open(os.path.join(self.d, 'reponse-1.json'), 'w', encoding='utf-8') as f: json.dump(geste(id='drive-0001'), f)
+        with mock.patch.object(R, 'appliquer', return_value=(True, 'appliqué')) as ap:
+            ligne = R.tour(self.d, chemin_secret=os.path.join(self.d, 'absent.txt'), requete=self.requete())
+        self.assertEqual(ap.call_count, 1)
+        self.assertIn('1 appliquée(s)', ligne)
+        self.assertIn('hub : secret absent', ligne)
+        self.assertEqual(self.appels, [])
+        self.assertFalse(os.path.exists(os.path.join(self.d, 'reponse-1.json')))
+
+    def test_pannes_du_hub_se_disent_sans_rien_lever(self):
+        for code, mot in ((401, 'secret refusé'), (503, 'pas encore actif'), (500, 'réponse inattendue')):
+            self.appels.clear()
+            ligne = R.tour(self.d, chemin_secret=self.secret, requete=self.requete(code=code))
+            self.assertIn(f'hub : {mot}', ligne); self.assertIn(f'HTTP {code}', ligne)
+
+    def test_reseau_coupe(self):
+        def coupe(*a, **k): raise OSError('réseau')
+        ligne = R.tour(self.d, chemin_secret=self.secret, requete=coupe)
+        self.assertIn('hub : envoi impossible (OSError)', ligne)
+
+    def test_accuse_en_echec_se_dit(self):
+        with mock.patch.object(R, 'appliquer', return_value=(True, 'appliqué')):
+            ligne = R.tour(self.d, chemin_secret=self.secret, requete=self.requete([geste()], code_accuse=401))
+        self.assertIn('hub : accusé refusé', ligne); self.assertIn('1 appliquée(s)', ligne)
+
+    def test_reponse_du_hub_malformee(self):
+        def bizarre(methode, url, secret, octets=None): return 200, '{"ok":true,"gestes":"oups"}'
+        self.assertEqual(R.lire_hub(SECRET, bizarre), ([], 'réponse sans liste de gestes'))
+        self.assertEqual(R.lire_hub(SECRET, lambda *a, **k: (200, 'pas du json')), ([], 'réponse illisible'))
+
+    def test_vingt_demandes_au_plus_par_tour(self):
+        textes, _ = R.lire_hub(SECRET, self.requete([geste(id=f'hub-{i:04d}') for i in range(30)]))
+        self.assertEqual(len(textes), R.PAR_TOUR)
+
+    def test_corps_accuse_filtre_les_ids_et_coupe_le_message(self):
+        c = R.corps_accuse([('hub-0001', True, 'x' * 500), ('', True, 'sans id'), ('court', True, 'id invalide')])
+        self.assertEqual(len(c['accuses']), 1)
+        self.assertEqual(len(c['accuses'][0]['msg']), 200)
+
+    def test_a_blanc_n_accuse_rien(self):
+        with mock.patch.object(R, 'appliquer') as ap:
+            R.tour(self.d, a_blanc=True, chemin_secret=self.secret, requete=self.requete([geste()]))
+        ap.assert_not_called(); self.assertEqual(self.accuses(), [])
 
 
 if __name__ == '__main__':
