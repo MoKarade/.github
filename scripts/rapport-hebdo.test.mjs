@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { calculer, collecterDepot, cycleRouge, duree, estPremierLundi, executantDe, lire, mediane, rendre, repartition, resumeConformite, titreRapport } from './rapport-hebdo.mjs';
+import { calculer, collecterDepot, cycleRouge, depuisEffectifs, duree, estPremierLundi, executantDe, ligneCachee, lire, lireLigneCachee, mediane, rendre, repartition, resumeConformite, titreRapport } from './rapport-hebdo.mjs';
 
 const H = 3_600_000;
 const J = 24 * H;
@@ -118,6 +118,80 @@ test('par auteur : cumul plus vieux que la lecture = lecture limitée, dite ; se
   const texte = rendre(vide);
   assert.match(texte, /Tâches acceptées : \*\*0\*\* — aucune\./);
   assert.doesNotMatch(texte, /NaN|null/);
+});
+
+const effectifs = (fil, Jules, Copilot, inconnu) => ({ fil, Jules, Copilot, inconnu, total: fil + Jules + Copilot + inconnu });
+const baseDe = (finIl, e, depuisIl = 6 * J) => ({ fin: MAINTENANT - finIl, depuis: MAINTENANT - depuisIl, ...e });
+
+test('ligne cachée : écrite puis relue à l\'identique, invisible (commentaire HTML)', () => {
+  const cumul = { depuis: MAINTENANT - 6 * J, ...depuisEffectifs({ fil: 10, Jules: 2, Copilot: 1, inconnu: 3 }) };
+  const ligne = ligneCachee(cumul, MAINTENANT - 1 * J);
+  assert.match(ligne, /^<!-- cumul-par-auteur : \{.*\} -->$/);
+  const lu = lireLigneCachee(`## Vitesse\n\n${ligne}`, MAINTENANT);
+  assert.equal(lu.etat, 'ok');
+  assert.deepEqual(lu.base, { fin: MAINTENANT - 1 * J, depuis: MAINTENANT - 6 * J, total: 16, fil: 10, Jules: 2, Copilot: 1, inconnu: 3 });
+});
+
+test('ligne cachée : absente, illisible ou incohérente → jamais utilisée (départ complet)', () => {
+  const bon = { fin: '2026-10-18T10:00:00.000Z', depuis: '2026-10-12T10:00:00.000Z', total: 3, fil: 1, Jules: 1, Copilot: 1, inconnu: 0 };
+  const avec = (v) => `<!-- cumul-par-auteur : ${typeof v === 'string' ? v : JSON.stringify(v)} -->`;
+  assert.deepEqual(lireLigneCachee('rapport ancien format', MAINTENANT), { etat: 'absente' });
+  assert.deepEqual(lireLigneCachee(undefined, MAINTENANT), { etat: 'absente' });
+  assert.equal(lireLigneCachee(avec(bon), MAINTENANT).etat, 'ok');
+  assert.match(lireLigneCachee(avec('{pas du json}'), MAINTENANT).raison, /JSON/);
+  assert.match(lireLigneCachee(avec({ ...bon, fin: 'demain' }), MAINTENANT).raison, /date/);
+  assert.match(lireLigneCachee(avec({ ...bon, fil: -1 }), MAINTENANT).raison, /effectif/);
+  assert.match(lireLigneCachee(avec({ ...bon, fil: 1.5 }), MAINTENANT).raison, /effectif/);
+  assert.match(lireLigneCachee(avec({ ...bon, total: 9 }), MAINTENANT).raison, /total/);
+  assert.match(lireLigneCachee(avec({ ...bon, depuis: '2026-10-19T00:00:00.000Z' }), MAINTENANT).raison, /début après la fin/);
+  assert.match(lireLigneCachee(avec({ ...bon, fin: '2026-10-20T10:00:00.000Z', depuis: '2026-10-12T10:00:00.000Z' }), MAINTENANT).raison, /futur/);
+});
+
+test('cumul repris : base + tâches acceptées STRICTEMENT après sa fin, rien avant n\'est recompté', () => {
+  const base = baseDe(2 * J, effectifs(10, 1, 0, 2)); // 13 tâches jusqu'à il y a 2 jours
+  const r = calculer({
+    maintenant: MAINTENANT,
+    base,
+    depots: [
+      depotVide('a', {
+        taches: [
+          tache(1, 5 * J, 2 * J), // fermée EXACTEMENT à la fin de la base : déjà comptée dans la base
+          tache(2, 4 * J, 2 * J - 1), // 1 ms après : nouvelle (fil)
+          tache(3, 3 * J, 1 * J, { auteurPr: 'copilot-swe-agent[bot]' }), // nouvelle (Copilot)
+          tache(4, 6 * J, 3 * J), // avant la base : déjà comptée
+        ],
+      }),
+    ],
+  });
+  const c = r.vitesse.cumul;
+  assert.deepEqual([c.total, c.fil, c.Jules, c.Copilot, c.inconnu], [15, 11, 1, 1, 2]);
+  assert.equal(c.nouvelles, 2);
+  assert.equal(c.repris, true);
+  assert.equal(c.limite, false);
+  assert.equal(c.depuis, base.depuis);
+  assert.deepEqual(c.parts, { fil: 73, Jules: 7, Copilot: 7, inconnu: 13 });
+});
+
+test('cumul repris : sans nouvelle tâche le cumul ne bouge pas ; base plus vieille que la lecture = trou dit', () => {
+  const base = baseDe(1 * J, effectifs(4, 0, 0, 0));
+  const r = calculer({ maintenant: MAINTENANT, base, depots: [depotVide('a')] });
+  assert.deepEqual([r.vitesse.cumul.total, r.vitesse.cumul.nouvelles], [4, 0]);
+  const vieille = calculer({ maintenant: MAINTENANT, base: baseDe(60 * J, effectifs(4, 0, 0, 0), 70 * J), depots: [depotVide('a', { taches: [tache(1, 50 * J, 45 * J), tache(2, 3 * J, 2 * J)] })] });
+  assert.equal(vieille.vitesse.cumul.total, 5, 'base + la seule tâche lue dans les 42 jours');
+  assert.equal(vieille.vitesse.cumul.limite, true);
+  assert.match(rendre(vieille), /lecture limitée aux 42 derniers jours/);
+});
+
+test('rendu du cumul : repris (avec le nombre de nouvelles) ou relu en entier avec la raison ; appels écrits', () => {
+  const repris = calculer({ maintenant: MAINTENANT, base: baseDe(2 * J, effectifs(3, 0, 0, 0)), depots: [depotVide('a', { taches: [tache(1, 3 * J, 1 * J)] })] });
+  const t1 = rendre({ ...repris, lecture: { taches: 14, total: 90 } });
+  assert.match(t1, /repris du rapport précédent, plus 1 tâche\(s\) acceptée\(s\) depuis/);
+  assert.match(t1, /: \*\*4\*\* — fil Claude 4 \(100 %\)/);
+  assert.match(t1, /\*\*14\*\* appels pour relire les tâches acceptées.*90 appels au total/);
+  const entier = calculer({ maintenant: MAINTENANT, cumulDepuis: MAINTENANT - 5 * J, depots: [depotVide('a')] });
+  assert.match(rendre({ ...entier, cumulSource: 'la ligne cachée du rapport #9 est illisible (JSON invalide)' }), /relu en entier : la ligne cachée du rapport #9 est illisible \(JSON invalide\)/);
+  assert.match(rendre(entier), /relu en entier : aucun rapport précédent/);
+  assert.doesNotMatch(rendre(entier), /appels pour relire/, 'pas de ligne de lecture sans compteur');
 });
 
 test('cycleRouge : échec puis succès du même workflow, ou échec jamais résolu', () => {
@@ -259,7 +333,9 @@ test('collecterDepot : dépôt privé illisible ; dépôt lisible normalisé (is
     const v = f();
     return typeof v === 'string' ? v : JSON.stringify(v);
   };
-  const d = await collecterDepot(gh, 'x', MAINTENANT, () => ({ vert: 1, rouge: 0, aRelire: 0, sansObjet: 0, lignesRouges: [] }));
+  const compteur = { taches: 0 };
+  const d = await collecterDepot(gh, 'x', MAINTENANT, () => ({ vert: 1, rouge: 0, aRelire: 0, sansObjet: 0, lignesRouges: [] }), undefined, compteur);
+  assert.equal(compteur.taches, 2, 'une tâche acceptée = un commentaire + une PR relus');
   assert.equal(d.lisible, true);
   assert.deepEqual(d.taches.map((t) => [t.numero, Boolean(t.acceptee), t.acceptee?.prFusionLe != null]), [[1, true, true]]);
   assert.deepEqual([d.taches[0].auteurPr, d.taches[0].assignes], ['copilot-swe-agent[bot]', ['Copilot']]);
