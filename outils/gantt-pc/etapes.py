@@ -48,6 +48,9 @@ def associer(prs, deploiements):
     return out
 
 
+class Plafond(Exception): pass
+
+
 def _gq(valeur): return json.dumps(valeur)       # une chaîne GraphQL est une chaîne JSON
 
 
@@ -84,7 +87,9 @@ def releve(prlog, depots, cache, graphql, maintenant, plafond=PLAFOND_REQUETES, 
     prets, dep = cache.setdefault('prets', {}), cache.setdefault('dep', {})
     sans, absents = cache.setdefault('sans', {}), cache.setdefault('absents', {})
     def lire(requete):
-        with verrou: compte[0] += 1
+        with verrou:
+            if compte[0] >= plafond: raise Plafond()          # le plafond vaut pour TOUT le tour, tous dépôts confondus
+            compte[0] += 1
         return graphql(requete)
     def par(f, items):
         with ThreadPoolExecutor(max(1, paralleles)) as ex: return list(ex.map(f, items))
@@ -116,12 +121,11 @@ def releve(prlog, depots, cache, graphql, maintenant, plafond=PLAFOND_REQUETES, 
     parcles = {}
     for x in prs:
         if x.get('ms') and not resolue(x): parcles.setdefault(x['r'], []).append(x)
-    pages_max = max(1, plafond - len(lots))
     couvert = {}
     def lister(cle):
         nodes, apres, pages = [], None, 0
         try:
-            while pages < min(PAGES_DEPLOIEMENTS, pages_max):
+            while pages < PAGES_DEPLOIEMENTS:
                 depot = (lire(requete_deploiements(depots[cle], apres)).get('data') or {}).get('repository')
                 if depot is None: return None, f'{depots[cle]} : déploiements : dépôt illisible'
                 page = depot['deployments']; pages += 1
@@ -129,6 +133,7 @@ def releve(prlog, depots, cache, graphql, maintenant, plafond=PLAFOND_REQUETES, 
                 if not page['pageInfo']['hasNextPage'] or min(n['createdAt'] for n in page['nodes']) < min(x['m'] for x in parcles[cle]): break
                 apres = page['pageInfo']['endCursor']
             return nodes, None
+        except Plafond: return nodes, None          # plafond atteint : ce qui est lu sert (couvert_depuis dit jusqu'où), le reste au tour suivant
         except Exception as e: return None, f'{depots[cle]} : déploiements : {str(e)[:160]}'
     for cle, (nodes, erreur) in zip(parcles, par(lister, list(parcles))):
         if erreur: erreurs.append(erreur); continue
