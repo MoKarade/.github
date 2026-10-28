@@ -9,10 +9,25 @@ _ENV = os.environ.get('GANTT_CACHE_HTTP', '')
 ACTIF = _ENV != 'off'
 DOSSIER = (_ENV if _ENV not in ('', 'off') else '/tmp/gantt-cache-http') .rstrip('/') + '/'
 STATS = {'req': 0, 'n304': 0, 'n200': 0, 'erreurs': 0, 'limite': 0, 'relectures_vide': 0}
+PAR_CHEMIN = {}               # requêtes COMPTÉES (200 et erreurs, pas les 304) par forme de chemin : .github#741 (qui pèse dans un relevé « léger » de 187 appels ?)
 ATTENTES_VIDE = (1, 2, 3)     # secondes avant chaque relecture d'une liste vide (les tests les mettent à zéro)
 _V = threading.Lock()
 TRANSITOIRE = re.compile(r'HTTP (429|50[234])|timed? ?out|EOF|connection (reset|refused)|temporar|TLS|handshake', re.I)
 if ACTIF: os.makedirs(DOSSIER, exist_ok=True)
+
+def forme(path):
+    """Forme d'un chemin pour le décompte : sans requête, le dépôt devient R, les nombres N, les SHA S. 'repos/MoKarade/x/issues/12/comments?page=2' -> 'repos/R/issues/N/comments'."""
+    p = re.sub(r'^/', '', path.split('?')[0])
+    p = re.sub(r'^repos/[^/]+/[^/]+', 'repos/R', p)
+    p = re.sub(r'/[0-9a-f]{7,40}(?=/|$)', '/S', p)
+    return re.sub(r'/\d+(?=/|$)', '/N', p)
+
+def _compter(path):
+    with _V: PAR_CHEMIN[forme(path)] = PAR_CHEMIN.get(forme(path), 0) + 1
+
+def detail_comptees(n=8):
+    """Les n formes de chemin les plus coûteuses : [(forme, appels comptés)], triées par coût décroissant puis par nom."""
+    with _V: return sorted(PAR_CHEMIN.items(), key=lambda kv: (-kv[1], kv[0]))[:n]
 
 def _fichier(cle): return DOSSIER + hashlib.sha1(cle.encode()).hexdigest() + '.json'
 
@@ -75,6 +90,7 @@ def _lire(path, *args, ecrire_vide=False):
             return (json.loads(corps_cache) if corps_cache.strip() else None), cache_vide
         if statut is not None and 200 <= statut < 300:
             with _V: STATS['n200'] += 1
+            _compter(path)
             res = json.loads(corps) if corps.strip() else None
             if ACTIF and en.get('etag') and (ecrire_vide or not _vide(res)):
                 try:
@@ -83,6 +99,7 @@ def _lire(path, *args, ecrire_vide=False):
                 except OSError: pass
             return res, False
         with _V: STATS['erreurs'] += 1
+        _compter(path)
         dernier = f"{path.split('?')[0]} : HTTP {statut} " + (corps or r.stderr or r.stdout)[:200].replace('\n', ' ')
         # limite secondaire (403/429 « rate limit ») : on attend ce que GitHub demande, sans insister
         if statut in (403, 429) and re.search(r'rate limit|abuse', corps or '', re.I):
