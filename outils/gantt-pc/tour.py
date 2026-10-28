@@ -126,6 +126,11 @@ def releve(econome=False, quota_complet=True, drive=None):
     # dans CE tour. Vide tant que Marc n'a pas autorisé l'accès ; un échec se DIT et ne bloque rien.
     gm = gmail_recus.passer(maintenant())
     if gm: quota += ' · ' + gm
+    # 1 ter. PR ouvertes (prs_ouvertes.py, .github#679) : chaque PR de chaque dépôt avec sa CI, son état Mergify et le dernier déploiement, pour l'onglet « En cours ».
+    # Lectures à ETag, au plus 80 comptées ; sauté au tour économe (le fichier précédent garde son `releve`) ; un échec se DIT et ne bloque rien.
+    if not econome:
+        if lancer([PY, 'prs_ouvertes.py'], '.refresh-prs.log', 300) == 0: quota += ' · ' + (queue('.refresh-prs.log', 160) or 'PR ouvertes : sans sortie')
+        else: quota += ' · PR ouvertes : ÉCHEC ' + queue('.refresh-prs.log', 200)
     # 2. file du script + données de la page
     if lancer([PY, 'build.py'], '.refresh-build.log', 600) != 0: return 1, f'ÉCHEC {maintenant()} build.py : {queue(".refresh-build.log")}'
     asof = lire('backlog.json')['asof']
