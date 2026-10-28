@@ -1,0 +1,312 @@
+#!/usr/bin/env python3
+# Tests de gmail_auth.py et gmail_recus.py : python -X utf8 -m unittest test_gmail.py (depuis outils/gantt-pc).
+# Courriels, montants, identifiants et jetons FICTIFS (valeurs rondes) : aucune donnée réelle, aucun appel réseau, pas de DPAPI (chiffrement simulé).
+import base64
+import hashlib
+import json
+import os
+import tempfile
+import unittest
+import urllib.parse
+
+import gmail_auth as A
+import gmail_recus as R
+
+# « chiffrement » de test : réversible, ne ressemble pas au clair
+PROTEGER = lambda b: b'ENC:' + base64.b64encode(b[::-1])
+DEPROTEGER = lambda b: base64.b64decode(b[4:])[::-1]
+MAINTENANT = '2000-01-15T12:00:00Z'
+
+
+def lire_json(p):
+    with open(p, encoding='utf-8') as f:
+        return json.load(f)
+
+
+def lire_octets(p):
+    with open(p, 'rb') as f:
+        return f.read()
+
+
+def message(i='m1', de='Anthropic <x@example.invalid>', objet='Receipt from Anthropic', extrait='Total $10.00 paid', ms=947_937_600_000):
+    return {'id': i, 'snippet': extrait, 'internalDate': str(ms), 'payload': {'headers': [{'name': 'From', 'value': de}, {'name': 'Subject', 'value': objet}]}}
+
+
+class Pkce(unittest.TestCase):
+    def test_defi_est_le_sha256_du_verifier_en_base64url_sans_bourrage(self):
+        v, d = A.pkce()
+        self.assertTrue(43 <= len(v) <= 128)
+        attendu = base64.urlsafe_b64encode(hashlib.sha256(v.encode()).digest()).rstrip(b'=').decode()
+        self.assertEqual(d, attendu)
+        self.assertNotIn('=', d)
+
+    def test_deux_tirages_different(self):
+        self.assertNotEqual(A.pkce()[0], A.pkce()[0])
+
+    def test_url_ne_demande_que_la_lecture_seule(self):
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(A.url_autorisation('cid', 'http://127.0.0.1:1', 'dd', 'ee')).query)
+        self.assertEqual(q['scope'], ['https://www.googleapis.com/auth/gmail.readonly'])
+        self.assertEqual(q['code_challenge_method'], ['S256'])
+        self.assertEqual(q['access_type'], ['offline'])
+        self.assertEqual(q['redirect_uri'], ['http://127.0.0.1:1'])
+
+
+class Client(unittest.TestCase):
+    def ecrire(self, d, contenu):
+        p = os.path.join(d, 'c.json')
+        with open(p, 'w') as f:
+            f.write(contenu)
+        return p
+
+    def test_lit_un_client_de_bureau(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = self.ecrire(d, json.dumps({'installed': {'client_id': 'id-fictif', 'client_secret': 'secret-fictif'}}))
+            self.assertEqual(A.lire_client(p), ('id-fictif', 'secret-fictif'))
+
+    def test_secret_facultatif(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(A.lire_client(self.ecrire(d, json.dumps({'installed': {'client_id': 'id-fictif'}}))), ('id-fictif', None))
+
+    def test_absent_et_illisible_ont_des_codes_distincts(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(A.ErreurGmail) as c:
+                A.lire_client(os.path.join(d, 'nexiste-pas.json'))
+            self.assertEqual(c.exception.code, 'client_absent')
+            for contenu in ('pas du json', '[]', '{}', '{"installed": {}}'):
+                with self.assertRaises(A.ErreurGmail) as c:
+                    A.lire_client(self.ecrire(d, contenu))
+                self.assertEqual(c.exception.code, 'client_illisible', contenu)
+
+
+class Jeton(unittest.TestCase):
+    def test_le_fichier_du_jeton_n_est_jamais_en_clair(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, 'j.bin')
+            A.sauver_jeton('refresh-fictif-123', p, PROTEGER)
+            self.assertNotIn(b'refresh-fictif-123', lire_octets(p))
+            self.assertEqual(A.charger_jeton(p, DEPROTEGER), 'refresh-fictif-123')
+
+    def test_jeton_absent(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(A.ErreurGmail) as c:
+                A.charger_jeton(os.path.join(d, 'x.bin'), DEPROTEGER)
+            self.assertEqual(c.exception.code, 'jeton_absent')
+
+    def prep(self, d, secret=True):
+        cp, jp = os.path.join(d, 'c.json'), os.path.join(d, 'j.bin')
+        with open(cp, 'w') as f:
+            json.dump({'installed': {'client_id': 'id-fictif', **({'client_secret': 's-fictif'} if secret else {})}}, f)
+        A.sauver_jeton('ancien', jp, PROTEGER)
+        return cp, jp
+
+    def test_acces_obtenu_avec_le_jeton_de_renouvellement(self):
+        vu = {}
+
+        def requete(methode, url, donnees=None, entetes=None):
+            vu.update(methode=methode, url=url, donnees=donnees)
+            return 200, {'access_token': 'acces-fictif'}
+        with tempfile.TemporaryDirectory() as d:
+            cp, jp = self.prep(d)
+            self.assertEqual(A.jeton_d_acces(cp, jp, requete, DEPROTEGER, PROTEGER), 'acces-fictif')
+            self.assertEqual(vu['donnees']['grant_type'], 'refresh_token')
+            self.assertEqual(vu['donnees']['refresh_token'], 'ancien')
+            self.assertEqual(vu['donnees']['client_secret'], 's-fictif')
+            self.assertEqual(A.charger_jeton(jp, DEPROTEGER), 'ancien')
+
+    def test_un_nouveau_jeton_de_renouvellement_remplace_l_ancien(self):
+        with tempfile.TemporaryDirectory() as d:
+            cp, jp = self.prep(d)
+            A.jeton_d_acces(cp, jp, lambda *a, **k: (200, {'access_token': 'a', 'refresh_token': 'neuf'}), DEPROTEGER, PROTEGER)
+            self.assertEqual(A.charger_jeton(jp, DEPROTEGER), 'neuf')
+
+    def test_invalid_grant_demande_a_reautoriser(self):
+        with tempfile.TemporaryDirectory() as d:
+            cp, jp = self.prep(d)
+            with self.assertRaises(A.ErreurGmail) as c:
+                A.jeton_d_acces(cp, jp, lambda *a, **k: (400, {'error': 'invalid_grant'}), DEPROTEGER, PROTEGER)
+            self.assertEqual(c.exception.code, 'reautoriser')
+
+    def test_panne_de_reponse_n_est_pas_une_reautorisation(self):
+        with tempfile.TemporaryDirectory() as d:
+            cp, jp = self.prep(d)
+            with self.assertRaises(A.ErreurGmail) as c:
+                A.jeton_d_acces(cp, jp, lambda *a, **k: (503, {}), DEPROTEGER, PROTEGER)
+            self.assertEqual(c.exception.code, 'reponse')
+
+    def test_echange_du_code_exige_un_jeton_de_renouvellement(self):
+        self.assertEqual(A.echanger_code('i', None, 'code', 'v', 'http://127.0.0.1:1', lambda *a, **k: (200, {'access_token': 'a', 'refresh_token': 'r'})), 'r')
+        with self.assertRaises(A.ErreurGmail):
+            A.echanger_code('i', None, 'code', 'v', 'http://127.0.0.1:1', lambda *a, **k: (200, {'access_token': 'a'}))
+
+    def test_le_message_d_erreur_ne_contient_jamais_le_jeton(self):
+        with tempfile.TemporaryDirectory() as d:
+            cp, jp = self.prep(d)
+            with self.assertRaises(A.ErreurGmail) as c:
+                A.jeton_d_acces(cp, jp, lambda *a, **k: (400, {'error': 'invalid_grant', 'error_description': 'ancien'}), DEPROTEGER, PROTEGER)
+            self.assertNotIn('ancien', str(c.exception))
+
+
+class Montants(unittest.TestCase):
+    def test_formats_courants(self):
+        self.assertEqual(R.montants('Total $10.00'), {(10.0, None)})
+        self.assertEqual(R.montants('Total 10,50 $'), {(10.5, None)})
+        self.assertEqual(R.montants('US$20.00 paid'), {(20.0, 'USD')})
+        self.assertEqual(R.montants('CA$16.09'), {(16.09, 'CAD')})
+        self.assertEqual(R.montants('1 234,50 $ CAD'), {(1234.5, None)} | set())      # « $ » suivi de CAD : le marqueur retenu est « $ »
+        self.assertEqual(R.montants('1,234.50 USD'), {(1234.5, 'USD')})
+
+    def test_sans_marqueur_de_devise_rien_n_est_pris(self):
+        self.assertEqual(R.montants('Commande 2000.01 du 10.10 numéro 123.45'), set())
+
+    def test_zero_et_texte_vide(self):
+        self.assertEqual(R.montants('$0.00'), set())
+        self.assertEqual(R.montants(''), set())
+        self.assertEqual(R.montants(None), set())
+
+
+class Recus(unittest.TestCase):
+    def test_recu_simple_devise_ambigue_a_verifier(self):
+        r = R.en_recu(message())
+        self.assertEqual((r['fournisseur'], r['montant'], r['devise'], r['date']), ('Anthropic', 10.0, None, '2000-01-15'))
+        self.assertTrue(r['a_verifier'], 'un « $ » seul ne dit pas la devise')
+
+    def test_devise_explicite_n_est_pas_a_verifier(self):
+        r = R.en_recu(message(extrait='Total US$10.00'))
+        self.assertEqual((r['montant'], r['devise'], r['a_verifier']), (10.0, 'USD', False))
+
+    def test_deux_montants_differents_aucun_choisi(self):
+        r = R.en_recu(message(extrait='Sous-total US$10.00, total US$11.50'))
+        self.assertIsNone(r['montant'])
+        self.assertTrue(r['a_verifier'])
+
+    def test_deux_fois_le_meme_montant_compte_pour_un(self):
+        self.assertEqual(R.en_recu(message(extrait='US$10.00 payé, solde US$10.00'))['montant'], 10.0)
+
+    def test_pas_de_montant_lisible_a_verifier(self):
+        r = R.en_recu(message(extrait='Voir la facture en ligne'))
+        self.assertIsNone(r['montant'])
+        self.assertTrue(r['a_verifier'])
+
+    def test_courriel_qui_n_est_pas_un_recu_est_ignore(self):
+        self.assertIsNone(R.en_recu(message(objet='Nouveautés de la semaine')))
+        self.assertIsNone(R.en_recu(message(de='Inconnu <x@example.invalid>', objet='Receipt #1')))
+
+    def test_rien_de_personnel_n_est_garde(self):
+        r = R.en_recu(message(de='Anthropic <secret@example.invalid>', objet='Receipt from Anthropic for jean@example.invalid', extrait='Pour jean@example.invalid $10.00'))
+        self.assertEqual(set(r), {'id', 'date', 'fournisseur', 'montant', 'devise', 'a_verifier'})
+        self.assertNotIn('example.invalid', json.dumps(r))
+
+    def test_message_mal_forme_ne_leve_pas(self):
+        for m in (None, {}, {'id': 3}, {'id': 'x', 'payload': 'a'}, {'id': 'x', 'payload': {'headers': ['a']}}):
+            self.assertIsNone(R.en_recu(m))
+
+
+class Cadence(unittest.TestCase):
+    def test_premiere_fois_sept_jours_et_reessai(self):
+        self.assertTrue(R.a_lire(None, MAINTENANT))
+        self.assertFalse(R.a_lire({'lu_le': '2000-01-10T12:00:00Z', 'recus': []}, MAINTENANT))
+        self.assertTrue(R.a_lire({'lu_le': '2000-01-08T11:00:00Z', 'recus': []}, MAINTENANT))
+        self.assertFalse(R.a_lire({'lu_le': '2000-01-01T00:00:00Z', 'erreur': 'reseau', 'tentative': '2000-01-15T09:00:00Z', 'recus': []}, MAINTENANT))
+        self.assertTrue(R.a_lire({'lu_le': '2000-01-01T00:00:00Z', 'erreur': 'reseau', 'tentative': '2000-01-15T05:00:00Z', 'recus': []}, MAINTENANT))
+
+    def test_fusion_dedoublonne_trie_et_compte_les_neufs(self):
+        anciens = [{'id': 'a', 'date': '2000-01-01'}, {'id': 'b', 'date': '2000-01-05'}]
+        liste, neufs = R.fusionner(anciens, [{'id': 'b', 'date': '2000-01-05', 'montant': 1.0}, {'id': 'c', 'date': '2000-01-09'}])
+        self.assertEqual([r['id'] for r in liste], ['c', 'b', 'a'])
+        self.assertEqual(neufs, 1)
+        self.assertEqual(liste[1]['montant'], 1.0)
+
+    def test_fusion_plafonnee(self):
+        liste, _ = R.fusionner([], [{'id': str(i), 'date': '2000-01-01'} for i in range(R.MAX_GARDES + 10)])
+        self.assertEqual(len(liste), R.MAX_GARDES)
+
+
+class Passer(unittest.TestCase):
+    def installer(self, d):
+        cp, jp, rp = (os.path.join(d, n) for n in ('c.json', 'j.bin', 'r.json'))
+        with open(cp, 'w') as f:
+            json.dump({'installed': {'client_id': 'id-fictif'}}, f)
+        A.sauver_jeton('ref', jp, PROTEGER)
+        return cp, jp, rp
+
+    def faux_gmail(self, messages, appels=None):
+        def requete(methode, url, donnees=None, entetes=None):
+            if appels is not None:
+                appels.append((methode, url, entetes))
+            if url.startswith(A.URL_JETON):
+                return 200, {'access_token': 'acces-fictif'}
+            chemin = urllib.parse.urlsplit(url).path
+            if chemin.endswith('/messages'):
+                return 200, {'messages': [{'id': m['id']} for m in messages]}
+            return 200, next(m for m in messages if chemin.endswith('/' + m['id']))
+        return requete
+
+    def passer(self, d, requete, maintenant=MAINTENANT):
+        cp, jp, rp = self.installer(d) if not os.path.exists(os.path.join(d, 'c.json')) else (os.path.join(d, 'c.json'), os.path.join(d, 'j.bin'), os.path.join(d, 'r.json'))
+        return R.passer(maintenant, rp, cp, jp, requete, DEPROTEGER, PROTEGER), rp
+
+    def test_lecture_reussie_ecrit_le_fichier_prive_et_dit_une_phrase(self):
+        with tempfile.TemporaryDirectory() as d:
+            appels = []
+            phrase, rp = self.passer(d, self.faux_gmail([message('m1'), message('m2', objet='Bonjour')], appels))
+            self.assertEqual(phrase, 'Gmail : 1 reçu(s) lu(s), 1 nouveau(x)')
+            etat = lire_json(rp)
+            self.assertEqual((etat['lu_le'], etat['erreur'], [r['id'] for r in etat['recus']]), (MAINTENANT, None, ['m1']))
+            gets = [a for a in appels if 'gmail.googleapis.com' in a[1]]
+            self.assertTrue(all(a[0] == 'GET' and a[2]['Authorization'] == 'Bearer acces-fictif' for a in gets))
+            self.assertTrue(all('format=metadata' in a[1] for a in gets if '/messages/' in a[1]), 'jamais le corps des courriels')
+
+    def test_pas_encore_du_moment_aucun_appel(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.passer(d, self.faux_gmail([message()]))
+            appels = []
+            phrase, _ = self.passer(d, self.faux_gmail([message()], appels), '2000-01-16T12:00:00Z')
+            self.assertEqual((phrase, appels), ('', []))
+
+    def test_pas_encore_autorise_ne_dit_rien_et_n_ecrit_rien(self):
+        with tempfile.TemporaryDirectory() as d:
+            rp = os.path.join(d, 'r.json')
+            self.assertEqual(R.passer(MAINTENANT, rp, os.path.join(d, 'absent.json'), os.path.join(d, 'absent.bin'), lambda *a, **k: (500, {})), '')
+            self.assertFalse(os.path.exists(rp))
+
+    def test_autorisation_expiree_se_dit_et_garde_les_recus(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.passer(d, self.faux_gmail([message()]))
+
+            def refuse(methode, url, donnees=None, entetes=None):
+                return 400, {'error': 'invalid_grant'}
+            phrase, rp = self.passer(d, refuse, '2000-01-30T12:00:00Z')
+            self.assertEqual(phrase, 'Gmail : autorisation à refaire (geste de Marc)')
+            etat = lire_json(rp)
+            self.assertEqual((etat['erreur'], [r['id'] for r in etat['recus']], etat['lu_le']), ('reautoriser', ['m1'], MAINTENANT))
+
+    def test_panne_reseau_garde_les_recus_et_reessaiera(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.passer(d, self.faux_gmail([message()]))
+
+            def panne(*a, **k):
+                raise A.ErreurGmail('reseau', 'OSError')
+            phrase, rp = self.passer(d, panne, '2000-01-30T12:00:00Z')
+            self.assertEqual(phrase, 'Gmail : échec (reseau)')
+            self.assertEqual([r['id'] for r in lire_json(rp)['recus']], ['m1'])
+
+    def test_api_desactivee_donne_un_code_refuse(self):
+        with tempfile.TemporaryDirectory() as d:
+            def requete(methode, url, donnees=None, entetes=None):
+                if url.startswith(A.URL_JETON):
+                    return 200, {'access_token': 'a'}
+                return 403, {'error': {'errors': [{'reason': 'accessNotConfigured'}]}}
+            phrase, rp = self.passer(d, requete)
+            self.assertEqual(phrase, 'Gmail : échec (refuse)')
+            self.assertEqual(lire_json(rp)['erreur'], 'refuse')
+
+    def test_une_exception_imprevue_ne_fait_pas_echouer_le_tour(self):
+        with tempfile.TemporaryDirectory() as d:
+            def bug(*a, **k):
+                raise KeyError('x')
+            phrase, _ = self.passer(d, bug)
+            self.assertEqual(phrase, 'Gmail : ÉCHEC KeyError')
+
+
+if __name__ == '__main__':
+    unittest.main()
