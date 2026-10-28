@@ -9,6 +9,9 @@
 // Il pose le commentaire « **Acceptée** » et ferme la tâche SEULEMENT si TOUT est vrai :
 //   - la tâche porte la ligne `**Acceptation automatique** : oui — <pourquoi>` (celui qui écrit la tâche affirme que son « Fini quand »
 //     est un contrôle CI ou un déploiement, jamais une lecture de la production : une machine ne lit que ce que GitHub sait) ;
+//     OU la tâche ne porte AUCUNE ligne « Acceptation automatique » (ni oui ni non) ni sonde, et la règle prudente du filet
+//     (`evaluerMarquage`, acceptation-marquage.mjs) la juge éligible À LA FUSION : la ligne n'a plus besoin d'être posée avant,
+//     ce qui perdait la course contre les fils (61 % des tâches sont prises en moins de 10 min, relevé du 28/10/2026). Une ligne « non » se respecte ;
 //   - la PR est fusionnée et cite CETTE seule tâche, ouverte, de son dépôt ; aucune autre PR ouverte ne la cite ;
 //   - la tâche n'attend rien (`preuve-attendue`, `qui:marc`, `bloqué`, `essai`, `preuve-manquante`) ;
 //   - aucun fichier d'écran n'est touché (jsx, tsx, css, html, images, `public/`) : un écran se prouve en le regardant, par un fil ;
@@ -125,14 +128,14 @@ export async function lireProduction({ sonde, fetchImpl = fetch, essais = ESSAIS
  * La tâche peut-elle s'accepter seule ? Rend { ok, motifs }.
  * `autresPr` : les PR ouvertes du dépôt (autres que celle qui vient de fusionner) ; `controles` : check-runs de la tête de la PR.
  */
-export function evaluerEligibilite({ issue, numeroTache, pr, fichiers, controles, autresPr = [], depot }) {
+export function evaluerEligibilite({ issue, numeroTache, pr, fichiers, controles, autresPr = [], depot, implicite = false }) {
   const motifs = [];
   const defaut = defautDeLaTache(issue);
   if (defaut) motifs.push(`la tâche ${defaut}`);
   else {
     const { sonde, erreur } = lireSonde(issue);
     if (erreur) motifs.push(erreur);
-    else if (!veutAuto(issue) && !sonde) motifs.push('la tâche ne porte pas la ligne « **Acceptation automatique** : oui — … » ni « **Fini quand exécutable** : GET … »');
+    else if (!veutAuto(issue) && !sonde && !implicite) motifs.push('la tâche ne porte pas la ligne « **Acceptation automatique** : oui — … » ni « **Fini quand exécutable** : GET … »');
     const attente = noms(issue).filter((n) => LABELS_ATTENTE.includes(n));
     if (attente.length) motifs.push(`la tâche attend quelque chose (${attente.join(', ')})`);
   }
@@ -165,7 +168,7 @@ export function derniersParNom(controles) {
 const court = (sha) => String(sha ?? '').slice(0, 7);
 
 /** Le commentaire de preuve : commence par « **Acceptée** », dit ce qui a été vérifié, porte le marqueur. */
-export function corpsAcceptee({ pr, controles, fichiers, deploiement, servie, sansDeploiement, sonde = null }) {
+export function corpsAcceptee({ pr, controles, fichiers, deploiement, servie, sansDeploiement, sonde = null, implicite = false }) {
   const verifies = controles.filter((c) => c.conclusion === 'success').length;
   const depl = servie && deploiement?.ok ? `déploiement READY (${deploiement.detail})` : `sans déploiement : ${sansDeploiement}`;
   return [
@@ -173,10 +176,24 @@ export function corpsAcceptee({ pr, controles, fichiers, deploiement, servie, sa
       `${fichiers.length} fichiers touchés, aucun écran ; ` +
       (sonde
         ? `acceptation automatique demandée par la ligne « Fini quand exécutable » de la tâche, production lue par la sonde : ${sonde.detail}.`
-        : 'acceptation automatique demandée par la ligne « Acceptation automatique » de la tâche, la production n’a pas été lue par une personne.'),
+        : implicite
+          ? 'acceptation automatique par la règle prudente appliquée à la fusion (le « Fini quand » de la tâche se lit par un test ou la CI, aucune ligne « Acceptation automatique » n’y figurait), la production n’a pas été lue par une personne.'
+          : 'acceptation automatique demandée par la ligne « Acceptation automatique » de la tâche, la production n’a pas été lue par une personne.'),
     '',
     MARQUEUR_AUTO,
   ].join('\n');
+}
+
+/**
+ * La règle prudente du filet s'applique-t-elle À LA FUSION à cette tâche ? Seulement si personne n'a décidé : aucune ligne
+ * « Acceptation automatique » (oui OU non), aucune sonde, pas Jules (il a sa propre acceptation). Import dynamique : acceptation-marquage.mjs
+ * importe ce module (ECRAN, LABELS_ATTENTE), un import statique ferait un cycle.
+ */
+export async function regleImplicite(issue) {
+  if (noms(issue).includes('jules')) return false;
+  const { aUneLigne, evaluerMarquage } = await import('./acceptation-marquage.mjs');
+  if (aUneLigne(issue?.body)) return false;
+  return evaluerMarquage({ titre: issue?.title ?? '', corps: issue?.body ?? '' }).ok;
 }
 
 const pages = async (api, chemin) => {
@@ -203,12 +220,15 @@ export async function accepterApresFusion({ api, depot, numeroPr, config = {}, m
   const numero = taches[0].numero;
   const issue = await api('GET', `/repos/${depot}/issues/${numero}`);
   // Question la moins chère d'abord : la plupart des tâches ne demandent pas l'acceptation automatique, rien d'autre n'est lu.
-  if (!issue || !(veutAuto(issue) || LIGNE_SONDE.test(String(issue.body ?? '')))) return ignoree('la tâche ne demande pas l’acceptation automatique');
+  if (!issue) return ignoree('la tâche ne demande pas l’acceptation automatique');
+  const decidee = veutAuto(issue) || LIGNE_SONDE.test(String(issue.body ?? ''));
+  const implicite = !decidee && (await regleImplicite(issue));
+  if (!decidee && !implicite) return ignoree('la tâche ne demande pas l’acceptation automatique');
 
   const fichiers = (await pages(api, `/repos/${depot}/pulls/${numeroPr}/files`)).map((f) => f.filename);
   const controles = derniersParNom(((await api('GET', `/repos/${depot}/commits/${pr.head?.sha}/check-runs?per_page=100`))?.check_runs ?? []).filter((c) => c.status === 'completed'));
   const ouvertes = ((await api('GET', `/repos/${depot}/pulls?state=open&per_page=30`)) ?? []).filter((p) => p.number !== numeroPr);
-  const verdict = evaluerEligibilite({ issue, numeroTache: numero, pr, fichiers, controles, autresPr: ouvertes, depot });
+  const verdict = evaluerEligibilite({ issue, numeroTache: numero, pr, fichiers, controles, autresPr: ouvertes, depot, implicite });
   if (!verdict.ok) return ignoree(...verdict.motifs);
 
   // L'adaptateur donne au garde-fou de preuve (api(chemin, { method, body })) la même API que le Réacteur (api(méthode, chemin, corps)).
@@ -234,6 +254,7 @@ export async function accepterApresFusion({ api, depot, numeroPr, config = {}, m
 
   const corps = corpsAcceptee({
     sonde: lue,
+    implicite,
     pr,
     controles,
     fichiers,

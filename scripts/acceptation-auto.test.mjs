@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ECRAN, MARQUEUR_AUTO, accepterApresFusion, corpsAcceptee, derniersParNom, ecran, evaluerEligibilite, lireProduction, lireSonde, veutAuto } from './acceptation-auto.mjs';
+import { ECRAN, MARQUEUR_AUTO, accepterApresFusion, regleImplicite, corpsAcceptee, derniersParNom, ecran, evaluerEligibilite, lireProduction, lireSonde, veutAuto } from './acceptation-auto.mjs';
 import { ENTETE_ABANDON, evaluer, trouverPreuve } from './preuve.mjs';
 
 const DEPOT = 'MoKarade/JobAI';
@@ -296,4 +296,49 @@ test('un écran touché reste prouvé par un fil, même avec une sonde', async (
 test('le corps sans sonde garde sa phrase d’origine', () => {
   const corps = corpsAcceptee({ pr: { number: 7, merge_commit_sha: SHA, head: { sha: TETE } }, controles: [], fichiers: ['a.md'], deploiement: { ok: null }, servie: false, sansDeploiement: 'docs' });
   assert.match(corps, /la production n’a pas été lue par une personne\./);
+});
+
+// Règle prudente appliquée À LA FUSION (tâche #699) : la ligne n'a plus besoin d'avoir été posée avant, ce qui perdait la course contre les fils.
+const SANS_LIGNE = '**Avant** : x\n\n**Après** : y\n\n**Fini quand** : les tests et la CI sont verts.\n\n**Fichiers touchés** :\n- `scripts/a.mjs`\n\n**Attend** : aucune';
+
+test('sans aucune ligne « Acceptation automatique », un « Fini quand » de machine s’accepte à la fusion, et le commentaire le dit', async () => {
+  const f = faux({ issueBody: SANS_LIGNE });
+  const r = await lancer(f);
+  assert.equal(r.statut, 'acceptee');
+  assert.equal(f.etat.issue.state, 'closed');
+  const preuve = f.etat.commentaires[0].body;
+  assert.match(preuve, /règle prudente appliquée à la fusion/);
+  assert.match(preuve, /la production n’a pas été lue par une personne/);
+  assert.ok(trouverPreuve(f.etat.commentaires));
+});
+
+test('une ligne « non » se respecte, une tâche non éligible, Jules ou une attente ne s’acceptent pas seuls', async () => {
+  const cas = [
+    [{ issueBody: `${SANS_LIGNE}\n**Acceptation automatique** : non — à regarder.` }, /ne demande pas/],
+    [{ issueBody: '**Avant** : x\n**Fini quand** : la page affiche le bouton.\n**Fichiers touchés** :\n- `scripts/a.mjs`' }, /ne demande pas/],
+    [{ issueBody: SANS_LIGNE, labels: ['niveau:tâche', 'jules'] }, /ne demande pas/],
+    [{ issueBody: SANS_LIGNE, labels: ['niveau:tâche', 'qui:marc'] }, /attend quelque chose/],
+    [{ issueBody: SANS_LIGNE, fichiers: ['app/page.tsx'] }, /écran/],
+    [{ issueBody: SANS_LIGNE, controles: [{ name: 'Gate', status: 'completed', conclusion: 'failure' }] }, /rouge/],
+  ];
+  for (const [options, motif] of cas) {
+    const f = faux(options);
+    const r = await lancer(f);
+    assert.equal(r.statut, 'ignoree', JSON.stringify(options));
+    assert.match(r.motifs.join(' '), motif, JSON.stringify(options));
+    assert.deepEqual(f.etat.ecritures, [], JSON.stringify(options));
+  }
+});
+
+test('regleImplicite : vraie seulement sans ligne, sans Jules, avec un « Fini quand » de machine', async () => {
+  assert.equal(await regleImplicite({ title: 't', body: SANS_LIGNE, labels: [] }), true);
+  assert.equal(await regleImplicite({ title: 't', body: `${SANS_LIGNE}\n${AUTO}`, labels: [] }), false);
+  assert.equal(await regleImplicite({ title: 't', body: SANS_LIGNE, labels: [{ name: 'jules' }] }), false);
+  assert.equal(await regleImplicite({ title: 't', body: 'rien', labels: [] }), false);
+});
+
+test('le corps de la règle prudente remplace la phrase d’origine', () => {
+  const corps = corpsAcceptee({ pr: { number: 7, merge_commit_sha: SHA, head: { sha: TETE } }, controles: [], fichiers: ['a.md'], deploiement: { ok: null }, servie: false, sansDeploiement: 'docs', implicite: true });
+  assert.doesNotMatch(corps, /demandée par la ligne/);
+  assert.match(corps, /règle prudente appliquée à la fusion/);
 });
