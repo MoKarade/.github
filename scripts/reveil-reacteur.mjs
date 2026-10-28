@@ -84,7 +84,8 @@ export const BOITES = {
 };
 // Dépôts dont le fil est CONFIRMÉ réveillé par sa boîte : plus de ligne sur la #58 pour eux. On n'y ajoute un dépôt qu'après un réveil réel de son fil (un fil non abonné ne doit rien perdre).
 // Hubperso : confirmé le 28/10/2026 à 22:01:53Z (commentaire de la boîte #203 à 22:01:50Z). MemoryAI : 22:01:59Z (boîte #206).
-export const BOITES_DIRECTES = new Set(['MoKarade/Hubperso', 'MoKarade/MemoryAI']);
+// DriveAI : 22:03:26Z (#200). FinanceAI : 22:03:37Z (#201). batchchef- : vers 22:03Z (#198).
+export const BOITES_DIRECTES = new Set(['MoKarade/Hubperso', 'MoKarade/MemoryAI', 'MoKarade/DriveAI', 'MoKarade/FinanceAI', 'MoKarade/batchchef-']);
 // Ce qui regarde le fil d'une app (une place libre, une tâche prête, une preuve à poser) ; la CI rouge, les notes LIA et le filet restent au Coordinateur.
 export const TYPES_POUR_LE_FIL = new Set(['pr_fusionnee', 'tache_fermee', 'tache_ouverte', 'deploiement']);
 
