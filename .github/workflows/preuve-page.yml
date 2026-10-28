@@ -4,7 +4,8 @@ name: Preuve de page, classe B (workflow commun)
 # fusionné est lancée avec les DONNÉES FICTIVES des tests (comme `captures.yml`), un navigateur sans tête lit les pages demandées par les lignes
 # « Lecture de page » de la tâche, puis `accepterApresFusion` (scripts/acceptation-auto.mjs) pose « **Acceptée** » et ferme la tâche APRÈS le déploiement
 # READY. Le commentaire dit que la lecture est fictive. Si rien n'est accepté, le Réacteur réveille le fil de l'app (type `preuve_page`) : rien ne se perd.
-# Tâche MoKarade/.github#781 ; aucun minuteur, aucun secret (le jeton du job suffit ; REVEIL_TOKEN, facultatif, sert au réveil comme dans reveil-reacteur.yml).
+# Tâche MoKarade/.github#781 ; aucun minuteur, aucun secret : le jeton du job suffit. Le réveil du fil passe donc par la boîte LOCALE du dépôt
+# (`reveilLocal` de scripts/reveil-reacteur.mjs : une PR brouillon permanente `claude/boite-reacteur`, comme FinanceAI#38 et MemoryAI#442), jamais par un jeton.
 #
 # Appel depuis une app (PR fusionnée du dépôt lui-même ; jamais une PR de fork) :
 #
@@ -16,7 +17,6 @@ name: Preuve de page, classe B (workflow commun)
 #       if: github.event.pull_request.merged == true && github.event.pull_request.head.repo.full_name == github.repository
 #       permissions: { contents: read, pull-requests: write, issues: write, checks: read, actions: write, deployments: read }
 #       uses: MoKarade/.github/.github/workflows/preuve-page.yml@main
-#       secrets: inherit
 #       with:
 #         runner: ${{ github.event.repository.visibility == 'public' && '"ubuntu-latest"' || '["self-hosted","pc-marc"]' }}
 #         installation: npm ci
@@ -62,10 +62,6 @@ on:
         description: 'Workflows qui déploient hors Vercel (ex. deploy.yml), séparés par des virgules.'
         type: string
         default: ''
-    secrets:
-      REVEIL_TOKEN:
-        description: 'Jeton fin limité à app-template (Actions : lecture et écriture), pour réveiller le fil si la tâche n’est pas acceptée.'
-        required: false
 
 permissions: {}
 
@@ -148,8 +144,7 @@ jobs:
       - name: Lire les pages (données fictives des tests)
         id: lire
         if: steps.decider.outputs.applicable == 'true'
-        continue-on-error: true
-        run: bash .preuve/scripts/preuve-page-lancer.sh "$GITHUB_WORKSPACE/app"
+        run: bash .preuve/scripts/preuve-page-lancer.sh "$GITHUB_WORKSPACE/app" || echo "::warning title=Preuve de page::lecture impossible, le fil de l'app prouvera"
 
       - name: Accepter la tâche si les pages sont conformes
         id: accepter
@@ -159,7 +154,6 @@ jobs:
       - name: Dire au Coordinateur ce qui s'est passé
         if: always() && steps.decider.outputs.applicable == 'true'
         env:
-          REVEIL_TOKEN: ${{ secrets.REVEIL_TOKEN }}
           REVEIL_TYPE: preuve_page
           REVEIL_DEPOT: ${{ github.repository }}
           REVEIL_PR: ${{ github.event.pull_request.number }}
