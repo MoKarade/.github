@@ -13,8 +13,13 @@ name: Surveillance des apps
 #
 # Tâche #30 : si une app dont la santé est rouge a un projet Vercel déclaré (`vercel` dans surveillance/apps.json)
 # et que sa panne suit un déploiement récent, la version précédente est remise en ligne et une issue `incident` est
-# ouverte (scripts/retour-arriere.mjs). Seul pas qui lit un secret du dépôt : VERCEL_TOKEN. Sans lui, ce pas est
-# inactif et le dit dans le résumé.
+# ouverte (scripts/retour-arriere.mjs). Ce pas lit VERCEL_TOKEN ; sans lui, il est inactif et le dit dans le résumé.
+#
+# Tâche #651 (mission #649) : au passage quotidien seulement (jamais sur `fumee-rouge`), scripts/modeles-nouveaux.mjs
+# compare la liste des modèles Anthropic aux identifiants `claude-…` du code des apps et ouvre dans l'app une tâche
+# de migration quand un modèle plus récent existe dans une famille qu'elle utilise. Il lit ANTHROPIC_API_KEY (liste
+# des modèles, gratuite) et RELECTURE_PAT (recherche de code, lecture et ouverture des tâches dans les apps). Une
+# clé absente ou une liste illisible rend le pas rouge avec un message : jamais une tâche inventée.
 #
 # Lancement d'essai (preuve « une panne ouvre l'issue, le retour la ferme ») : « Run workflow » avec
 # un nom et une URL de santé ; seule cette app simulée est sondée. Avec `retour-essai` (un projet Vercel d'essai),
@@ -113,7 +118,7 @@ jobs:
         run: node scripts/retour-arriere.mjs
 
       - name: Détecter les nouveaux modèles Anthropic et ouvrir les tâches de migration
-        if: ${{ !cancelled() && !inputs.deploiement-essai && !inputs.url-essai }}
+        if: ${{ !cancelled() && github.event_name != 'repository_dispatch' && !inputs.deploiement-essai && !inputs.url-essai }}
         env:
           GH_PAT: ${{ secrets.RELECTURE_PAT }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
