@@ -9,9 +9,9 @@
 #   - Gemini : l'instant où l'étiquette `gemini:fait` ou `gemini:echec` est posée, et `libere_a` (quand une place se libère).
 # Usage : python3 quota.py [--rapide] [--seulement=a,b] [--sortie=fichier]
 #   (sans option : tout, Actions sur le mois entier ; --rapide : Actions sur 36 h seulement, tout le reste identique)
-import re, json, sys, os, datetime, math, threading, urllib.request
+import re, json, sys, os, datetime, math, threading, traceback, urllib.request
 from concurrent.futures import ThreadPoolExecutor
-import ghcache, visibilite
+import ghcache, visibilite, taux_change
 
 OPT = {a.split('=', 1)[0]: (a.split('=', 1) + [''])[1] for a in sys.argv[1:] if a.startswith('--')}
 D = os.path.dirname(os.path.abspath(__file__)) + '/'
@@ -51,6 +51,7 @@ def pages(path, key=None, stop=None, maxp=30):
     out = []
     for p in range(1, maxp + 1):
         d = gh(path + ('&' if '?' in path else '?') + f'per_page=100&page={p}', verifier_vide=p > 1)     # page vide après une page pleine : GitHub se trompe (ghcache.lire)
+        if d is None: raise RuntimeError('réponse vide de GitHub : ' + path.split('?')[0])     # 28/10/2026 : « 'NoneType' object is not subscriptable » ne disait ni où ni quoi
         items = d[key] if key else d
         if not items: break
         for it in items:
@@ -122,6 +123,12 @@ def _passages(vis, depuis):
     parts = [f"{r} {'privé' if p else 'public'} depuis le {t[8:10]}/{t[5:7]}" for r in REPOS for t, p in visibilite.passages(vis, r, depuis)]
     return ' (' + ', '.join(parts) + ')' if parts else ''
 
+def jobs_du_passage(r, run):
+    """Les jobs d'une exécution. Une réponse vide ou sans `jobs` lève RuntimeError (dépôt, exécution) : l'appelant saute CETTE exécution au lieu de perdre la jauge."""
+    d = gh(f"repos/MoKarade/{r}/actions/runs/{run['id']}/attempts/{run.get('run_attempt', 1)}/jobs?per_page=100")
+    if not isinstance(d, dict) or not isinstance(d.get('jobs'), list): raise RuntimeError(f"jobs illisibles : {r} exécution {run['id']}")
+    return d['jobs']
+
 # ---- 1. Minutes GitHub Actions (dépôts PRIVÉS seulement ; les dépôts publics sont gratuits) ----
 def actions():
     privees = [r for r in REPOS if prive(r)]          # relit aussi la visibilité : `visibilite` est à jour
@@ -139,10 +146,17 @@ def actions():
             if run['status'] != 'completed': en_cours.append((r, run))
             if key in cache['runs'] and run['status'] == 'completed': continue
             todo.append((r, run, key))
+    non_lues = []      # exécutions dont les jobs n'ont pas pu être lus ce passage-ci : non comptées, relues au suivant (jamais un 0 inventé)
     def mesure(x):
         r, run, key = x
+        try: return _mesure(x)
+        except RuntimeError as e:
+            non_lues.append([r, run['id'], str(e)[:80]])
+            return key, 'illisible', None
+    def _mesure(x):
+        r, run, key = x
         mins, par_j = 0, {}
-        for j in gh(f"repos/MoKarade/{r}/actions/runs/{run['id']}/attempts/{run.get('run_attempt', 1)}/jobs?per_page=100")['jobs']:
+        for j in jobs_du_passage(r, run):
             if not j.get('started_at') or not j.get('completed_at'): continue
             if not j.get('runner_id') and not j.get('runner_name'): continue      # jamais attribué à une machine : rien de facturé (ex. job Dependabot annulé au bout de 24 h)
             lab = [l.lower() for l in j.get('labels', [])]
@@ -155,7 +169,7 @@ def actions():
         return key, run['status'], {'r': r, 'm': mins, 'j': par_j, 'c': run['created_at'], 'w': run.get('name')}
     with ThreadPoolExecutor(8) as ex:
         for key, st, v in ex.map(mesure, todo):
-            if st == 'completed': cache['runs'][key] = v          # une exécution en cours est recomptée au relevé suivant, une fois finie
+            if st == 'completed' and v is not None: cache['runs'][key] = v          # une exécution en cours est recomptée au relevé suivant, une fois finie
     # anciens noms de dépôts (renommés en minuscules) : entrées périmées du cache, sinon comptées en double
     for k in [k for k, v in cache['runs'].items() if v['r'] not in REPOS]: del cache['runs'][k]
     tot, par_j, par_depot = 0, {}, {}
@@ -167,7 +181,7 @@ def actions():
     ec_min = 0
     for r, run in en_cours:
         try:
-            for j in gh(f"repos/MoKarade/{r}/actions/runs/{run['id']}/attempts/{run.get('run_attempt', 1)}/jobs?per_page=100")['jobs']:
+            for j in jobs_du_passage(r, run):
                 if j.get('started_at') and not j.get('completed_at') and (j.get('runner_id') or j.get('runner_name')) \
                    and 'self-hosted' not in [l.lower() for l in j.get('labels', [])]:
                     ec_min += math.ceil((NOW - t(j['started_at'])).total_seconds() / 60)
@@ -180,7 +194,8 @@ def actions():
             # tout le mois, jour par jour : la courbe cumulée de la page s'appuie dessus (un jour sans trace = 0 mesuré)
             'par_jour_mois': {jour_de(mois0 + datetime.timedelta(days=i, hours=12)): par_j.get(jour_de(mois0 + datetime.timedelta(days=i, hours=12)), 0)
                               for i in range(0, (min(NOW, mois1) - mois0).days + 1)},
-            'mesure': 'mesuré', 'note': 'Dépôts privés seulement (' + ', '.join(privees) + '), et seulement tant qu\'ils l\'étaient' + _passages(vis, since) + ', jobs sur machines GitHub ; le robot du PC et les dépôts publics ne comptent pas. Chaque job arrondi à la minute. Une exécution en cours n\'entre dans le total qu\'une fois finie ; ses minutes écoulées sont indiquées à part.',
+            'non_lues': non_lues[:10], 'mesure': 'partiel' if non_lues else 'mesuré',
+            'note': ('' if not non_lues else f'{len(non_lues)} exécution(s) non lue(s) à ce passage (non comptées, relues au suivant). ') + 'Dépôts privés seulement (' + ', '.join(privees) + '), et seulement tant qu\'ils l\'étaient' + _passages(vis, since) + ', jobs sur machines GitHub ; le robot du PC et les dépôts publics ne comptent pas. Chaque job arrondi à la minute. Une exécution en cours n\'entre dans le total qu\'une fois finie ; ses minutes écoulées sont indiquées à part.',
             'source': 'Plan GitHub Free : 2 000 min/mois (docs/couts.md de CarAI)'}
 
 # ---- 2. Déploiements Vercel (6 000 par jour et 450 par heure pour tout le compte, plan Pro ; Hobby = 100 par jour) ----
@@ -374,7 +389,7 @@ def api():
             if essai == 2: raise
     if not d.get('ok') or d.get('cumulCad') is None or not d.get('dataAsOf'): raise RuntimeError('réponse /api/cout sans cumulCad ou dataAsOf')
     m = d.get('mois') or {}
-    base = {'unite': d.get('devise', 'CAD'), 'taux_usd_cad': d.get('tauxUsdCad'), 'apps_lues': (d.get('apps') or {}).get('lues'),
+    base = {'unite': d.get('devise', 'CAD'), 'taux_hub_usd_cad': d.get('tauxUsdCad'), 'apps_lues': (d.get('apps') or {}).get('lues'),
             'cumul_cad': d['cumulCad'], 'cumul_as_of': d['dataAsOf'], 'source': 'coût : hubperso.com/api/cout ; repère de 20 $ par mois : Marc', 'mesure': 'publié par Hubperso (somme des usage.cost des apps)'}
     if m.get('totalCad') is None or not m.get('dernierReleve'):
         return {**base, 'nom': 'API Anthropic des apps (coût cumulé)', 'periode': 'total', 'utilise': d['cumulCad'], 'data_as_of': d['dataAsOf'], 'source_asof': d['dataAsOf'],
@@ -406,7 +421,10 @@ def lancer(k):
         g['releve'] = iso(NOW)
         return k, g
     except Exception as e:
-        return k, {'nom': k, 'erreur': str(e)[:200]}
+        # 28/10/2026 : l'erreur de la jauge Actions (« 'NoneType' object is not subscriptable ») ne disait pas OÙ : on joint la fonction et la ligne
+        try: ici = traceback.extract_tb(e.__traceback__)[-1]; ou = f' ({ici.name}, ligne {ici.lineno})'
+        except Exception: ou = ''
+        return k, {'nom': k, 'erreur': (str(e)[:160] + ou)[:200]}
 with ThreadPoolExecutor(6) as ex: resultats = dict(ex.map(lancer, CHOISIES))
 for k in TOUTES:
     if k in resultats:
@@ -422,6 +440,11 @@ try:
         elif 'erreur' in out['jauges'].get(k, {}) and o and 'erreur' not in o:
             e = out['jauges'][k]['erreur']; o['perime'] = old['asof']; o['erreur'] = e; out['jauges'][k] = o
 except Exception: pass
+# Taux USD -> CAD : UN seul, avec sa date et sa source (taux_change.py). `jauges.api.taux_hub_usd_cad` est celui que le hub applique à ses propres
+# conversions : tant qu'il diffère de `taux_usd_cad`, c'est un écart à corriger côté Hubperso (lib/usage.ts), pas une seconde valeur de référence.
+try: ancien_taux = json.load(open(SORTIE)).get('taux_usd_cad')
+except Exception: ancien_taux = None
+out['taux_usd_cad'] = taux_change.mesure(ancien_taux, iso(NOW))
 c = ghcache.compteurs()
 out['appels'] = {'comptes': c['comptees'], 'gratuits_304': c['n304']}
 
