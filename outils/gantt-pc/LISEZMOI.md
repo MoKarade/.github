@@ -61,12 +61,12 @@ lu par `taux_change.py` dans la série FXUSDCAD de la Banque du Canada (gratuite
 `jauges.api.cumul_as_of` n'est PAS la date du relevé : c'est la mesure la plus ancienne parmi les apps lues par le hub (`lib/coutCumule.ts`) ; la date du passage
 est `jauges.api.releve`. Une app qui ne dépense plus garde donc légitimement une date ancienne.
 
-PR ouvertes (28/10/2026, tâche .github#679) : `prs_ouvertes.py` écrit `prs-ouvertes.json` à chaque tour (sauté au tour économe), et `build.py` le range dans `donnees.json`
+PR ouvertes (28/10/2026, tâche .github#679) : `prs_ouvertes.py` écrit `prs-ouvertes.json` à chaque tour (au tour économe : plafond réduit à 30 lectures, PR les plus récemment modifiées d'abord), et `build.py` le range dans `donnees.json`
 sous `prs_ouvertes` (donc déjà envoyé au hub et déposé sur le Drive). Une entrée par PR ouverte de chaque dépôt du relevé : `repo`, `n`, `titre`, `url`, `tache`, `auteur`,
 `agent` (Claude, Jules, Copilot, Dependabot, autre robot ; « Marc » = compte humain sans attribution, hypothèse), `brouillon`, `cree_le`, `maj_le`, `ci` (`etat` : rouge, en_cours,
 annule, vert ou aucun ; nombres de contrôles ; `noms_en_file` = jobs qui attendent une machine ; `rouges`), `mergify` (`file`, `etat`, `position`, `etape`, `message` et `controle`
 recopiés de Mergify, rien deviné). Les PR de test de la file Mergify sont comptées dans `brouillons_mergify`. `deploiements` : le dernier de chaque dépôt (ou `erreur`, ou `null`).
-Une lecture en échec s'écrit `erreur`, jamais « vert » ; `incomplet` = plafond de 80 lectures atteint, les PR restantes sont `non_lu`. Tests : `python -X utf8 -m unittest test_prs_ouvertes.py`.
+Une lecture en échec s'écrit `erreur`, jamais « vert » ; `incomplet` = plafond de lectures atteint (80, ou 30 au tour économe), les PR restantes sont `non_lu`. Tests : `python -X utf8 -m unittest test_prs_ouvertes.py`.
 
 ## Suivre et arrêter
 

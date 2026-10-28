@@ -3,7 +3,7 @@
 # -> prs-ouvertes.json, repris par build.py comme champ `prs_ouvertes` de donnees.json (demande de Marc : un onglet « En cours » qui montre tout).
 # Règles : 0 $ (lectures GitHub avec ETag, un 304 ne compte pas) ; au plus PLAFOND_APPELS lectures comptées par tour, les PR restantes sont marquées « non lu » ;
 # jamais de fake data : une lecture qui échoue s'écrit `erreur`, jamais un « vert » par défaut ; les PR de test que Mergify ouvre pour sa file sont comptées à part.
-# Usage : python3 prs_ouvertes.py [sortie.json] [--depots=a,b]   (sans --depots : les dépôts du backlog.json du même tour)
+# Usage : python3 prs_ouvertes.py [sortie.json] [--depots=a,b] [--plafond=n]   (sans --depots : les dépôts du backlog.json du même tour ; sans --plafond : PLAFOND_APPELS)
 import datetime, html, json, os, re, sys
 from acteurs import BOTS
 
@@ -142,6 +142,14 @@ def releve(depots, lire, maintenant, compter=lambda: 0, plafond=PLAFOND_APPELS):
             'prs': sortie, 'deploiements': deploiements}
 
 
+def plafond_de(opt):
+    """--plafond=n -> n (entier > 0), sinon PLAFOND_APPELS ; une valeur illisible est refusée plutôt qu'ignorée."""
+    if 'plafond' not in opt: return PLAFOND_APPELS
+    n = int(opt['plafond'])
+    if n <= 0: raise ValueError('--plafond doit être un entier positif')
+    return n
+
+
 def main(argv):
     import ghcache
     args = [a for a in argv if not a.startswith('--')]
@@ -149,7 +157,7 @@ def main(argv):
     sortie = args[0] if args else D + 'prs-ouvertes.json'
     depots = opt['depots'].split(',') if opt.get('depots') else [r['repo'] for r in json.load(open(D + 'backlog.json', encoding='utf-8'))['repos']]
     maintenant = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    res = releve(depots, ghcache.lire, maintenant, lambda: ghcache.compteurs()['comptees'])
+    res = releve(depots, ghcache.lire, maintenant, lambda: ghcache.compteurs()['comptees'], plafond_de(opt))
     with open(sortie + '.tmp', 'w', encoding='utf-8') as fh: json.dump(res, fh, ensure_ascii=False)
     os.replace(sortie + '.tmp', sortie)
     print(f"PR ouvertes : {len(res['prs'])} ({res['appels']} lectures comptées" + (', incomplet' if res['incomplet'] else '') + (f", {len(res['erreurs'])} erreur(s)" if res['erreurs'] else '') + ')')
