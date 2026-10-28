@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { marquerParJules, piedDeJules, retirerEtiquette, menageFermees, ETIQUETTES_FERMEES, toucheMcp, toucheEcran, deploiementProduction, commentaireAcceptee, controlesVerts, corpsNettoye, evaluerFusion, horsPermis, prDeLaTache, suivreDepot, tachesCitees, testsSeuls } from './jules-suivi.mjs';
+import { CLE_NON_JULES, marquerParJules, piedDeJules, retirerEtiquette, menageFermees, ETIQUETTES_FERMEES, toucheMcp, toucheEcran, deploiementProduction, commentaireAcceptee, controlesVerts, corpsNettoye, evaluerFusion, horsPermis, prDeLaTache, suivreDepot, tachesCitees, testsSeuls } from './jules-suivi.mjs';
 import { tourJulesSuivi } from './filet-pc.mjs';
 import { lireCitation, evaluer } from './preuve.mjs';
 
@@ -367,4 +367,22 @@ test('marquerParJules : à blanc ne crée ni ne pose rien ; les commentaires lus
   const beaucoup = ghParJules({ ouvertes: Array.from({ length: 30 }, (_, i) => PR(i + 1)) });
   marquerParJules({ depot: 'MoKarade/CarAI', gh: beaucoup.gh });
   assert.equal(beaucoup.appels.filter((a) => a.includes('/comments')).length, 20);
+});
+
+test('marquerParJules : une PR ouverte sans trace de Jules depuis 15 min n\'est plus relue au tour suivant ; une PR toute neuve l\'est encore ; l\'état oublie les PR fermées', () => {
+  const maintenant = Date.parse('2026-10-28T12:00:00Z');
+  const il_y_a = (min) => new Date(maintenant - min * 60_000).toISOString();
+  const etat = { [`${CLE_NON_JULES}MoKarade/CarAI#99`]: true };
+  const premier = ghParJules({ ouvertes: [PR(1, { created_at: il_y_a(60) }), PR(2, { created_at: il_y_a(3) })] });
+  assert.deepEqual(marquerParJules({ depot: 'MoKarade/CarAI', gh: premier.gh, etat, maintenant }).marquees, []);
+  assert.equal(premier.appels.filter((a) => a.includes('/comments')).length, 2, 'premier tour : les deux sont lues');
+  assert.equal(etat[`${CLE_NON_JULES}MoKarade/CarAI#1`], true, 'la PR de 60 min est mémorisée « pas Jules »');
+  assert.equal(etat[`${CLE_NON_JULES}MoKarade/CarAI#2`], undefined, 'la PR de 3 min peut encore recevoir le commentaire de Jules');
+  assert.equal(`${CLE_NON_JULES}MoKarade/CarAI#99` in etat, false, 'PR 99 absente des ouvertes : oubliée');
+  const second = ghParJules({ ouvertes: [PR(1, { created_at: il_y_a(60) }), PR(2, { created_at: il_y_a(3) })] });
+  marquerParJules({ depot: 'MoKarade/CarAI', gh: second.gh, etat, maintenant });
+  assert.deepEqual(second.appels.filter((a) => a.includes('/comments')), ['GET repos/MoKarade/CarAI/issues/2/comments?per_page=100'], 'second tour : seule la neuve est relue');
+  // Jules commente la PR neuve : elle est marquée, et jamais mémorisée comme « pas Jules ».
+  const tard = ghParJules({ ouvertes: [PR(2, { created_at: il_y_a(3) })], commentaires: { 2: [{ user: { login: 'google-labs-jules[bot]' } }] } });
+  assert.deepEqual(marquerParJules({ depot: 'MoKarade/CarAI', gh: tard.gh, etat, maintenant }).marquees, ['CarAI#2']);
 });
