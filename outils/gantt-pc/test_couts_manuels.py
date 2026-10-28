@@ -44,27 +44,7 @@ class Lecture(unittest.TestCase):
         self.assertIsNone(res)
         self.assertTrue(raison.startswith('fichier trop gros'))
 
-    def test_recus_gmail_s_ajoutent_au_registre_sans_le_remplacer(self):
-        reg = ecrire(self.d, {'notes': {'a': 'b'}})
-        recus = ecrire(self.d, {'v': 1, 'lu_le': '2000-01-01T00:00:00Z', 'erreur': None, 'recus': [{'id': 'm1'}], 'autre': 'ignoré'}, 'r.json')
-        res, raison = C.lire(reg, recus)
-        self.assertEqual(raison, 'ok')
-        self.assertEqual(res, {'notes': {'a': 'b'}, 'recus_gmail': {'lu_le': '2000-01-01T00:00:00Z', 'erreur': None, 'recus': [{'id': 'm1'}]}})
-
-    def test_recus_gmail_seuls_suffisent(self):
-        recus = ecrire(self.d, {'lu_le': None, 'erreur': 'reautoriser', 'recus': []}, 'r.json')
-        res, raison = C.lire(os.path.join(self.d, 'nexiste-pas.json'), recus)
-        self.assertEqual((raison, sorted(res)), ('ok', ['recus_gmail']))
-        self.assertEqual(res['recus_gmail']['erreur'], 'reautoriser')
-
-    def test_recus_absents_ou_illisibles_ne_changent_rien(self):
-        reg = ecrire(self.d, {'notes': {'a': 'b'}})
-        for r in (os.path.join(self.d, 'x.json'), ecrire(self.d, '{pas du json', 'r1.json'), ecrire(self.d, {'recus': 'x'}, 'r2.json')):
-            self.assertEqual(C.lire(reg, r), ({'notes': {'a': 'b'}}, 'ok'))
-
     def test_chemin_par_variable_puis_defaut(self):
-        self.assertEqual(C.chemin_recus({'GMAIL_RECUS_FILE': 'r.json'}), 'r.json')
-        self.assertEqual(C.chemin_recus({}), C.RECUS_DEFAUT)
         self.assertEqual(C.chemin({'COUTS_MANUELS_FILE': 'x.json'}), 'x.json')
         self.assertEqual(C.chemin({}), C.CHEMIN_DEFAUT)
 

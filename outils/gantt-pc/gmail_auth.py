@@ -79,7 +79,7 @@ def lire_client(chemin: str | None = None) -> tuple[str, str | None]:
 
 
 # ---- chiffrement du jeton de renouvellement (DPAPI, Windows) ----
-def dpapi_proteger(octets: bytes) -> bytes:
+def _dpapi(octets: bytes, proteger: bool) -> bytes:
     import ctypes
     from ctypes import wintypes
 
@@ -89,29 +89,24 @@ def dpapi_proteger(octets: bytes) -> bytes:
     entree = Blob(len(octets), ctypes.cast(ctypes.create_string_buffer(octets, len(octets)), ctypes.POINTER(ctypes.c_char)))
     sortie = Blob()
     # 0x1 = CRYPTPROTECT_UI_FORBIDDEN : aucune fenêtre, jamais
-    if not ctypes.windll.crypt32.CryptProtectData(ctypes.byref(entree), 'gantt-gmail', None, None, None, 0x1, ctypes.byref(sortie)):
-        raise ErreurGmail('refuse', 'chiffrement Windows impossible')
+    if proteger:
+        ok = ctypes.windll.crypt32.CryptProtectData(ctypes.byref(entree), 'gantt-gmail', None, None, None, 0x1, ctypes.byref(sortie))
+    else:
+        ok = ctypes.windll.crypt32.CryptUnprotectData(ctypes.byref(entree), None, None, None, None, 0x1, ctypes.byref(sortie))
+    if not ok:
+        raise ErreurGmail('refuse' if proteger else 'reautoriser', 'chiffrement Windows impossible' if proteger else 'jeton illisible pour ce compte Windows')
     try:
         return ctypes.string_at(sortie.pbData, sortie.cbData)
     finally:
         ctypes.windll.kernel32.LocalFree(sortie.pbData)
+
+
+def dpapi_proteger(octets: bytes) -> bytes:
+    return _dpapi(octets, True)
 
 
 def dpapi_deproteger(octets: bytes) -> bytes:
-    import ctypes
-    from ctypes import wintypes
-
-    class Blob(ctypes.Structure):
-        _fields_ = [('cbData', wintypes.DWORD), ('pbData', ctypes.POINTER(ctypes.c_char))]
-
-    entree = Blob(len(octets), ctypes.cast(ctypes.create_string_buffer(octets, len(octets)), ctypes.POINTER(ctypes.c_char)))
-    sortie = Blob()
-    if not ctypes.windll.crypt32.CryptUnprotectData(ctypes.byref(entree), None, None, None, None, 0x1, ctypes.byref(sortie)):
-        raise ErreurGmail('reautoriser', 'jeton illisible pour ce compte Windows')
-    try:
-        return ctypes.string_at(sortie.pbData, sortie.cbData)
-    finally:
-        ctypes.windll.kernel32.LocalFree(sortie.pbData)
+    return _dpapi(octets, False)
 
 
 def sauver_jeton(refresh: str, chemin: str | None = None, proteger=dpapi_proteger) -> None:

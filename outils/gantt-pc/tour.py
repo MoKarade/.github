@@ -19,7 +19,7 @@
 # Lancer : python -X utf8 tour.py --drive "G:\Mon disque\_Gantt"   (un tour, puis sortie ; code 0 = OK ou tour sauté, 1 = échec)
 import argparse, datetime, gzip, json, os, shutil, socket, subprocess, sys, time
 import pousser_hub
-import gestes, gmail_recus, missions, reponses      # gestes de Marc à jour (.github#478) ; reponses.appliquer écrit le commentaire « Fait » et retire qui:marc
+import gestes, missions, reponses      # gestes de Marc à jour (.github#478) ; reponses.appliquer écrit le commentaire « Fait » et retire qui:marc
 
 D = os.path.dirname(os.path.abspath(__file__)) + os.sep
 ENV = dict(os.environ, PYTHONUTF8='1')
@@ -122,10 +122,6 @@ def releve(econome=False, quota_complet=True, drive=None):
     if lancer([PY, 'quota.py'] + (['--rapide'] if rapide else []) + seule, '.refresh-quota.log', 900) == 0:
         if not rapide and not seule: touche('.dernier-quota-plein')
     else: quota = ' · quota : ÉCHEC ' + queue('.refresh-quota.log', 200)
-    # 1 bis. reçus Gmail (gmail_recus.py, .github#657) : au plus une lecture réussie par semaine, lecture seule, avant build.py pour que la page l'ait
-    # dans CE tour. Vide tant que Marc n'a pas autorisé l'accès ; un échec se DIT et ne bloque rien.
-    gm = gmail_recus.passer(maintenant())
-    if gm: quota += ' · ' + gm
     # 2. file du script + données de la page
     if lancer([PY, 'build.py'], '.refresh-build.log', 600) != 0: return 1, f'ÉCHEC {maintenant()} build.py : {queue(".refresh-build.log")}'
     asof = lire('backlog.json')['asof']
