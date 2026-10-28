@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { calculer, collecterDepot, cycleRouge, depuisEffectifs, duree, estPremierLundi, executantDe, ligneCachee, lire, lireLigneCachee, mediane, rendre, repartition, resumeConformite, titreRapport } from './rapport-hebdo.mjs';
+import { calculer, collecterDepot, cycleRouge, depuisEffectifs, duree, estPremierLundi, executantDe, ligneCachee, lire, lireLigneCachee, lirePages, mediane, rendre, repartition, resumeConformite, titreRapport } from './rapport-hebdo.mjs';
 
 const H = 3_600_000;
 const J = 24 * H;
@@ -316,29 +316,47 @@ test('collecterDepot : dépôt privé illisible ; dépôt lisible normalisé (is
   await assert.rejects(() => collecterDepot(enPanne, 'x', MAINTENANT, () => null), /502/);
 
   const issue = (n, extra = {}) => ({ number: n, title: `t${n}`, labels: [{ name: 'niveau:tâche' }], created_at: il_y_a(3 * J), updated_at: il_y_a(1 * J), closed_at: null, body: '', state: 'open', ...extra });
-  const reponses = [
-    [/--jq \.full_name$/, () => 'MoKarade/x'],
-    [/issues\?state=all/, () => [[issue(1, { state: 'closed', state_reason: 'completed', closed_at: il_y_a(1 * J), assignees: [{ login: 'Copilot' }] }), issue(2, { pull_request: {} })]]],
-    [/issues\?state=open/, () => [[issue(3, { parent_issue_url: 'u' }), issue(4)]]],
-    [/issues\/1\/comments/, () => [[{ body: '**Acceptée** — PR #12 fusionnée', created_at: il_y_a(1 * J) }]]],
-    [/pulls\/12 --jq/, () => '{"m":"' + il_y_a(1 * J + 20 * 60_000) + '","a":"copilot-swe-agent[bot]"}'],
-    [/pulls\?state=all/, () => [[{ number: 12, updated_at: il_y_a(1 * J), merged_at: il_y_a(1 * J), body: 'Tâche : #1', head: { ref: 'claude/x' } }]]],
-    [/actions\/runs/, () => [{ workflow_runs: [{ name: 'CI', conclusion: 'success', created_at: il_y_a(1 * J), updated_at: il_y_a(1 * J) }] }]],
-    [/contents\/qualite\/seuils\.json/, () => Buffer.from(JSON.stringify({ portes: { 'couverture.lignes': { min: 80 }, 'code_mort': { max: 3 } } })).toString('base64')],
-  ];
-  const gh = async (args) => {
-    const cle = args.join(' ');
-    const [, f] = reponses.find(([re]) => re.test(cle)) ?? [];
-    assert.ok(f, `appel inattendu : ${cle}`);
-    const v = f();
-    return typeof v === 'string' ? v : JSON.stringify(v);
+  const acceptation = { body: '**Acceptée** — PR #12 fusionnée', created_at: il_y_a(1 * J), issue_url: 'https://api.github.com/repos/MoKarade/x/issues/1' };
+  const pr12 = { number: 12, updated_at: il_y_a(1 * J), merged_at: il_y_a(1 * J + 20 * 60_000), user: { login: 'copilot-swe-agent[bot]' }, body: 'Tâche : #1', head: { ref: 'claude/x' } };
+  // `groupe` : l'« Acceptée » et la PR sont dans les lots du dépôt ; sinon il faut relire la tâche et la PR une à une.
+  const monde = (groupe) => {
+    const appels = [];
+    const reponses = [
+      [/--jq \.full_name$/, () => 'MoKarade/x'],
+      [/issues\?state=all/, () => [[issue(1, { state: 'closed', state_reason: 'completed', closed_at: il_y_a(1 * J), assignees: [{ login: 'Copilot' }] }), issue(2, { pull_request: {} })]]],
+      [/issues\?state=open/, () => [[issue(3, { parent_issue_url: 'u' }), issue(4)]]],
+      [/issues\/comments\?since=.*&per_page=100&page=1$/, () => (groupe ? [acceptation, { body: 'bruit de bot', created_at: il_y_a(1 * J), issue_url: 'https://api.github.com/repos/MoKarade/x/issues/9' }] : [])],
+      [/issues\/1\/comments/, () => [[acceptation]]],
+      [/pulls\/12 --jq/, () => '{"m":"' + pr12.merged_at + '","a":"copilot-swe-agent[bot]"}'],
+      [/pulls\?state=all/, () => [groupe ? [pr12] : [{ ...pr12, number: 13 }]]],
+      [/actions\/runs/, () => [{ workflow_runs: [{ name: 'CI', conclusion: 'success', created_at: il_y_a(1 * J), updated_at: il_y_a(1 * J) }] }]],
+      [/contents\/qualite\/seuils\.json/, () => Buffer.from(JSON.stringify({ portes: { 'couverture.lignes': { min: 80 }, 'code_mort': { max: 3 } } })).toString('base64')],
+    ];
+    const gh = async (args) => {
+      const cle = args.join(' ');
+      appels.push(cle);
+      const [, f] = reponses.find(([re]) => re.test(cle)) ?? [];
+      assert.ok(f, `appel inattendu : ${cle}`);
+      const v = f();
+      return typeof v === 'string' ? v : JSON.stringify(v);
+    };
+    return { gh, appels };
   };
+  const conformite = () => ({ vert: 1, rouge: 0, aRelire: 0, sansObjet: 0, lignesRouges: [] });
+  const lot = monde(true);
   const compteur = { taches: 0 };
-  const d = await collecterDepot(gh, 'x', MAINTENANT, () => ({ vert: 1, rouge: 0, aRelire: 0, sansObjet: 0, lignesRouges: [] }), undefined, compteur);
-  assert.equal(compteur.taches, 2, 'une tâche acceptée = un commentaire + une PR relus');
+  const d = await collecterDepot(lot.gh, 'x', MAINTENANT, conformite, undefined, compteur);
+  assert.equal(compteur.taches, 1, 'lecture groupée : une page de commentaires du dépôt, la PR vient du lot des PR');
+  assert.ok(!lot.appels.some((c) => /issues\/1\/comments|pulls\/12 --jq/.test(c)), 'aucune lecture par tâche');
   assert.equal(d.lisible, true);
   assert.deepEqual(d.taches.map((t) => [t.numero, Boolean(t.acceptee), t.acceptee?.prFusionLe != null]), [[1, true, true]]);
   assert.deepEqual([d.taches[0].auteurPr, d.taches[0].assignes], ['copilot-swe-agent[bot]', ['Copilot']]);
+  // Équivalence : mêmes données lues tâche par tâche (lots vides) = même résultat, mais 3 appels au lieu de 1.
+  const seul = monde(false);
+  const compteurSeul = { taches: 0 };
+  const dSeul = await collecterDepot(seul.gh, 'x', MAINTENANT, conformite, undefined, compteurSeul);
+  assert.equal(compteurSeul.taches, 3, 'page de commentaires + commentaires de la tâche + PR relue');
+  assert.deepEqual(dSeul.taches, d.taches);
   assert.equal(executantDe(d.taches[0]), 'Copilot');
   assert.deepEqual(d.ouvertes.map((o) => [o.numero, o.parent]), [[3, true], [4, false]]);
   assert.equal(d.signalements.length, 1, 'les PR sont écartées des issues');
@@ -368,4 +386,18 @@ test('gestes de Marc ouverts depuis plus de 7 jours : listés avec leur raison, 
   assert.match(texte, /Gestes de Marc ouverts depuis plus de 7 jours : \*\*3\*\*/);
   assert.match(texte, /a#1 \(.*\) : c'est son compte/);
   assert.match(texte, /a#3 \(.*\) : raison non écrite/);
+});
+
+test('lirePages : une page de moins de 100 s\'arrête, une page pleine appelle la suivante, chaque page est comptée', async () => {
+  const pages = [Array.from({ length: 100 }, (_, i) => i), [100, 101]];
+  const vus = [];
+  const gh = async (args) => {
+    vus.push(args.at(-1));
+    return JSON.stringify(pages[Number(/page=(\d+)$/.exec(args.at(-1))[1]) - 1]);
+  };
+  const compteur = { taches: 0 };
+  const tout = await lirePages(gh, 'repos/x/issues/comments?since=2026-01-01T00:00:00Z', compteur);
+  assert.equal(tout.length, 102);
+  assert.equal(compteur.taches, 2);
+  assert.match(vus[1], /per_page=100&page=2$/);
 });
