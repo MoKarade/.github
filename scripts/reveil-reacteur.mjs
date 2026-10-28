@@ -50,6 +50,7 @@ import { prAttendantMarc } from './attend-marc.mjs';
 import { dispense, extraireTachesCompletes } from './tache-liee.mjs';
 import { PLACES_PAR_DEPOT } from './capacite.mjs';
 import { accepterApresFusion } from './acceptation-auto.mjs';
+import { controleFiniQuand } from './fini-quand.mjs';
 import { accepterPreuvesAttendues, LUES_EVENEMENT, LUES_FILET } from './preuve-attendue-auto.mjs';
 import { fileDuDepot } from './file-depot.mjs';
 import { confierJulesDuDepot } from './jules-auto.mjs';
@@ -88,7 +89,7 @@ export const BOITES = {
 // JobAI : 22:03:31Z (#204). CarAI : 22:03:32Z (#199). .github : 22:03:30Z (#196). lia-ui : 22:03:29Z (#205, lu en file à 22:08Z, rien de perdu).
 export const BOITES_DIRECTES = new Set(['MoKarade/Hubperso', 'MoKarade/MemoryAI', 'MoKarade/DriveAI', 'MoKarade/FinanceAI', 'MoKarade/batchchef-', 'MoKarade/JobAI', 'MoKarade/CarAI', 'MoKarade/.github', 'MoKarade/lia-ui']);
 // Ce qui regarde le fil d'une app (une place libre, une tâche prête, une preuve à poser) ; la CI rouge, les notes LIA et le filet restent au Coordinateur.
-export const TYPES_POUR_LE_FIL = new Set(['pr_fusionnee', 'tache_fermee', 'tache_ouverte', 'deploiement']);
+export const TYPES_POUR_LE_FIL = new Set(['pr_fusionnee', 'tache_fermee', 'tache_ouverte', 'deploiement', 'preuve_page']);
 
 /** Les numéros de boîte qui reçoivent ce réveil, dans l'ordre : la #58 d'abord (sauf dépôt direct), puis la boîte du dépôt. */
 export function boitesDuReveil({ evt, boites = BOITES, directes = BOITES_DIRECTES }) {
@@ -392,6 +393,13 @@ export async function decider({ api, evt, maintenant = new Date(), accepter = ac
   return differees.acceptees.length > 0 || differees.erreur ? { ...d, differees } : d;
 }
 
+/** La preuve de cette tâche se lit-elle par la classe B ? « Fini quand » de classe B bien écrit ET le dépôt a le workflow `preuve-page.yml`. */
+async function parLaClasseB({ api, depot, issue }) {
+  const v = controleFiniQuand(issue?.body);
+  if (!v.ok || v.classe !== 'B') return false;
+  return Boolean(await api('GET', `/repos/${depot}/contents/.github/workflows/preuve-page.yml`).catch(() => null));
+}
+
 /**
  * Le réveil d'une tâche que le Réacteur vient d'accepter seul hors d'une PR fusionnée (déploiement READY, preuve différée due) : « D libre ; suivante : #n ;
  * tâche D#n acceptée seule », et Jules reçoit sa tâche. Dépôt dont les deux places sont prises : rien (même règle qu'à la fusion). Rend null si rien à dire.
@@ -451,6 +459,17 @@ async function deciderEvenement({ api, evt, maintenant, accepter }) {
     return { action: 'reveiller', motif: construireMotif([`note LIA reçue sur ${depot}`, note ? `note ${note}` : '']) };
   }
   // Une tâche vient d'être réservée à Jules (étiquette `faisable-jules` posée) : il la prend tout de suite si le dépôt le permet, sans réveiller personne.
+  // Classe B (scripts/preuve-page.mjs, workflow preuve-page.yml) : la page a été lue en mode fictif. Acceptée : la place se libère, le fil suivant est réveillé.
+  // Refusée ou lecture impossible : la tâche reste ouverte et le fil de l'app prouve (rien ne se perd, aucun minuteur).
+  if (type === 'preuve_page') {
+    const n = Number(evt.issue);
+    if (!Number.isInteger(n) || n <= 0) return { action: 'rien', raison: 'preuve de page sans numéro de tâche' };
+    if (evt.raison === 'acceptee') {
+      const apres = await reveilApresAcceptation({ api, depot, maintenant, taches: [n] });
+      return apres ?? { action: 'rien', raison: 'tâche acceptée par la classe B, dépôt encore occupé' };
+    }
+    return { action: 'reveiller', motif: construireMotif([`preuve à poser sur ${depot}#${n}`, 'classe B : la lecture de la page en mode fictif n’a pas abouti', evt.pr ? `PR #${evt.pr}` : '']), sujets: [n] };
+  }
   if (type === 'tache_reservee') {
     const dit = await julesDe({ api, depot, maintenant });
     return { action: 'rien', raison: dit.jules ? `tâche #${dit.jules.n} confiée à Jules` : 'rien à confier à Jules', ...dit };
@@ -478,11 +497,14 @@ async function deciderEvenement({ api, evt, maintenant, accepter }) {
     // « ignoree » est le cas ordinaire (la tâche n'a rien demandé) : il ne sort pas de la décision.
     const dit = acceptation.statut === 'ignoree' ? {} : { acceptation };
     const preuves = [];
+    const classeB = [];
     for (const t of taches) {
       const cle = `${t.depot}#${t.numero}`;
       const issue = await api('GET', `/repos/${t.depot}/issues/${t.numero}`).catch(() => null);
       if (preuveAPoser({ issue, commentaires: issue ? await commentairesDe(api, t.depot, t.numero).catch(() => []) : [] })) {
-        preuves.push(`preuve à poser sur ${cle}`);
+        // Classe B dans un dépôt qui a `preuve-page.yml` : la machine lit la page et réveille elle-même (type `preuve_page`) si elle n'accepte pas.
+        if (t.depot === depot && (await parLaClasseB({ api, depot, issue }))) classeB.push(`${cle} lue par la classe B`);
+        else preuves.push(`preuve à poser sur ${cle}`);
       }
     }
     const tachesExclues = taches.filter((t) => t.depot === depot).map((t) => t.numero);
@@ -492,7 +514,7 @@ async function deciderEvenement({ api, evt, maintenant, accepter }) {
     // Dépôt dont les deux places sont prises et rien à prouver : la fusion n'apprend rien au Coordinateur.
     if (en >= PLACES_PAR_DEPOT && preuves.length === 0) return { action: 'rien', raison: 'dépôt encore occupé', ...dit, ...jules };
     const acceptee = acceptation.statut === 'acceptee' ? `tâche ${depot}#${acceptation.tache} acceptée seule` : '';
-    return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), suite.ligne, ligneJules(jules), `PR #${evt.pr} fusionnée`, acceptee, ...preuves]), sujets: [...tachesExclues, suite.brut?.suivante].filter(Boolean), ...dit, ...jules, ...(suite.file ? { file: suite.file } : {}) };
+    return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), suite.ligne, ligneJules(jules), `PR #${evt.pr} fusionnée`, acceptee, ...classeB, ...preuves]), sujets: [...tachesExclues, suite.brut?.suivante].filter(Boolean), ...dit, ...jules, ...(suite.file ? { file: suite.file } : {}) };
   }
 
   if (type === 'ci_rouge') {

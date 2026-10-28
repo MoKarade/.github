@@ -1,0 +1,176 @@
+name: Preuve de page, classe B (workflow commun)
+
+# Une tâche dont le « Fini quand » est de classe B (docs/cycle-de-vie-tache.md §2 bis) se prouve ICI, sans le PC et sans secret : l'app du commit
+# fusionné est lancée avec les DONNÉES FICTIVES des tests (comme `captures.yml`), un navigateur sans tête lit les pages demandées par les lignes
+# « Lecture de page » de la tâche, puis `accepterApresFusion` (scripts/acceptation-auto.mjs) pose « **Acceptée** » et ferme la tâche APRÈS le déploiement
+# READY. Le commentaire dit que la lecture est fictive. Si rien n'est accepté, le Réacteur réveille le fil de l'app (type `preuve_page`) : rien ne se perd.
+# Tâche MoKarade/.github#781 ; aucun minuteur, aucun secret : le jeton du job suffit. Le réveil du fil passe donc par la boîte LOCALE du dépôt
+# (`reveilLocal` de scripts/reveil-reacteur.mjs : une PR brouillon permanente `claude/boite-reacteur`, comme FinanceAI#38 et MemoryAI#442), jamais par un jeton.
+#
+# Appel depuis une app (PR fusionnée du dépôt lui-même ; jamais une PR de fork) :
+#
+#   on:
+#     pull_request:
+#       types: [closed]
+#   jobs:
+#     preuve-page:
+#       if: github.event.pull_request.merged == true && github.event.pull_request.head.repo.full_name == github.repository
+#       permissions: { contents: read, pull-requests: write, issues: write, checks: read, actions: write, deployments: read }
+#       uses: MoKarade/.github/.github/workflows/preuve-page.yml@main
+#       with:
+#         runner: ${{ github.event.repository.visibility == 'public' && '"ubuntu-latest"' || '["self-hosted","pc-marc"]' }}
+#         installation: npm ci
+#         demarrage: npm run start -- --port 3000     # l'app, lancée avec les données des tests
+#         url: http://localhost:3000
+#
+# Le script vient de ce dépôt, jamais du code de l'appelant. Les commandes d'installation et de démarrage sont celles de l'appelant (commit fusionné).
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: 'Machine, en JSON : "ubuntu-latest" (dépôt public) ou ["self-hosted","pc-marc"] (dépôt privé).'
+        type: string
+        default: '"ubuntu-latest"'
+      installation:
+        description: 'Commande d’installation (dans la racine de l’app).'
+        type: string
+        default: npm ci
+      demarrage:
+        description: 'Commande qui LANCE l’app avec les données fictives des tests (elle reste au premier plan).'
+        type: string
+        required: true
+      url:
+        description: 'URL locale de l’app une fois lancée.'
+        type: string
+        default: http://localhost:3000
+      etapes:
+        description: 'Étapes jouées avant de lire, une par ligne, format fermé de captures.yml (aller, cliquer-bouton, attendre-texte, pointeur). Aucun JavaScript libre.'
+        type: string
+        default: ''
+      stockage-local:
+        description: 'Valeurs posées dans le localStorage de l’app avant le premier chargement, « cle=valeur » par ligne.'
+        type: string
+        default: ''
+      racine:
+        description: 'Dossier de l’app dans le dépôt (« web » chez batchchef-).'
+        type: string
+        default: .
+      attente-s:
+        description: 'Secondes d’attente du démarrage de l’app.'
+        type: number
+        default: 60
+      node-version:
+        type: string
+        default: '24'
+      deploiement:
+        description: 'vercel (défaut) : une PR qui change du code servi attend son déploiement READY ; aucun : dépôt qui ne se déploie pas.'
+        type: string
+        default: vercel
+      workflows-deploiement:
+        description: 'Workflows qui déploient hors Vercel (ex. deploy.yml), séparés par des virgules.'
+        type: string
+        default: ''
+
+permissions: {}
+
+# Un passage par PR ; deux PR de suite se lisent l'une après l'autre.
+concurrency:
+  group: preuve-page-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  preuve:
+    name: Preuve de page (classe B)
+    # Plafond : démarrage de l'app + lecture + attente du déploiement (jusqu'à ~3 min) ; un job figé ne doit pas tourner six heures.
+    timeout-minutes: 25
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      checks: read
+      actions: write
+      deployments: read
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      PREUVE_PR: ${{ github.event.pull_request.number }}
+      PREUVE_DOSSIER: ${{ github.workspace }}/.preuve-sortie
+      PREUVE_OUTILS: ${{ github.workspace }}/.preuve-outils
+      PREUVE_INSTALLATION: ${{ inputs.installation }}
+      PREUVE_DEMARRAGE: ${{ inputs.demarrage }}
+      PREUVE_URL: ${{ inputs.url }}
+      PREUVE_RACINE: ${{ inputs.racine }}
+      PREUVE_ETAPES: ${{ inputs.etapes }}
+      PREUVE_STOCKAGE: ${{ inputs.stockage-local }}
+      PREUVE_ATTENTE: ${{ inputs.attente-s }}
+      PREUVE_DEPLOIEMENT: ${{ inputs.deploiement }}
+      PREUVE_WORKFLOWS: ${{ inputs.workflows-deploiement }}
+    steps:
+      - name: Récupérer le script de preuve
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: MoKarade/.github
+          ref: main
+          path: .preuve
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      # Question la moins chère d'abord : la plupart des PR ne citent pas une tâche de classe B, rien d'autre ne tourne alors.
+      - name: La PR relève-t-elle de la classe B ?
+        id: decider
+        run: |
+          mkdir -p "$PREUVE_DOSSIER"
+          node .preuve/scripts/preuve-page.mjs decider
+
+      - name: Récupérer le commit fusionné
+        if: steps.decider.outputs.applicable == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          path: app
+          persist-credentials: false
+
+      # --with-deps appelle sudo : seulement sur les machines GitHub (dépôt public). Le robot du PC a déjà les bibliothèques de Chromium.
+      - name: Installer le navigateur
+        if: steps.decider.outputs.applicable == 'true'
+        env:
+          VISIBILITE: ${{ github.event.repository.visibility }}
+        run: |
+          mkdir -p "$PREUVE_OUTILS"
+          cd "$PREUVE_OUTILS"
+          echo '{"name":"preuve-outils","private":true}' > package.json
+          npm install --no-audit --no-fund --save-exact playwright@1.49.1
+          if [ "$VISIBILITE" = "public" ]; then
+            npx playwright install --with-deps chromium
+          else
+            npx playwright install chromium
+          fi
+
+      # Une app qui ne démarre pas n'est pas un rouge : la tâche reste ouverte et le fil est réveillé plus bas.
+      - name: Lire les pages (données fictives des tests)
+        id: lire
+        if: steps.decider.outputs.applicable == 'true'
+        run: bash .preuve/scripts/preuve-page-lancer.sh "$GITHUB_WORKSPACE/app" || echo "::warning title=Preuve de page::lecture impossible, le fil de l'app prouvera"
+
+      - name: Accepter la tâche si les pages sont conformes
+        id: accepter
+        if: always() && steps.decider.outputs.applicable == 'true'
+        run: node .preuve/scripts/preuve-page.mjs accepter
+
+      - name: Dire au Coordinateur ce qui s'est passé
+        if: always() && steps.decider.outputs.applicable == 'true'
+        env:
+          REVEIL_TYPE: preuve_page
+          REVEIL_DEPOT: ${{ github.repository }}
+          REVEIL_PR: ${{ github.event.pull_request.number }}
+          REVEIL_ISSUE: ${{ steps.decider.outputs.tache }}
+          REVEIL_RAISON: ${{ steps.accepter.outputs.statut == 'acceptee' && 'acceptee' || 'echec' }}
+          REVEIL_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          REVEIL_BRANCHE_DEFAUT: ${{ github.event.repository.default_branch }}
+          REVEIL_DEPLOIEMENT: ${{ inputs.deploiement }}
+          REVEIL_WORKFLOWS: ${{ inputs.workflows-deploiement }}
+        run: node .preuve/scripts/reveil-reacteur.mjs
