@@ -27,6 +27,8 @@ const REFERENCE = /(?:MoKarade\/([\w.-]+))?#(\d+)\b/g;
 // Jules n'est PAS dispensé : ses PR citent une tâche, c'est la règle de son AGENTS.md.
 const ROBOTS_DISPENSES = new Set(['dependabot[bot]', 'mergify[bot]', 'github-actions[bot]']);
 const BRANCHE_BOITE = 'claude/boite-reacteur';
+// Une boîte par dépôt (tâche #750) : `claude/boite-<dépôt>`, PR brouillon permanente d'app-template, jamais fusionnée.
+const BRANCHE_BOITE_DEPOT = /^claude\/boite-[\w.-]+$/;
 
 /** Les tâches citées par le corps d'une PR : [{ depot, numero }], sans doublon. Le dépôt par défaut est celui de la PR. */
 export function extraireTaches(corps, depotCourant) {
@@ -57,7 +59,7 @@ export function extraireTachesCompletes(corps, depotComplet) {
 export function dispense(pr) {
   const login = pr?.user?.login ?? '';
   if (pr?.user?.type === 'Bot' && ROBOTS_DISPENSES.has(login.toLowerCase())) return `robot ${login}`;
-  if (pr?.head?.ref === BRANCHE_BOITE && pr?.draft === true) return 'boîte du Réacteur';
+  if ((pr?.head?.ref === BRANCHE_BOITE || BRANCHE_BOITE_DEPOT.test(pr?.head?.ref ?? '')) && pr?.draft === true) return 'boîte du Réacteur';
   return null;
 }
 
