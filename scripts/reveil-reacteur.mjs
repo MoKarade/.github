@@ -131,6 +131,26 @@ export async function boitesDuDepotAvecChantier({ sujets, lire, boiteDepot }) {
   if (verdicts.some(Boolean)) return [boiteDepot, BOITE_PAGE_CHANTIER];
   return [boiteDepot];
 }
+// Repli sans jeton (tâche MoKarade/.github#772) : un dépôt sans secret `REVEIL_TOKEN` (FinanceAI neuf, MemoryAI le 28/10/2026) ne peut pas lancer le workflow
+// d'app-template. Il commente alors sa PROPRE boîte, un brouillon permanent sur `claude/boite-reacteur`, avec le jeton du job : le fil du dépôt qui s'y abonne
+// est réveillé comme par une boîte d'app-template. Seuls les types destinés au fil passent ; le reste attend le jeton (le Coordinateur n'est pas sur cette boîte).
+export const BRANCHE_BOITE_LOCALE = 'claude/boite-reacteur';
+
+/** Commente la boîte locale du dépôt. Rend son numéro, ou null (aucune boîte brouillon ouverte, type non destiné au fil, lecture ou écriture en échec : jamais d'exception). */
+export async function reveilLocal({ api, evt, texte, journal }) {
+  if (!TYPES_POUR_LE_FIL.has(evt.type)) return null;
+  try {
+    const [proprietaire] = String(evt.depot).split('/');
+    const prs = await api('GET', `/repos/${evt.depot}/pulls?state=open&head=${proprietaire}:${BRANCHE_BOITE_LOCALE}&per_page=1`);
+    const boite = (prs ?? []).find((pr) => pr.draft === true && pr.head?.ref === BRANCHE_BOITE_LOCALE);
+    if (!boite) return null;
+    await api('POST', `/repos/${evt.depot}/issues/${boite.number}/comments`, { body: texte });
+    return boite.number;
+  } catch (e) {
+    journal(`::warning::Réacteur : boîte locale de ${evt.depot} non réveillée (${e.message}).`);
+    return null;
+  }
+}
 export const DEPOT_GITHUB = 'MoKarade/.github';
 // Les deux balayages de `.github` qu'une planification GitHub ne lance presque jamais (MoKarade/.github#148) : sans entrée,
 // chacun relit toutes les PR ouvertes. Lancés après le réveil, sur les seuls événements d'une PR ou d'une tâche.
@@ -529,7 +549,12 @@ export async function traiter({ api, evt, jetonReveil, journal = console.log, ma
     return { ...d, balayages: await lancerBalayages({ api, jetonReveil, journal, workflows: d.workflows ?? WORKFLOWS_PR_OUVERTE }) };
   }
   if (!jetonReveil) {
-    journal('::warning::Réacteur : réveil impossible, le secret REVEIL_TOKEN est absent (PR d’un fork, ou secret pas encore posé).');
+    const locale = await reveilLocal({ api, evt, texte: d.motif, journal });
+    if (locale) {
+      journal(`Réacteur : sans REVEIL_TOKEN, fil de ${evt.depot} réveillé sur sa boîte locale #${locale} (${d.motif})`);
+      return { ...d, reveille: true, locale };
+    }
+    journal('::warning::Réacteur : réveil impossible, le secret REVEIL_TOKEN est absent (PR d’un fork, ou secret pas encore posé) et le dépôt n’a pas de boîte locale.');
     return { ...d, reveille: false };
   }
   // Le réveil passe en premier : un balayage qui échoue ne doit jamais le retarder.
