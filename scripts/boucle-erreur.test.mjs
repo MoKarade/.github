@@ -103,6 +103,13 @@ test('nettoyer : jetons, secrets et retours à la ligne ne sortent jamais dans u
   assert.equal(nettoyer(undefined), '');
 });
 
+test('le commit complet (40 caractères hexadécimaux) s’écrit en 7 caractères, jamais « [retiré] »', () => {
+  const corps = corpsDeLEchec({ ...base, sha: 'abcdef0123456789abcdef0123456789abcdef01', conclusion: 'failure', ligne: '' });
+  assert.match(corps, /- Commit : `abcdef0`/);
+  assert.doesNotMatch(corps, /retiré/);
+  assert.doesNotMatch(corpsDeLEchec({ ...base, sha: 'pas un sha', conclusion: 'failure', ligne: '' }), /Commit/);
+});
+
 test('ligneDEchec et corpsDeLEchec : des noms de job et d’étape, un lien du run, pas de journal', () => {
   assert.equal(ligneDEchec([]), '');
   assert.equal(ligneDEchec([{ name: 'A', conclusion: 'success' }]), '');
