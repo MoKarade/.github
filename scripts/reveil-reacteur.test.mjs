@@ -921,7 +921,8 @@ test('boitesDuReveil : la #58 puis la boîte du dépôt ; la CI rouge et le file
   assert.deepEqual(boitesDuReveil({ evt: { type: 'note_lia', depot: jobai } }), [NUMERO_BOITE]);
   assert.deepEqual(boitesDuReveil({ evt: { type: 'tache_ouverte', depot: 'MoKarade/inconnu' } }), [NUMERO_BOITE]);
   assert.deepEqual(boitesDuReveil({ evt: { type: 'pr_fusionnee', depot: jobai }, directes: new Set([jobai]) }), [BOITES[jobai]]);
-  assert.deepEqual([...BOITES_DIRECTES], [], 'aucun dépôt direct tant qu’un fil n’est pas confirmé abonné');
+  assert.deepEqual([...BOITES_DIRECTES], ['MoKarade/Hubperso', 'MoKarade/MemoryAI'], 'un dépôt direct seulement une fois son fil confirmé réveillé par sa boîte');
+  assert.deepEqual(boitesDuReveil({ evt: { type: 'pr_fusionnee', depot: 'MoKarade/Hubperso' } }), [BOITES['MoKarade/Hubperso']]);
   assert.ok(TYPES_POUR_LE_FIL.has('pr_fusionnee') && !TYPES_POUR_LE_FIL.has('ci_rouge'));
   assert.equal(new Set(Object.values(BOITES)).size, Object.keys(BOITES).length, 'une boîte par dépôt, jamais partagée');
   assert.ok(!Object.values(BOITES).includes(NUMERO_BOITE));
