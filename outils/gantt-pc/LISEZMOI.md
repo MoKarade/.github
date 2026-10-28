@@ -64,6 +64,7 @@ est `jauges.api.releve`. Une app qui ne dépense plus garde donc légitimement u
 ## Suivre et arrêter
 
 - Journal : `C:\dev\_pc-local\gantt-releve\tour.log` ; dernier résultat : `_Gantt\etat.json` dans le Drive.
+- Version du code (28/10/2026, #674) : chaque ligne « tour, code <sha> » du journal dit quel commit de `main` tourne. Un `git pull --ff-only` raté s'écrit « pull ÉCHEC : <cause> » ; le clone dédié est alors remis à l'identique de `main` (`fetch` + `reset --hard`, jamais le dépôt où Marc travaille) et, si même cela échoue, le tour continue avec le code déjà copié.
 - Arrêter : `Unregister-ScheduledTask -TaskName Gantt-releve -Confirm:$false`.
 
 ## Source
