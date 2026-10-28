@@ -167,7 +167,7 @@ test('executer en essai à blanc rend 1 tâche et ne fait aucun POST', async (t)
   const appels = [];
   globalThis.fetch = async (url, options = {}) => {
     appels.push({ url, options });
-    if (url.includes('api.anthropic.com')) {
+    if (url.startsWith('https://api.anthropic.com/')) {
       return reponse(200, { data: [{ id: 'claude-sonnet-5-5' }, { id: 'claude-3-5-sonnet-20241022' }] });
     }
     if (url.includes('search/code')) {
@@ -203,7 +203,7 @@ test('executer en passage réel ouvre exactement 1 issue avec le bon titre et la
   const appels = [];
   globalThis.fetch = async (url, options = {}) => {
     appels.push({ url, options });
-    if (url.includes('api.anthropic.com')) {
+    if (url.startsWith('https://api.anthropic.com/')) {
       return reponse(200, { data: [{ id: 'claude-sonnet-5-5' }, { id: 'claude-3-5-sonnet-20241022' }] });
     }
     if (url.includes('search/code')) {
@@ -246,7 +246,7 @@ test('executer ne fait aucun POST si l’issue existe déjà même fermée', asy
   const appels = [];
   globalThis.fetch = async (url, options = {}) => {
     appels.push({ url, options });
-    if (url.includes('api.anthropic.com')) {
+    if (url.startsWith('https://api.anthropic.com/')) {
       return reponse(200, { data: [{ id: 'claude-sonnet-5-5' }, { id: 'claude-3-5-sonnet-20241022' }] });
     }
     if (url.includes('search/code')) {
