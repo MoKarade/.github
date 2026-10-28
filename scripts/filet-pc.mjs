@@ -48,7 +48,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DEPOT_BOITE, WORKFLOW_BOITE, construireMotif } from './reveil-reacteur.mjs';
-import { lierTout, ghCli } from './lier-taches.mjs';
+import { lierTout, ghCli, compteursGh } from './lier-taches.mjs';
 import { suivreDepot, menageFermees, marquerParJules } from './jules-suivi.mjs';
 import { marquerFaisables, retirerPerimees } from './jules-marquage.mjs';
 import { completerDepot } from './jules-gabarit.mjs';
@@ -610,6 +610,12 @@ export function tourAcceptationMarquee({ executer = false, aBlanc = false, gh = 
   }
 }
 
+/** « appels filet : N comptés (M en 304 gratuits sur R) [rôle n, …] » : seuls les rôles qui ont coûté quelque chose, du plus lourd au plus léger. */
+export function ligneAppels(c, roles) {
+  const lourds = roles.filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'fr')).map(([nom, n]) => `${nom} ${n}`);
+  return `appels filet : ${c.comptees} comptés (${c.n304} en 304 gratuits sur ${c.req})${lourds.length ? ` [${lourds.join(', ')}]` : ''}`;
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const arg = (nom) => { const i = process.argv.indexOf(nom); return i > 0 ? process.argv[i + 1] : null; };
   const fichierProchaines = process.argv[2];
@@ -619,16 +625,19 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const fichierEtat = arg('--etat') ?? 'filet-pc-etat.json';
     const options = { executer: process.argv.includes('--executer'), aBlanc: process.argv.includes('--a-blanc') };
     // Une seule ligne sur la sortie : la tâche du PC la reprend telle quelle dans etat.json. Le passage quotidien a son propre fichier d'état.
-    const reveil = tour({ fichierProchaines, fichierEtat, ...options });
-    const quotidien = tourQuotidien({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-quotidien.json'), ...options });
-    const oublis = tourOublis({ fichierProchaines, fichierEtat: fichierEtat.replace(/(\.json)?$/, '-oublis.json'), ...options });
-    const quota = tourQuota({ fichierProchaines, fichierEtat: fichierEtat.replace(/(\.json)?$/, '-quota.json'), ...options });
-    const liens = tourLiens({ fichierProchaines, ...options });
-    const file = tourFile({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-file.json'), ...options });
-    const suivi = tourJulesSuivi({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-jules-suivi.json'), ...options });
-    const fichiers = tourFichiersTouches(options);
-    const marquage = tourAcceptationMarquee(options);
-    const preuves = tourPreuvesRetard({ fichierDefauts: fichierProchaines.replace(/[^/\\]*$/, '') + 'defauts-preuve.json', fichierEtat: fichierEtat.replace(/(\.json)?$/, '-preuves.json'), ...options });
-    console.log(`${reveil} · ${quotidien} · ${oublis} · ${quota} · ${liens} · ${file} · ${suivi} · ${fichiers} · ${marquage} · ${preuves} · ${versionDuCode()}`);
+    // .github#741 : appels GitHub COMPTÉS par rôle (les 304 du cache ETag sont gratuits), dits sur la même ligne ; le tour du PC ne les voyait pas (267 appels cachés le 28/10/2026).
+    const roles = [];
+    const mesure = (nom, f) => { const avant = compteursGh().comptees; const r = f(); roles.push([nom, compteursGh().comptees - avant]); return r; };
+    const reveil = mesure('réveil', () => tour({ fichierProchaines, fichierEtat, ...options }));
+    const quotidien = mesure('quotidien', () => tourQuotidien({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-quotidien.json'), ...options }));
+    const oublis = mesure('oublis', () => tourOublis({ fichierProchaines, fichierEtat: fichierEtat.replace(/(\.json)?$/, '-oublis.json'), ...options }));
+    const quota = mesure('quota', () => tourQuota({ fichierProchaines, fichierEtat: fichierEtat.replace(/(\.json)?$/, '-quota.json'), ...options }));
+    const liens = mesure('liens', () => tourLiens({ fichierProchaines, ...options }));
+    const file = mesure('file', () => tourFile({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-file.json'), ...options }));
+    const suivi = mesure('jules-suivi', () => tourJulesSuivi({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-jules-suivi.json'), ...options }));
+    const fichiers = mesure('fichiers-touches', () => tourFichiersTouches(options));
+    const marquage = mesure('acceptation-marquage', () => tourAcceptationMarquee(options));
+    const preuves = mesure('preuves', () => tourPreuvesRetard({ fichierDefauts: fichierProchaines.replace(/[^/\\]*$/, '') + 'defauts-preuve.json', fichierEtat: fichierEtat.replace(/(\.json)?$/, '-preuves.json'), ...options }));
+    console.log(`${reveil} · ${quotidien} · ${oublis} · ${quota} · ${liens} · ${file} · ${suivi} · ${fichiers} · ${marquage} · ${preuves} · ${versionDuCode()} · ${ligneAppels(compteursGh(), roles)}`);
   }
 }
