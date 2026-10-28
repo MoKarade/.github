@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { calculer, collecterDepot, cycleRouge, duree, estPremierLundi, lire, mediane, rendre, resumeConformite, titreRapport } from './rapport-hebdo.mjs';
+import { calculer, collecterDepot, cycleRouge, duree, estPremierLundi, executantDe, lire, mediane, rendre, repartition, resumeConformite, titreRapport } from './rapport-hebdo.mjs';
 
 const H = 3_600_000;
 const J = 24 * H;
@@ -8,9 +8,11 @@ const MAINTENANT = Date.parse('2026-10-19T10:00:00Z'); // lundi
 const il_y_a = (ms) => new Date(MAINTENANT - ms).toISOString();
 
 const depotVide = (nom, extra = {}) => ({ nom, lisible: true, taches: [], ouvertes: [], signalements: [], prs: [], couverture: null, conformite: null, ...extra });
-const tache = (numero, creeIl, fermeIl, { etiquettes = ['niveau:tâche'], prFusionIl = null, acceptee = true } = {}) => ({
+const tache = (numero, creeIl, fermeIl, { etiquettes = ['niveau:tâche'], prFusionIl = null, acceptee = true, auteurPr = 'MoKarade', assignes = [] } = {}) => ({
   numero,
   etiquettes,
+  auteurPr,
+  assignes,
   creeLe: il_y_a(creeIl),
   fermeLe: il_y_a(fermeIl),
   acceptee: acceptee ? { le: il_y_a(fermeIl), prFusionLe: prFusionIl == null ? null : il_y_a(prFusionIl) } : null,
@@ -34,7 +36,7 @@ test('vitesse : acceptées de la semaine seulement, délais, part prouvée dans 
       depotVide('a', {
         taches: [
           tache(1, 3 * J, 2 * J, { prFusionIl: 2 * J + 30 * 60_000 }), // acceptée 1 j après création, prouvée en 30 min
-          tache(2, 5 * J, 1 * J, { prFusionIl: 1 * J + 3 * H, etiquettes: ['niveau:tâche', 'jules'] }), // 3 h
+          tache(2, 5 * J, 1 * J, { prFusionIl: 1 * J + 3 * H, etiquettes: ['niveau:tâche', 'jules'], auteurPr: 'google-labs-jules[bot]' }), // 3 h
           tache(3, 40 * J, 20 * J), // hors fenêtre
           tache(4, 2 * J, 1 * J, { acceptee: false }), // fermée sans preuve
         ],
@@ -45,13 +47,77 @@ test('vitesse : acceptées de la semaine seulement, délais, part prouvée dans 
   });
   assert.equal(r.vitesse.acceptees, 3);
   assert.deepEqual(r.vitesse.parDepot, { a: 2, b: 1 });
-  assert.deepEqual(r.vitesse.parExecutant, { fil: 2, Jules: 1 });
+  assert.deepEqual([r.vitesse.parExecutant.fil, r.vitesse.parExecutant.Jules, r.vitesse.parExecutant.Copilot, r.vitesse.parExecutant.inconnu], [2, 1, 0, 0]);
   assert.equal(r.vitesse.acceptation.max, 4 * J);
   assert.equal(r.vitesse.acceptation.mediane, 1 * J);
   assert.equal(r.vitesse.preuve.n, 2);
   assert.equal(r.vitesse.preuve.max, 3 * H);
   assert.equal(r.vitesse.preuve.dansLHeure, 0.5);
   assert.deepEqual(r.illisibles, ['prive']);
+});
+
+test('executantDe : Jules, Copilot, fil Claude ; sans signal l\'auteur est inconnu, pas « fil »', () => {
+  assert.equal(executantDe({ etiquettes: ['jules'] }), 'Jules');
+  assert.equal(executantDe({ auteurPr: 'google-labs-jules[bot]' }), 'Jules');
+  assert.equal(executantDe({ auteurPr: 'copilot-swe-agent[bot]' }), 'Copilot');
+  assert.equal(executantDe({ auteurPr: 'Copilot' }), 'Copilot');
+  assert.equal(executantDe({ assignes: ['Copilot'], auteurPr: 'MoKarade' }), 'Copilot');
+  assert.equal(executantDe({ auteurPr: 'MoKarade' }), 'fil');
+  assert.equal(executantDe({}), null);
+  assert.equal(executantDe({ etiquettes: ['niveau:tâche'] }), null);
+});
+
+test('repartition : effectifs et parts entières, aucune part inventée sans tâche', () => {
+  const r = repartition([{ auteurPr: 'MoKarade' }, { auteurPr: 'MoKarade' }, { auteurPr: 'Copilot' }, {}]);
+  assert.deepEqual([r.total, r.fil, r.Jules, r.Copilot, r.inconnu], [4, 2, 0, 1, 1]);
+  assert.deepEqual(r.parts, { fil: 50, Jules: 0, Copilot: 25, inconnu: 25 });
+  const vide = repartition([]);
+  assert.equal(vide.total, 0);
+  assert.deepEqual(vide.parts, { fil: null, Jules: null, Copilot: null, inconnu: null });
+});
+
+test('par auteur : Copilot compté à part, semaine ET cumul sur plusieurs semaines, quota Claude « non mesuré »', () => {
+  const depuisCumul = MAINTENANT - 20 * J; // première livraison de la mission, il y a trois semaines
+  const r = calculer({
+    maintenant: MAINTENANT,
+    cumulDepuis: depuisCumul,
+    depots: [
+      depotVide('a', {
+        taches: [
+          tache(1, 3 * J, 2 * J), // semaine : fil
+          tache(2, 3 * J, 2 * J, { auteurPr: 'copilot-swe-agent[bot]' }), // semaine : Copilot
+          tache(3, 12 * J, 10 * J, { auteurPr: 'copilot-swe-agent[bot]' }), // semaine -2 : cumul seulement
+          tache(4, 16 * J, 15 * J, { etiquettes: ['niveau:tâche', 'jules'], auteurPr: 'google-labs-jules[bot]' }), // cumul seulement
+          tache(5, 19 * J, 18 * J, { auteurPr: null }), // cumul : auteur non établi (aucune PR citée)
+          tache(6, 30 * J, 25 * J), // avant la première livraison : hors cumul
+        ],
+      }),
+    ],
+  });
+  const s = r.vitesse.parExecutant;
+  assert.deepEqual([s.total, s.fil, s.Copilot, s.Jules, s.inconnu], [2, 1, 1, 0, 0]);
+  assert.deepEqual([s.parts.fil, s.parts.Copilot], [50, 50]);
+  const c = r.vitesse.cumul;
+  assert.deepEqual([c.total, c.fil, c.Copilot, c.Jules, c.inconnu], [5, 1, 2, 1, 1]);
+  assert.deepEqual(c.parts, { fil: 20, Jules: 20, Copilot: 40, inconnu: 20 });
+  assert.equal(c.depuis, depuisCumul);
+  assert.equal(c.limite, false);
+  const texte = rendre(r);
+  assert.match(texte, /Tâches acceptées : \*\*2\*\* — fil Claude 1 \(50 %\), Jules 0 \(0 %\), Copilot 1 \(50 %\)\./);
+  assert.match(texte, /Cumul depuis le 2026-09-29 .*: \*\*5\*\* — fil Claude 1 \(20 %\), Jules 1 \(20 %\), Copilot 2 \(40 %\), auteur non établi 1 \(20 %\)\./);
+  assert.match(texte, /Quota Claude consommé : non mesuré/);
+  assert.doesNotMatch(texte, /lecture limitée/);
+});
+
+test('par auteur : cumul plus vieux que la lecture = lecture limitée, dite ; semaine vide = « aucune », pas de pourcentage', () => {
+  const r = calculer({ maintenant: MAINTENANT, cumulDepuis: MAINTENANT - 400 * J, depots: [depotVide('a', { taches: [tache(1, 50 * J, 45 * J), tache(2, 3 * J, 2 * J)] })] });
+  assert.equal(r.vitesse.cumul.total, 1, 'la tâche de -45 j dépasse CUMUL_MAX_JOURS');
+  assert.equal(r.vitesse.cumul.limite, true);
+  assert.match(rendre(r), /lecture limitée aux 42 derniers jours/);
+  const vide = calculer({ maintenant: MAINTENANT, cumulDepuis: MAINTENANT - 5 * J, depots: [depotVide('a')] });
+  const texte = rendre(vide);
+  assert.match(texte, /Tâches acceptées : \*\*0\*\* — aucune\./);
+  assert.doesNotMatch(texte, /NaN|null/);
 });
 
 test('cycleRouge : échec puis succès du même workflow, ou échec jamais résolu', () => {
@@ -178,10 +244,10 @@ test('collecterDepot : dépôt privé illisible ; dépôt lisible normalisé (is
   const issue = (n, extra = {}) => ({ number: n, title: `t${n}`, labels: [{ name: 'niveau:tâche' }], created_at: il_y_a(3 * J), updated_at: il_y_a(1 * J), closed_at: null, body: '', state: 'open', ...extra });
   const reponses = [
     [/--jq \.full_name$/, () => 'MoKarade/x'],
-    [/issues\?state=all/, () => [[issue(1, { state: 'closed', state_reason: 'completed', closed_at: il_y_a(1 * J) }), issue(2, { pull_request: {} })]]],
+    [/issues\?state=all/, () => [[issue(1, { state: 'closed', state_reason: 'completed', closed_at: il_y_a(1 * J), assignees: [{ login: 'Copilot' }] }), issue(2, { pull_request: {} })]]],
     [/issues\?state=open/, () => [[issue(3, { parent_issue_url: 'u' }), issue(4)]]],
     [/issues\/1\/comments/, () => [[{ body: '**Acceptée** — PR #12 fusionnée', created_at: il_y_a(1 * J) }]]],
-    [/pulls\/12 --jq/, () => '{"m":"' + il_y_a(1 * J + 20 * 60_000) + '"}'],
+    [/pulls\/12 --jq/, () => '{"m":"' + il_y_a(1 * J + 20 * 60_000) + '","a":"copilot-swe-agent[bot]"}'],
     [/pulls\?state=all/, () => [[{ number: 12, updated_at: il_y_a(1 * J), merged_at: il_y_a(1 * J), body: 'Tâche : #1', head: { ref: 'claude/x' } }]]],
     [/actions\/runs/, () => [{ workflow_runs: [{ name: 'CI', conclusion: 'success', created_at: il_y_a(1 * J), updated_at: il_y_a(1 * J) }] }]],
     [/contents\/qualite\/seuils\.json/, () => Buffer.from(JSON.stringify({ portes: { 'couverture.lignes': { min: 80 }, 'code_mort': { max: 3 } } })).toString('base64')],
@@ -196,6 +262,8 @@ test('collecterDepot : dépôt privé illisible ; dépôt lisible normalisé (is
   const d = await collecterDepot(gh, 'x', MAINTENANT, () => ({ vert: 1, rouge: 0, aRelire: 0, sansObjet: 0, lignesRouges: [] }));
   assert.equal(d.lisible, true);
   assert.deepEqual(d.taches.map((t) => [t.numero, Boolean(t.acceptee), t.acceptee?.prFusionLe != null]), [[1, true, true]]);
+  assert.deepEqual([d.taches[0].auteurPr, d.taches[0].assignes], ['copilot-swe-agent[bot]', ['Copilot']]);
+  assert.equal(executantDe(d.taches[0]), 'Copilot');
   assert.deepEqual(d.ouvertes.map((o) => [o.numero, o.parent]), [[3, true], [4, false]]);
   assert.equal(d.signalements.length, 1, 'les PR sont écartées des issues');
   assert.deepEqual(d.couverture, { 'couverture.lignes': 80 });
