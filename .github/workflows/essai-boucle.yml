@@ -1,0 +1,13 @@
+name: Rapport hebdomadaire
+on:
+  push:
+    branches: [claude/essai-boucle]
+permissions: {}
+jobs:
+  essai:
+    name: Essai de la boucle d'erreurs
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Échec voulu
+        run: exit 1
