@@ -75,8 +75,12 @@ le secret que le PC a déjà) et réveille le Coordinateur par `boite-reacteur.y
 Étapes (28/10/2026, tâche .github#689) : `etapes.py` écrit `etapes.json`, rangé par `build.py` dans `donnees.json` sous `etapes`, pour la durée moyenne de chaque étape de la page.
 `prets` (clé `r#n`, comme `prlog`) : dernier `ready_for_review` avant la fusion, `null` = lue et jamais brouillon, clé absente = pas encore lue. `en_ligne` : le déploiement dont le commit
 est le commit de fusion (`ms` de `prlog`), avec `sha`, `env`, `cree_le` et `pret_le` (statut `success` = en ligne) ; une fusion sans déploiement (build sauté) n'a pas d'entrée.
-`couvert_depuis` : plus ancien déploiement lu par dépôt (avant, l'absence ne prouve rien) ; `restant` : PR pas encore lues. Résultats mémorisés à vie dans `etapes-cache.json`
-(perdu : le passé se relit par paquets) ; fusions des 35 derniers jours seulement, les plus récentes d'abord ; au plus 60 lectures comptées par tour quand le compte GitHub a 3 500 appels ou plus, 15 en dessous, aucune (étape sautée) sous 1 500. Tests : `python -X utf8 -m unittest test_etapes.py`.
+`couvert_depuis` : plus ancien déploiement lu par dépôt (avant, l'absence ne prouve rien) ; `restant` : PR pas encore lues ; `absents` : PR de `prlog` introuvables ou dont la date de
+fusion n'est pas la même dans le dépôt (autre dépôt qui reprend les numéros, comme FinanceAI et son archive) : jamais attribuées à une autre PR, jamais relues. Résultats mémorisés à vie
+dans `etapes-cache.json` (perdu : le passé se relit par paquets) ; fusions des 35 derniers jours seulement, les plus récentes d'abord. **Lecture par GraphQL** (`gh api graphql`) : la limite
+GraphQL du jeton est séparée de la limite REST « core » ; une requête lit 20 PR ou 100 déploiements avec leurs statuts (1 à 2 points), au plus 16 requêtes par tour (`--plafond=n`), aucun appel REST,
+donc l'étape tourne aussi au tour économe. `appels` = requêtes GraphQL du tour. Une fusion de plus de 6 h sans déploiement sur le commit, dans une liste qui la couvre, n'en aura pas (build sauté) : plus relue.
+Tests : `python -X utf8 -m unittest test_etapes.py`.
 
 ## Suivre et arrêter
 

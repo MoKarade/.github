@@ -134,11 +134,10 @@ def releve(econome=False, quota_complet=True, drive=None):
     # Lectures à ETag, au plus 80 comptées (30 au tour économe, PR les plus récentes d'abord) ; un échec se DIT et ne bloque rien.
     if lancer([PY, 'prs_ouvertes.py'] + (['--plafond=30'] if econome else []), '.refresh-prs.log', 300) == 0: quota += ' · ' + (queue('.refresh-prs.log', 160) or 'PR ouvertes : sans sortie')
     else: quota += ' · PR ouvertes : ÉCHEC ' + queue('.refresh-prs.log', 200)
-    # 1 quater. étapes (etapes.py, .github#689) : heure « PR prête » et heure « en ligne » des PR fusionnées, mémorisées à vie ; rattrapage du passé par paquets
-    # (60 lectures comptées au plus quand le compte GitHub est ample, 15 sous 3 500 restants, aucune sous 1 500 : le rattrapage du passé n'est pas urgent et le jeton est
-    # celui de Marc, partagé avec tout son compte, 28/10/2026 : tours sautés à 0 appel restant) ; un échec se DIT et ne bloque rien.
-    if econome: quota += ' · Étapes : sautées (tour économe)'
-    elif lancer([PY, 'etapes.py'] + ([] if quota_complet else ['--plafond=15']), '.refresh-etapes.log', 300) == 0: quota += ' · ' + (queue('.refresh-etapes.log', 160) or 'Étapes : sans sortie')
+    # 1 quater. étapes (etapes.py, .github#689) : heure « PR prête » et heure « en ligne » des PR fusionnées, mémorisées à vie ; rattrapage du passé par paquets.
+    # Lue par GraphQL (limite SÉPARÉE de la limite REST « core » du jeton de Marc, que le relevé et les sessions du PC ont vidée le 28/10/2026) : zéro appel REST, donc
+    # aucune raison de la sauter au tour économe ; un échec se DIT et ne bloque rien.
+    if lancer([PY, 'etapes.py'], '.refresh-etapes.log', 300) == 0: quota += ' · ' + (queue('.refresh-etapes.log', 160) or 'Étapes : sans sortie')
     else: quota += ' · Étapes : ÉCHEC ' + queue('.refresh-etapes.log', 200)
     # 2. file du script + données de la page
     if lancer([PY, 'build.py'], '.refresh-build.log', 600) != 0: return 1, f'ÉCHEC {maintenant()} build.py : {queue(".refresh-build.log")}'
