@@ -13,6 +13,7 @@ import { execFile } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { analyserGeste } from './geste-controle.mjs';
 
 export const DEPOTS = ['.github', 'app-template', 'batchchef-', 'CarAI', 'DriveAI', 'FinanceAI', 'hub-contract', 'Hubperso', 'JobAI', 'lia-ui', 'MemoryAI'];
 const HEURE = 3_600_000;
@@ -105,7 +106,10 @@ export function calculer({ depots, maintenant }) {
   // Santé du backlog
   const ouvertes = lisibles.flatMap((d) => d.ouvertes.map((o) => ({ ...o, depot: d.nom })));
   const bloquees = ouvertes.filter((o) => etiquette(o, 'bloqué') && maintenant - temps(o.majLe) > 7 * JOUR);
-  const gestes = ouvertes.filter((o) => etiquette(o, 'qui:marc')).map((o) => ({ depot: o.depot, numero: o.numero, titre: o.titre, age: maintenant - temps(o.creeLe) }));
+  const gestes = ouvertes
+    .filter((o) => etiquette(o, 'qui:marc'))
+    .map((o) => ({ depot: o.depot, numero: o.numero, titre: o.titre, age: maintenant - temps(o.creeLe), raison: analyserGeste({ corps: o.corps, commentaires: (o.commentaires ?? []).map((body) => ({ body })) }).pourquoi }));
+  const gestesAnciens = gestes.filter((g) => g.age > 7 * JOUR);
   const orphelines = ouvertes.filter((o) => etiquette(o, 'niveau:tâche') && !o.parent);
   const nonProuvees = [];
   for (const d of lisibles) {
@@ -145,7 +149,7 @@ export function calculer({ depots, maintenant }) {
       couverture: Object.fromEntries(lisibles.map((d) => [d.nom, d.couverture])),
       conformite: Object.fromEntries(lisibles.map((d) => [d.nom, d.conformite])),
     },
-    backlog: { bloquees, gestes, orphelines, nonProuvees, preuves },
+    backlog: { bloquees, gestes, gestesAnciens, orphelines, nonProuvees, preuves },
   };
 }
 
@@ -191,6 +195,7 @@ export function rendre(r, { premierLundi = false, maintenant = r.fenetre.fin } =
   l.push('## Santé du backlog', '');
   l.push(`- Tâches bloquées depuis plus de 7 jours : **${b.bloquees.length}**${b.bloquees.length ? ` (${b.bloquees.map((o) => lien(o.depot, o.numero)).join(', ')})` : ''}.`);
   l.push(`- Gestes de Marc en attente : **${b.gestes.length}**${b.gestes.length ? ` — ${b.gestes.map((g) => `${lien(g.depot, g.numero)} (${duree(g.age)})`).join(', ')}` : ''}.`);
+  l.push(`- Gestes de Marc ouverts depuis plus de 7 jours : **${b.gestesAnciens.length}**${b.gestesAnciens.length ? ` — ${b.gestesAnciens.map((g) => `${lien(g.depot, g.numero)} (${duree(g.age)}) : ${g.raison ?? 'raison non écrite'}`).join(' ; ')}` : ''}.`);
   l.push(`- Tâches orphelines (sans mission) : **${b.orphelines.length}**${b.orphelines.length ? ` (${b.orphelines.map((o) => lien(o.depot, o.numero)).join(', ')})` : ''}.`);
   l.push(`- Fusionnées mais pas encore prouvées : **${b.nonProuvees.length}**${b.nonProuvees.length ? ` — ${b.nonProuvees.map((n) => `${lien(n.depot, n.tache)} via PR ${n.pr} (${duree(n.depuis)})`).join(', ')}` : ''}.`);
   l.push(`- Preuves programmées : **${b.preuves.length}**${b.preuves.length ? ` — ${b.preuves.map((p) => `${lien(p.depot, p.numero)} : ${p.quand}`).join(' ; ')}` : ''}.`);
@@ -281,7 +286,13 @@ export async function collecterDepot(gh, depot, maintenant, conformiteDe) {
     nom: depot,
     lisible: true,
     taches,
-    ouvertes: ouvertes.map(norm),
+    ouvertes: await Promise.all(ouvertes.map(async (i) => {
+      const n = norm(i);
+      // La raison d'un geste peut être en commentaire : on ne les lit que pour les tâches `qui:marc` (quelques-unes), jamais pour les autres.
+      if (!n.etiquettes.includes('qui:marc')) return n;
+      const cs = await lire(gh, `${R}/issues/${i.number}/comments?per_page=100`);
+      return { ...n, commentaires: cs.map((c) => c.body ?? '') };
+    })),
     signalements: recents.map(norm),
     prs,
     couverture,
