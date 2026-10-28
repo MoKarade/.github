@@ -213,6 +213,10 @@ export async function executer({ aBlanc = false, apps = APPS_PAR_DEFAUT, apiKey 
 
   const aOuvrir = modelesAMigrer(listeModeles, idsParApp);
 
+  // Ce qui a été lu, pour qu'un « 0 tâche » soit vérifiable : modèles les plus récents de l'API, puis modèles trouvés par app.
+  console.log(`Modèles Anthropic lus : ${listeModeles.length}, dont ${listeModeles.map(idDe).filter(familleDuModele).join(', ')}`);
+  for (const a of idsParApp) console.log(`${a.nom} (${a.depot}) : ${a.utilises.length ? a.utilises.join(', ') : 'aucun identifiant trouvé'} ; ${a.ouvertes.length} issue(s) lue(s)`);
+
   if (aBlanc) {
     console.log(`[Essai à blanc] ${aOuvrir.length} tâche(s) de migration à ouvrir :`);
     for (const t of aOuvrir) console.log(` - ${t.app} (${t.depot}) : ${t.ancien} → ${t.nouveau} | « ${t.titre} »`);
