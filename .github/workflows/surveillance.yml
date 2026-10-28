@@ -111,3 +111,10 @@ jobs:
           RETOUR_CONTROLE: ${{ inputs.retour-controle }}
           RETOUR_URL_BASE: ${{ github.event.client_payload.url_base }}
         run: node scripts/retour-arriere.mjs
+
+      - name: Détecter les nouveaux modèles Anthropic et ouvrir les tâches de migration
+        if: ${{ !cancelled() && !inputs.deploiement-essai && !inputs.url-essai }}
+        env:
+          GH_PAT: ${{ secrets.RELECTURE_PAT }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node scripts/modeles-nouveaux.mjs
