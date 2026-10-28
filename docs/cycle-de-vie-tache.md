@@ -434,6 +434,7 @@ Le workflow commun `fumee` tourne après chaque déploiement de production. Il c
 - **la vitesse** :
   - le délai entre la création d'une tâche et son acceptation (médiane et maximum) ;
   - les tâches acceptées, par dépôt et par exécutant (fil, Jules) ;
+  - le cumul par exécutant depuis la première livraison de la mission .github#703 : chaque rapport porte une ligne cachée `<!-- cumul-par-auteur : {...} -->` (date de fin et effectifs), le suivant la lit et ne relit que les tâches acceptées après cette date ; sans ligne lisible, il relit tout (42 jours au plus) et le dit ; le rapport écrit le nombre d'appels API de sa lecture ;
   - le délai entre la mise en ligne (ou la fusion) et « Acceptée » (médiane et maximum), avec la part des tâches prouvées dans l'heure ;
 - **la qualité** :
   - les PR passées au rouge et le temps pour revenir au vert ;
