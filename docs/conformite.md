@@ -30,6 +30,8 @@ Le tableau ligne par ligne s'écrit dans le résumé du job. Le workflow « Essa
 |---|---|---|
 | 1 | Dépôt public, branche protégée | API : `private`, protection de la branche par défaut (au moins un contrôle exigé) |
 | 2 | CI sur machines GitHub | chaque `runs-on` nomme une machine GitHub ; chaque job a `timeout-minutes` (ou appelle un workflow) ; aucun `paths:` sur un déclencheur de PR |
+
+**Privé voulu.** Un dépôt privé par décision de Marc (liste `PRIVES_VOULUS` dans `scripts/conformite.mjs` ; DriveAI, documents sensibles) met « sans objet » les deux sous-contrôles « dépôt public » (ligne 1) et « machines GitHub » (ligne 2), car le robot de tests du PC y sert la CI. La branche protégée, les `timeout-minutes` et l'absence de `paths:` restent vérifiés. Ajouter un dépôt à la liste exige la décision écrite de Marc.
 | 3 | Gate | `typecheck`, `lint`, `test`, `build` existent dans `package.json` ET un workflow les lance |
 | 4 | Couverture | `qualite/seuils.json` porte un seuil `couverture.*` |
 | 5 | Fumée | un workflow appelle `fumee.yml` |

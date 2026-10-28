@@ -2,7 +2,7 @@
 // Aucune dépendance, aucun réseau (`node --test scripts/conformite.test.mjs`). Chaque ligne a un cas vert ET un cas rouge.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cronQuotidien, evaluer, jobsDe, scriptsAppeles, sombreSeulDeclare, tableau } from './conformite.mjs';
+import { PRIVES_VOULUS, cronQuotidien, evaluer, jobsDe, scriptsAppeles, sombreSeulDeclare, tableau } from './conformite.mjs';
 
 const SHA = 'a'.repeat(40);
 const CI = `name: CI
@@ -72,6 +72,24 @@ test('dépôt entièrement conforme : 14 lignes vertes, la sauvegarde (10) reste
   const e = etats(depot());
   assert.equal(e[10], 'non-verifiable');
   assert.deepEqual(Object.entries(e).filter(([n, v]) => n !== '10' && v !== 'vert'), []);
+});
+
+test('1 et 2 : dépôt privé voulu (DriveAI) → visibilité et machines « sans objet », le reste reste contrôlé', () => {
+  const pc = CI.replace(/runs-on: .*/, 'runs-on: [self-hosted, pc-marc]');
+  const drive = (extra = {}, api = {}) => depot({ fichiers: { '.github/workflows/ci.yml': pc, ...extra }, api: { depot: { nom: 'MoKarade/DriveAI', prive: true, branche: 'main', securite: null }, ...api } });
+  assert.ok(PRIVES_VOULUS['mokarade/driveai']);
+  const e = etats(drive());
+  assert.equal(e[1], 'vert');
+  assert.equal(e[2], 'vert');
+  assert.match(detail(drive(), 1), /sans objet : privé par décision de Marc/);
+  assert.match(detail(drive(), 2), /sans objet : machines du PC admises/);
+  // La protection de branche, les timeouts et les paths: comptent toujours.
+  assert.equal(etats(drive({}, { protection: { protegee: false, verifs: [] } }))[1], 'rouge');
+  assert.equal(etats(drive({ '.github/workflows/ci.yml': pc.replace('timeout-minutes: 15\n', '') }))[2], 'rouge');
+  assert.equal(etats(drive({ '.github/workflows/ci.yml': pc.replace('  pull_request:\n', '  pull_request:\n    paths: [a]\n') }))[2], 'rouge');
+  // Un autre dépôt privé ou hors machines GitHub reste rouge.
+  assert.equal(etats(depot({ fichiers: { '.github/workflows/ci.yml': pc }, api: { depot: { nom: 'MoKarade/autre', prive: true, branche: 'main' } } }))[1], 'rouge');
+  assert.equal(etats(depot({ fichiers: { '.github/workflows/ci.yml': pc } }))[2], 'rouge');
 });
 
 test('1 : dépôt privé, branche non protégée, protection sans contrôle exigé', () => {
