@@ -259,7 +259,7 @@ export function rendre(r, { premierLundi = false, maintenant = r.fenetre.fin } =
   l.push(`- Tâches acceptées : **${v.acceptees}** — ${texteRepartition(v.parExecutant)}.`);
   const origineCumul = v.cumul.repris ? `repris du rapport précédent, plus ${v.cumul.nouvelles} tâche(s) acceptée(s) depuis` : `relu en entier : ${r.cumulSource ?? 'aucun rapport précédent'}`;
   l.push(`- Cumul depuis le ${jourQuebec(v.cumul.depuis)} (première livraison de la mission .github#703 ; ${origineCumul})${v.cumul.limite ? `, lecture limitée aux ${CUMUL_MAX_JOURS} derniers jours` : ''} : **${v.cumul.total}** — ${texteRepartition(v.cumul)}.`);
-  if (r.lecture) l.push(`- Lecture de l'API pour ce rapport : **${r.lecture.taches}** appels pour relire les tâches acceptées (commentaire « Acceptée » + PR), ${r.lecture.total} appels au total.`);
+  if (r.lecture) l.push(`- Lecture de l'API pour ce rapport : **${r.lecture.taches}** appels pour relire les tâches acceptées (pages de commentaires du dépôt, plus les relectures isolées d'une tâche ou d'une PR absente des lots), ${r.lecture.total} appels au total.`);
   l.push('- Quota Claude consommé : non mesuré (aucune source de lecture, rien n\'est estimé).');
   const depots = Object.entries(v.parDepot).filter(([, n]) => n > 0).map(([d, n]) => `${d} ${n}`);
   l.push(`- Par dépôt : ${depots.length ? depots.join(', ') : 'aucune'}.`);
@@ -325,6 +325,18 @@ export async function lire(gh, chemin, cle) {
   return pages.flatMap((p) => (cle ? p[cle] ?? [] : p));
 }
 
+/** GET page par page (100 par page), chaque page = un appel compté dans `compteur.taches` : le chiffre dit les vraies requêtes. */
+export async function lirePages(gh, chemin, compteur) {
+  const tout = [];
+  for (let page = 1; page <= 200; page += 1) {
+    compteur.taches += 1;
+    const lot = JSON.parse(await gh(['api', `${chemin}${chemin.includes('?') ? '&' : '?'}per_page=100&page=${page}`]));
+    tout.push(...lot);
+    if (lot.length < 100) break;
+  }
+  return tout;
+}
+
 const noms = (o) => (o.labels ?? []).map((x) => (typeof x === 'string' ? x : x.name));
 
 export async function collecterDepot(gh, depot, maintenant, conformiteDe, cumulDepuis = CUMUL_DEPUIS, compteur = { taches: 0 }) {
@@ -343,28 +355,51 @@ export async function collecterDepot(gh, depot, maintenant, conformiteDe, cumulD
   const debutCumul = Math.max(cumulDepuis, maintenant - CUMUL_MAX_JOURS * JOUR);
   const norm = (i) => ({ numero: i.number, titre: i.title, etiquettes: noms(i), creeLe: i.created_at, majLe: i.updated_at, fermeLe: i.closed_at, parent: Boolean(i.parent_issue_url), corps: i.body ?? '' });
 
+  // Lecture GROUPÉE : les commentaires du dépôt (pages de 100) et ses PR (déjà lues plus bas pour les runs) remplacent
+  // une lecture par tâche. Une tâche dont l'« Acceptée » ou la PR manque dans ces lots est relue seule, comme avant :
+  // le résultat est le même, seul le nombre d'appels baisse.
+  const aLire = recents.filter((x) => x.state === 'closed' && x.state_reason === 'completed' && noms(x).includes('niveau:tâche') && temps(x.closed_at) >= Math.min(debut, debutCumul));
+  const commentairesParIssue = new Map();
+  if (aLire.length) {
+    const depuisCommentaires = new Date(Math.min(...aLire.map((x) => temps(x.closed_at))) - 2 * JOUR).toISOString();
+    for (const c of await lirePages(gh, `${R}/issues/comments?since=${depuisCommentaires}`, compteur)) {
+      const n = Number(/\/issues\/(\d+)$/.exec(c.issue_url ?? '')?.[1]);
+      if (n) commentairesParIssue.set(n, [...(commentairesParIssue.get(n) ?? []), c]);
+    }
+  }
+  const toutesPrs = await lire(gh, `${R}/pulls?state=all&sort=updated&direction=desc&per_page=40`);
+  const prParNumero = new Map(toutesPrs.map((p) => [p.number, p]));
+
   const taches = [];
-  for (const i of recents.filter((x) => x.state === 'closed' && x.state_reason === 'completed' && noms(x).includes('niveau:tâche') && temps(x.closed_at) >= Math.min(debut, debutCumul))) {
-    compteur.taches += 1;
-    const commentaires = await lire(gh, `${R}/issues/${i.number}/comments?per_page=100`);
-    const accept = commentaires.find((c) => /^\*\*Acceptée\*\*/.test(c.body ?? ''));
+  for (const i of aLire) {
+    let accept = (commentairesParIssue.get(i.number) ?? []).find((c) => /^\*\*Acceptée\*\*/.test(c.body ?? ''));
+    if (!accept) {
+      compteur.taches += 1;
+      accept = (await lire(gh, `${R}/issues/${i.number}/comments?per_page=100`)).find((c) => /^\*\*Acceptée\*\*/.test(c.body ?? ''));
+    }
     let prFusionLe = null;
     let auteurPr = null;
     const pr = /PR #(\d+)/.exec(accept?.body ?? '');
     if (pr) {
-      compteur.taches += 1;
-      try {
-        const lu = JSON.parse(await gh(['api', `${R}/pulls/${pr[1]}`, '--jq', '{m: .merged_at, a: .user.login}']));
-        prFusionLe = lu.m;
-        auteurPr = lu.a ?? null;
-      } catch {
-        prFusionLe = null;
+      const connue = prParNumero.get(Number(pr[1]));
+      if (connue) {
+        prFusionLe = connue.merged_at ?? null;
+        auteurPr = connue.user?.login ?? null;
+      } else {
+        compteur.taches += 1;
+        try {
+          const lu = JSON.parse(await gh(['api', `${R}/pulls/${pr[1]}`, '--jq', '{m: .merged_at, a: .user.login}']));
+          prFusionLe = lu.m;
+          auteurPr = lu.a ?? null;
+        } catch {
+          prFusionLe = null;
+        }
       }
     }
     taches.push({ ...norm(i), assignes: (i.assignees ?? []).map((a) => a.login), auteurPr, acceptee: accept ? { le: accept.created_at, prFusionLe } : null });
   }
 
-  const prsBrutes = (await lire(gh, `${R}/pulls?state=all&sort=updated&direction=desc&per_page=40`)).filter((p) => temps(p.updated_at) >= maintenant - 30 * JOUR);
+  const prsBrutes = toutesPrs.filter((p) => temps(p.updated_at) >= maintenant - 30 * JOUR);
   const prs = [];
   for (const p of prsBrutes) {
     let runs = [];
