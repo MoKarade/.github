@@ -20,7 +20,11 @@ def sauter_le_plein(econome, prec, maintenant):
     return bool(econome) and not leger_possible(prec, maintenant)
 
 def ligne_appels(journal):
-    """La dernière ligne « <mode> : N appels comptés (…) » du journal de fetch.py ('' si absente). Elle n'était lisible que dans le journal du relevé ou sur un ÉCHEC ;
-    le tour la recopie dans sa ligne OK (.github#741) : la preuve « moins de 100 appels par tour » se lit alors dans etat.json."""
-    lignes = [l.strip() for l in (journal or '').splitlines() if ' appels comptés (' in l]
-    return lignes[-1] if lignes else ''
+    """La dernière ligne « <mode> : N appels comptés (…) » du journal de fetch.py, suivie des formes de chemin les plus coûteuses si le journal les donne
+    (« appels comptés par chemin : … ») ; '' si la première est absente. Lisible dans la ligne OK du tour (.github#741) : la preuve « moins de 100 appels
+    par tour » et la réponse à « lesquels pèsent ? » se lisent dans etat.json."""
+    lignes = [l.strip() for l in (journal or '').splitlines()]
+    comptes = [l for l in lignes if ' appels comptés (' in l]
+    if not comptes: return ''
+    chemins = [l for l in lignes if l.startswith('appels comptés par chemin :')]
+    return comptes[-1] + (' ; ' + chemins[-1] if chemins else '')

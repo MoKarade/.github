@@ -442,6 +442,9 @@ res['appels'], res['reqs'], res['n304'] = CPT['comptees'], CPT['req'], CPT['n304
 res['duree_s'], res['reutilises'] = round(time.time() - T0, 1), sum(s[1] for s in sorties)
 if not LEGER: res['ecarts_enfants'] = ECARTS_ENFANTS     # plein : les enfants vus par « parent » diffèrent-ils de sub_issues ? (attendu : aucun)
 print(f"{res['mode']} : {res['appels']} appels comptés ({res['n304']} en 304 gratuits sur {res['reqs']}), {res['duree_s']} s, {res['reutilises']} reprises" + (f", écarts enfants {len(ECARTS_ENFANTS)}" if not LEGER else ''), file=sys.stderr)
+# .github#741 : QUOI pèse dans les appels comptés (les 304 ne coûtent rien) ; une seconde ligne, la première reste celle que le tour recopie
+res['appels_par_chemin'] = dict(ghcache.detail_comptees())
+print('appels comptés par chemin : ' + (', '.join(f'{c} {n}' for c, n in ghcache.detail_comptees()) or 'aucun'), file=sys.stderr)
 # Miroir local des scripts de MoKarade/.github que la page fait tourner : UN calcul de la file (prochaine-tache.mjs) et UNE mesure de fidélité
 # (verif-fidelite.mjs), les mêmes pour la page et pour la routine. Relus à chaque relevé (un 304 ne coûte rien) ; leurs imports relatifs suivent.
 SCRIPTS_ENTREES = ['prochaine-tache.mjs', 'verif-fidelite.mjs', 'filet-pc.mjs']
