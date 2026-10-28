@@ -5,10 +5,12 @@
 # jamais de fake data : une lecture qui échoue s'écrit `erreur`, jamais un « vert » par défaut ; les PR de test que Mergify ouvre pour sa file sont comptées à part.
 # Usage : python3 prs_ouvertes.py [sortie.json] [--depots=a,b] [--plafond=n]   (sans --depots : les dépôts du backlog.json du même tour ; sans --plafond : PLAFOND_APPELS)
 import datetime, html, json, os, re, sys
+from concurrent.futures import ThreadPoolExecutor
 from acteurs import BOTS
 
 VERSION = 1
 PLAFOND_APPELS = 80
+PARALLELES = 5      # lectures simultanées (comme fetch.py)
 D = os.path.dirname(os.path.abspath(__file__)) + os.sep
 MERGIFY_FILE = re.compile(r'^mergify/merge-queue/')           # branche des PR brouillon de test de la file Mergify
 NOM_MERGIFY = re.compile(r'^(@?mergify/)?Mergify ', re.I)     # ses contrôles ne sont pas la CI du projet
@@ -102,39 +104,63 @@ def _liste(lire, chemin):
     return out
 
 
-def releve(depots, lire, maintenant, compter=lambda: 0, plafond=PLAFOND_APPELS):
-    """`lire(chemin)` -> JSON (ghcache.lire) ; `compter()` -> lectures déjà comptées par GitHub. Rend le dict du fichier. Ne lève jamais pour une lecture."""
+def _lire_depot(lire, depot):
+    """Les PR ouvertes d'un dépôt (hors PR de test de Mergify) et son dernier déploiement. Ne lève jamais."""
+    prs, mergify, erreur, dep = [], 0, None, None
+    try:
+        for p in _liste(lire, f'repos/MoKarade/{depot}/pulls?state=open&per_page=100'):
+            if MERGIFY_FILE.match((p.get('head') or {}).get('ref') or ''): mergify += 1
+            else: prs.append(p)
+    except Exception as e: erreur = f'{depot} : liste des PR : {str(e)[:160]}'
+    try:
+        deps = lire(f'repos/MoKarade/{depot}/deployments?per_page=1')
+        sts = lire(f'repos/MoKarade/{depot}/deployments/{deps[0]["id"]}/statuses?per_page=1') if deps else []
+        dep = deploiement(deps, sts)
+    except Exception as e: dep = {'erreur': str(e)[:160]}
+    return prs, mergify, erreur, dep
+
+
+def _lire_pr(lire, depot, p):
+    """La CI et l'état Mergify d'une PR -> (ci, mergify). Une lecture en échec s'écrit `erreur`, jamais un « vert »."""
+    sha, n = (p.get('head') or {}).get('sha'), p['number']
+    ci, mg, runs = {'etat': 'non_lu'}, {'etat': 'non_lu'}, []
+    try:
+        d = lire(f'repos/MoKarade/{depot}/commits/{sha}/check-runs?per_page=100')
+        runs = d.get('check_runs') or []
+        ci = etat_ci(runs)
+        if (d.get('total_count') or 0) > len(runs): ci['incomplet'] = True
+    except Exception as e: ci = {'erreur': str(e)[:160]}
+    try:
+        # un brouillon ne peut pas être en file : pas de lecture des commentaires, seulement le contrôle de Mergify
+        coms = [] if p.get('draft') else lire(f'repos/MoKarade/{depot}/issues/{n}/comments?per_page=100')
+        mg = etat_mergify(coms, runs)
+    except Exception as e: mg = {'erreur': str(e)[:160]}
+    return ci, mg
+
+
+def releve(depots, lire, maintenant, compter=lambda: 0, plafond=PLAFOND_APPELS, paralleles=PARALLELES):
+    """`lire(chemin)` -> JSON (ghcache.lire) ; `compter()` -> lectures déjà comptées par GitHub. Rend le dict du fichier. Ne lève jamais pour une lecture.
+    Les lectures se font `paralleles` à la fois (un `gh` par lecture, ~2 s chacun sous Windows : en série, le tour de 15 h 41 a dépassé ses 300 s, .github#684) ;
+    le plafond se vérifie avant chaque lot, il peut donc être dépassé de quelques lectures au plus."""
     base = compter()
+    def par(f, items):
+        with ThreadPoolExecutor(max(1, paralleles)) as ex: return list(ex.map(f, items))
     prs, erreurs, brouillons_mergify, deploiements = [], [], 0, {}
-    for depot in depots:
-        try:
-            for p in _liste(lire, f'repos/MoKarade/{depot}/pulls?state=open&per_page=100'):
-                if MERGIFY_FILE.match((p.get('head') or {}).get('ref') or ''): brouillons_mergify += 1
-                else: prs.append((depot, p))
-        except Exception as e: erreurs.append(f'{depot} : liste des PR : {str(e)[:160]}')
-        try:
-            deps = lire(f'repos/MoKarade/{depot}/deployments?per_page=1')
-            sts = lire(f'repos/MoKarade/{depot}/deployments/{deps[0]["id"]}/statuses?per_page=1') if deps else []
-            deploiements[depot] = deploiement(deps, sts)
-        except Exception as e: deploiements[depot] = {'erreur': str(e)[:160]}
-    incomplet, sortie = False, []
-    for depot, p in sorted(prs, key=lambda x: x[1].get('updated_at') or '', reverse=True):     # sous le plafond, les PR les plus récemment modifiées d'abord
-        sha, n = (p.get('head') or {}).get('sha'), p['number']
-        ci, mg, runs = {'etat': 'non_lu'}, {'etat': 'non_lu'}, []
-        if compter() - base >= plafond: incomplet = True
-        else:
-            try:
-                d = lire(f'repos/MoKarade/{depot}/commits/{sha}/check-runs?per_page=100')
-                runs = d.get('check_runs') or []
-                ci = etat_ci(runs)
-                if (d.get('total_count') or 0) > len(runs): ci['incomplet'] = True
-            except Exception as e: ci = {'erreur': str(e)[:160]}
-            try:
-                # un brouillon ne peut pas être en file : pas de lecture des commentaires, seulement le contrôle de Mergify
-                coms = [] if p.get('draft') else lire(f'repos/MoKarade/{depot}/issues/{n}/comments?per_page=100')
-                mg = etat_mergify(coms, runs)
-            except Exception as e: mg = {'erreur': str(e)[:160]}
-        sortie.append({'repo': depot, 'n': n, 'titre': p.get('title'), 'url': p.get('html_url'), 'tache': tache_de(p.get('body'), depot), 'auteur': (p.get('user') or {}).get('login'),
+    for depot, (liste, mergify, erreur, dep) in zip(depots, par(lambda d: _lire_depot(lire, d), depots)):
+        prs += [(depot, p) for p in liste]
+        brouillons_mergify += mergify
+        if erreur: erreurs.append(erreur)
+        deploiements[depot] = dep
+    ordre = sorted(prs, key=lambda x: x[1].get('updated_at') or '', reverse=True)     # sous le plafond, les PR les plus récemment modifiées d'abord
+    incomplet, lus = False, []
+    for k in range(0, len(ordre), max(1, paralleles)):
+        lot = ordre[k:k + max(1, paralleles)]
+        if compter() - base >= plafond: incomplet = True; lus += [({'etat': 'non_lu'}, {'etat': 'non_lu'})] * len(lot)
+        else: lus += par(lambda x: _lire_pr(lire, x[0], x[1]), lot)
+    sortie = []
+    for (depot, p), (ci, mg) in zip(ordre, lus):
+        sha = (p.get('head') or {}).get('sha')
+        sortie.append({'repo': depot, 'n': p['number'], 'titre': p.get('title'), 'url': p.get('html_url'), 'tache': tache_de(p.get('body'), depot), 'auteur': (p.get('user') or {}).get('login'),
                        'agent': agent_de(p), 'brouillon': bool(p.get('draft')), 'branche': (p.get('head') or {}).get('ref'), 'sha': (sha or '')[:7],
                        'cree_le': p.get('created_at'), 'maj_le': p.get('updated_at'), 'ci': ci, 'mergify': mg})
     sortie.sort(key=lambda x: (depots.index(x['repo']), x['n']))
