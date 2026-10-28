@@ -31,7 +31,7 @@ class Montants(unittest.TestCase):
         self.assertEqual(R.montants('Total 10,50 $'), {(10.5, None)})
         self.assertEqual(R.montants('US$20.00 paid'), {(20.0, 'USD')})
         self.assertEqual(R.montants('CA$16.09'), {(16.09, 'CAD')})
-        self.assertEqual(R.montants('1 234,50 $ CAD'), {(1234.5, None)} | set())      # « $ » suivi de CAD : le marqueur retenu est « $ »
+        self.assertEqual(R.montants('1 234,50 $ CAD'), {(1234.5, 'CAD')})
         self.assertEqual(R.montants('1,234.50 USD'), {(1234.5, 'USD')})
 
     def test_sans_marqueur_de_devise_rien_n_est_pris(self):
@@ -54,9 +54,13 @@ class Recus(unittest.TestCase):
         self.assertEqual((r['montant'], r['devise'], r['a_verifier']), (10.0, 'USD', False))
 
     def test_deux_montants_differents_aucun_choisi(self):
-        r = R.en_recu(message(extrait='Sous-total US$10.00, total US$11.50'))
+        r = R.en_recu(message(extrait='Prix US$10.00 puis US$11.50'))
         self.assertIsNone(r['montant'])
         self.assertTrue(r['a_verifier'])
+
+    def test_le_libelle_total_designe_le_montant_paye(self):
+        r = R.en_recu(message(extrait='Sous-total US$10.00, total US$11.50'))
+        self.assertEqual((r['montant'], r['devise'], r['a_verifier']), (11.5, 'USD', False))
 
     def test_deux_fois_le_meme_montant_compte_pour_un(self):
         self.assertEqual(R.en_recu(message(extrait='US$10.00 payé, solde US$10.00'))['montant'], 10.0)
@@ -72,12 +76,60 @@ class Recus(unittest.TestCase):
 
     def test_rien_de_personnel_n_est_garde(self):
         r = R.en_recu(message(de='Anthropic <secret@example.invalid>', objet='Receipt from Anthropic for jean@example.invalid', extrait='Pour jean@example.invalid $10.00'))
-        self.assertEqual(set(r), {'id', 'date', 'fournisseur', 'montant', 'devise', 'a_verifier'})
+        self.assertEqual(set(r), {'id', 'date', 'instant', 'fournisseur', 'type', 'montant', 'devise', 'devise_probable', 'a_verifier'})
         self.assertNotIn('example.invalid', json.dumps(r))
 
     def test_message_mal_forme_ne_leve_pas(self):
         for m in (None, {}, {'id': 3}, {'id': 'x', 'payload': 'a'}, {'id': 'x', 'payload': {'headers': ['a']}}):
             self.assertIsNone(R.en_recu(m))
+
+
+def avec_corps(texte, de, objet, mime='text/plain'):
+    m = message(de=de, objet=objet, extrait='')
+    m['payload']['mimeType'] = 'multipart/mixed'
+    m['payload']['parts'] = [{'mimeType': mime, 'body': {'data': base64.urlsafe_b64encode(texte.encode()).decode().rstrip('=')}}, {'mimeType': 'application/pdf', 'body': {'attachmentId': 'x'}}]
+    return m
+
+
+class FormatsDesFournisseurs(unittest.TestCase):
+    def lire(self, texte, de, objet, **k):
+        return R.en_recu(avec_corps(texte, de, objet, **k))
+
+    def test_stripe_anthropic_devise_explicite(self):
+        r = self.lire('Receipt from Anthropic, PBC CA$100.00 Paid May 1, 2000 Total excluding tax CA$80.00 GST CA$4.00 Total CA$100.00 Amount paid CA$100.00', 'invoice@mail.anthropic.com', 'Your receipt from Anthropic, PBC #1')
+        self.assertEqual((r['fournisseur'], r['type'], r['montant'], r['devise'], r['a_verifier']), ('Anthropic', 'recu', 100.0, 'CAD', False))
+
+    def test_stripe_vercel_dollar_seul_devise_probable_a_verifier(self):
+        r = self.lire('Receipt from Vercel Inc. $50.00 Paid on May 1, 2000 Pro Qty 1 $20.00 Subtotal $40.00 Total $50.00 Amount paid $50.00', 'invoice@vercel.com', 'Your receipt from Vercel Inc. #1')
+        self.assertEqual((r['montant'], r['devise'], r['devise_probable'], r['a_verifier']), (50.0, None, 'USD', True))
+
+    def test_github_code_de_devise_apres_le_nombre(self):
+        r = self.lire('GITHUB RECEIPT\nGitHub Pro - month: $4.00 USD\n\nTotal: $4.00 USD*\n', 'noreply@github.com', '[GitHub] Payment Receipt for X')
+        self.assertEqual((r['fournisseur'], r['montant'], r['devise'], r['a_verifier']), ('GitHub', 4.0, 'USD', False))
+
+    def test_google_cloud_virgule_decimale_et_dollar_ca(self):
+        r = self.lire('Paiement reçu\n\nVotre paiement de 0,57 $CA (référence CLOUD X sur Mastercard) a été appliqué', 'payments-noreply@google.com', 'Google Cloud Platform & APIs : Paiement reçu')
+        self.assertEqual((r['fournisseur'], r['montant'], r['devise'], r['a_verifier']), ('Google Cloud', 0.57, 'CAD', False))
+
+    def test_google_play_total_et_non_le_budget_ni_l_abonnement(self):
+        fr = self.lire("débité du coût de l'abonnement de (actuellement\n$3.99/mois)\n\nTaxe: $1.00\n\nTotal: $0.00\n\nTotal des dépenses en octobre : vous avez dépensé $12.00 de\nvotre budget de $25.00.", 'googleplay-noreply@google.com', 'Reçu de votre commande Google Play passée le 18 oct. 2000')
+        en = self.lire("Item Price\n\nPrime $8.00/month\n\nTax: $1.20\n\nTotal: $9.20/month\n\nTotal spent in October: you've spent $30.00 of your\n$25.00 budget.", 'googleplay-noreply@google.com', 'Your Google Play Order Receipt from Oct 26, 2000')
+        self.assertEqual((fr['montant'], en['montant']), (0.0, 9.2))
+        self.assertEqual((en['devise'], en['devise_probable'], en['a_verifier']), (None, 'CAD', True))
+
+    def test_remboursement_garde_son_type_et_son_montant(self):
+        r = self.lire('Refund from Vercel Inc. $0.02 Refunded on May 1, 2000 Receipt #1 Total $7.50 Amount paid $7.50', 'invoice@vercel.com', 'Your refund from Vercel Inc. #1')
+        self.assertEqual((r['type'], r['montant']), ('remboursement', 0.02))
+
+    def test_correction_de_factures_n_est_pas_une_depense(self):
+        self.assertIsNone(self.lire('Correction ... Total $1.00', 'no-reply@vercel.com', 'Correction to your Vercel invoices for March–September 2000'))
+
+    def test_html_seul_est_lu_sans_balises_ni_scripts(self):
+        r = self.lire('<style>.a{}</style><p>Total&nbsp;: <b>$4.00 USD</b></p><script>var Total = 9.99;</script>', 'noreply@github.com', '[GitHub] Payment Receipt', mime='text/html')
+        self.assertEqual((r['montant'], r['devise']), (4.0, 'USD'))
+
+    def test_l_instant_est_en_utc_iso(self):
+        self.assertEqual(R.en_recu(message())['instant'], '2000-01-15T12:00:00Z')
 
 
 class Cadence(unittest.TestCase):
@@ -129,7 +181,8 @@ class Passer(unittest.TestCase):
             self.assertEqual((etat['lu_le'], etat['erreur'], [r['id'] for r in etat['recus']]), (MAINTENANT, None, ['m1']))
             gets = [a for a in appels if 'gmail.googleapis.com' in a[1]]
             self.assertTrue(all(a[0] == 'GET' and a[2]['Authorization'] == 'Bearer acces-fictif' for a in gets))
-            self.assertTrue(all('format=metadata' in a[1] for a in gets if '/messages/' in a[1]), 'jamais le corps des courriels')
+            self.assertTrue(all('format=full' in a[1] for a in gets if '/messages/' in a[1]))
+            self.assertFalse([a for a in gets if '/attachments/' in a[1]], 'les pièces jointes ne sont jamais lues')
 
     def test_pas_encore_du_moment_aucun_appel(self):
         with tempfile.TemporaryDirectory() as d:
