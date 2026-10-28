@@ -9,5 +9,5 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Échec voulu
-        run: exit 1
+      - name: Succès voulu
+        run: exit 0
