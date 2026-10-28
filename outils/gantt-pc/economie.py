@@ -18,3 +18,9 @@ def leger_possible(prec, maintenant, age_max=AGE_LEGER_MAX_S):
 def sauter_le_plein(econome, prec, maintenant):
     """Au tour économe, le relevé est SAUTÉ (le précédent reste, la page le montre en retard) plutôt que refait en plein."""
     return bool(econome) and not leger_possible(prec, maintenant)
+
+def ligne_appels(journal):
+    """La dernière ligne « <mode> : N appels comptés (…) » du journal de fetch.py ('' si absente). Elle n'était lisible que dans le journal du relevé ou sur un ÉCHEC ;
+    le tour la recopie dans sa ligne OK (.github#741) : la preuve « moins de 100 appels par tour » se lit alors dans etat.json."""
+    lignes = [l.strip() for l in (journal or '').splitlines() if ' appels comptés (' in l]
+    return lignes[-1] if lignes else ''
