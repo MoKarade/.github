@@ -19,7 +19,7 @@
 # Lancer : python -X utf8 tour.py --drive "G:\Mon disque\_Gantt"   (un tour, puis sortie ; code 0 = OK ou tour sauté, 1 = échec)
 import argparse, datetime, gzip, json, os, shutil, socket, subprocess, sys, time
 import pousser_hub
-import gestes, gmail_recus, lia_notes, missions, reponses      # gestes de Marc à jour (.github#478) ; reponses.appliquer écrit le commentaire « Fait » et retire qui:marc
+import economie, gestes, gmail_recus, lia_notes, missions, reponses      # gestes de Marc à jour (.github#478) ; reponses.appliquer écrit le commentaire « Fait » et retire qui:marc
 
 D = os.path.dirname(os.path.abspath(__file__)) + os.sep
 ENV = dict(os.environ, PYTHONUTF8='1')
@@ -103,7 +103,11 @@ def releve(econome=False, quota_complet=True, drive=None):
     except (OSError, ValueError): pass
     if corrige and mode == 'leger': mode = 'plein (écarts I2)'
     args = [PY, 'fetch.py', '--sans-quota'] + (['--leger'] if mode == 'leger' else [])
-    if lancer(args, '.refresh-fetch.log', 900) != 0:
+    # .github#741 : au tour économe, un précédent trop vieux pour un léger ferait relire TOUT (~280 appels) dans fetch.py ; le relevé est sauté, le précédent reste
+    try: sauter = economie.sauter_le_plein(econome, lire('backlog.json'), datetime.datetime.now(datetime.timezone.utc))
+    except (OSError, ValueError): sauter = False
+    if sauter: mode = 'sauté (économe : précédent trop ancien pour un léger, un plein coûterait ~280 appels)'
+    elif lancer(args, '.refresh-fetch.log', 900) != 0:
         if mode == 'leger' and lancer([PY, 'fetch.py', '--sans-quota'], '.refresh-fetch.log', 900) == 0: mode = 'plein (léger en échec)'
         else: return 1, f'ÉCHEC {maintenant()} relevé GitHub ({mode}) : {queue(".refresh-fetch.log")}'
     if mode.startswith('plein'): touche('.dernier-plein')
