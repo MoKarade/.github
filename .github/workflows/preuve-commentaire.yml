@@ -1,0 +1,84 @@
+name: Contrôle de la preuve à l'écriture
+
+# Une preuve mal écrite n'était vue qu'APRÈS la fermeture : le garde-fou rouvrait l'issue (13 % des tâches, 28/10/2026). Ici, dès qu'une personne écrit un
+# commentaire qui commence par « **Acceptée** » sur une tâche OUVERTE, le même jugement que le garde-fou (scripts/preuve.mjs, importé, jamais modifié) est rendu
+# comme si l'issue se fermait maintenant, et UNE réponse le dit : « serait acceptée » ou la liste des motifs. Rien n'est fermé, édité, rouvert ni étiqueté.
+# Tâche MoKarade/.github#713 ; règle : docs/cycle-de-vie-tache.md §10 bis, « Contrôle à l'écriture ».
+# Aucun minuteur, aucun secret : le jeton du job suffit. Le script vient de ce dépôt, jamais du code de l'appelant.
+#
+# Les autres dépôts l'appellent depuis un petit workflow à eux (tâches sœurs de #712) :
+#
+#   on: { issue_comment: { types: [created] } }
+#   jobs:
+#     controle:
+#       if: ${{ !github.event.issue.pull_request && github.event.issue.state == 'open' && contains(github.event.issue.labels.*.name, 'niveau:tâche') && github.event.comment.user.type == 'User' && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) }}
+#       permissions: { contents: read, issues: write, pull-requests: read, deployments: read, actions: read }
+#       uses: MoKarade/.github/.github/workflows/preuve-commentaire.yml@main
+#       with:
+#         runner: ${{ github.event.repository.visibility == 'public' && '"ubuntu-latest"' || '["self-hosted","pc-marc"]' }}
+#         deploiement: vercel            # ou « aucun » pour un dépôt qui ne se déploie pas
+on:
+  issue_comment:
+    types: [created]
+  workflow_call:
+    inputs:
+      runner:
+        description: 'Machine, en JSON : "ubuntu-latest" (dépôt public) ou ["self-hosted","pc-marc"] (dépôt privé).'
+        type: string
+        default: '"ubuntu-latest"'
+      deploiement:
+        description: 'vercel : une PR qui change du code servi exige un déploiement de production réussi ; aucun : jamais exigé.'
+        type: string
+        default: vercel
+      workflows-deploiement:
+        description: 'Workflows qui déploient hors Vercel (ex. deploy.yml), séparés par des virgules.'
+        type: string
+        default: ''
+
+permissions: {}
+
+# Un contrôle par commentaire ; deux commentaires de suite se contrôlent l'un après l'autre.
+concurrency:
+  group: preuve-commentaire-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  controle:
+    name: Contrôle de la preuve à l'écriture
+    # Seules les tâches ouvertes ; une personne du dépôt (jamais un robot, donc jamais la réponse de ce contrôle, ni un inconnu d'un dépôt public) ; le script juge l'en-tête « **Acceptée** ».
+    if: >-
+      !github.event.issue.pull_request && github.event.issue.state == 'open'
+      && contains(github.event.issue.labels.*.name, 'niveau:tâche')
+      && github.event.comment.user.type == 'User' && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      && contains(github.event.comment.body, 'ccept')
+    timeout-minutes: 5
+    runs-on: ${{ fromJSON(inputs.runner || (github.event.repository.visibility == 'public' && '"ubuntu-latest"' || '["self-hosted","pc-marc"]')) }}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+      deployments: read
+      actions: read
+    steps:
+      - name: Récupérer le script de contrôle
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: MoKarade/.github
+          ref: main
+          path: .preuve
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Contrôler la preuve écrite
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          # .github ne se déploie nulle part (comme son garde-fou de preuve) ; les autres dépôts le disent par `with:`.
+          PREUVE_DEPLOIEMENT: ${{ inputs.deploiement || (github.repository == 'MoKarade/.github' && 'aucun' || 'vercel') }}
+          PREUVE_WORKFLOWS: ${{ inputs.workflows-deploiement }}
+        run: node .preuve/scripts/preuve-commentaire.mjs

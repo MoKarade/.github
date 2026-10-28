@@ -163,6 +163,16 @@ class Releve(unittest.TestCase):
         self.assertNotIn('b#1', r['prets'])               # absente = pas encore lue, jamais « sans événement »
         self.assertLessEqual(r['appels'], 2)
 
+    def test_le_plafond_vaut_pour_tout_le_tour_depots_confondus(self):
+        depots = {f'd{i}': f'Depot-{i}' for i in range(11)}
+        prs = [{'r': f'd{i}', 'n': 1, 'm': f'2000-01-{i + 1:02d}T10:10:00Z', 'ms': f'abc000{i}'} for i in range(11)]
+        prets = {(f'Depot-{i}', 1): (f'2000-01-{i + 1:02d}T10:10:00Z', []) for i in range(11)}
+        r = E.releve(prs, depots, {}, self.faux(prets=prets), '2000-02-01T00:00:00Z', plafond=4)
+        self.assertEqual(r['appels'], 4)                                  # 1 requête de PR + 3 listes de déploiements, pas 1 + 11
+        self.assertEqual(len([q for q in self.requetes if 'deployments(' in q]), 3)
+        self.assertEqual(len(r['prets']), 11)
+        self.assertEqual(r['erreurs'], [])                                # un plafond atteint n'est pas une erreur
+
     def test_pr_introuvable_ou_d_un_autre_depot_est_absente_et_jamais_relue(self):
         cache = {}
         prs = [{'r': 'a', 'n': 5, 'm': '2000-01-01T10:10:00Z'}, {'r': 'a', 'n': 6, 'm': '2000-01-02T10:10:00Z'}]

@@ -26,4 +26,4 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-      - run: node --test scripts/preuve.test.mjs scripts/acceptation-auto.test.mjs scripts/preuve-attendue-auto.test.mjs
+      - run: node --test scripts/preuve.test.mjs scripts/acceptation-auto.test.mjs scripts/preuve-attendue-auto.test.mjs scripts/preuve-commentaire.test.mjs

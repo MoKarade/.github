@@ -369,6 +369,8 @@ Décision de Marc, 16/10/2026 : « je veux toujours qu'une tâche soit prouvée 
 
 **Mécanisme.** Le workflow commun `.github/workflows/preuve.yml` (script `scripts/preuve.mjs`, testé) est appelé par le `reacteur.yml` de chacun des dix dépôts quand une issue `niveau:tâche` est fermée, par n'importe qui ou n'importe quoi (fil, Jules, Mergify, ménage, Marc). Il lit l'issue, ses commentaires, la PR citée et les déploiements, par l'API GitHub, et décide.
 
+**Contrôle à l'écriture** (tâche #713, 28/10/2026 : 87 tâches sur 660, soit 13 %, avaient été rouvertes, souvent pour une preuve de bon fond au mauvais format). Dès qu'une personne du dépôt écrit un commentaire qui commence par « **Acceptée** » sur une tâche OUVERTE, `preuve-commentaire.yml` (`scripts/preuve-commentaire.mjs`, événement `issue_comment`, aucun minuteur) rend le jugement de `traiter` comme si l'issue se fermait maintenant, et répond UNE fois (`<!-- controle-preuve:<id> -->`) : « **Contrôle de la preuve** : serait acceptée », ou « serait refusée » avec les motifs du garde-fou. Il ne ferme, n'édite, ne rouvre ni n'étiquette rien (toute écriture de `traiter` est jetée), ne recopie jamais le texte du commentaire, et ne juge ni un robot ni Jules. Le garde-fou de fermeture reste le seul juge. Les autres dépôts l'appellent par un petit workflow à eux (modèle en tête du fichier).
+
 **Une fermeture `completed` est valide seulement si TOUT est vrai :**
 1. un commentaire commence par `**Acceptée**`, écrit par une personne ou par Claude (pas un robot, pas Jules) ; le dernier de ces commentaires fait foi ;
 2. il n'avoue aucun doute (§10, « Ce qui n'est PAS une preuve ») ;
