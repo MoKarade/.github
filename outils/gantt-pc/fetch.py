@@ -18,7 +18,7 @@ import json, subprocess, sys, datetime, re, os, time, threading, base64, hashlib
 from reponses import options as reponses_options     # réponses préfaites d'une question (section « Réponses » de l'issue)
 from concurrent.futures import ThreadPoolExecutor
 import deps as deps_mod     # dépendances vers une PR : ramenées à la tâche qu'elle cite, ou levées si elle est fusionnée
-import completude
+import completude, economie
 from acteurs import acteurs as acteurs_de    # qui a travaillé sur la tâche (Copilot, Jules, Claude, Marc), lu dans les commits de sa PR
 from acceptation import est_preuve    # même règle que le garde-fou : une personne, ou l'acceptation automatique marquée du robot
 import gestes     # contrôle des gestes de Marc à jour (.github#478) : fetch.py y garde les derniers commentaires de Marc (`marc_com`)
@@ -59,7 +59,7 @@ if LEGER:
         prev = json.load(open(OPT['--prev'] if OPT.get('--prev') else D + OUT))
         age = time.time() - datetime.datetime.fromisoformat(prev['asof'].replace('Z', '+00:00')).timestamp()
         if prev.get('v', 0) < 10: raise ValueError('relevé précédent d\'une ancienne version')
-        if age > 45 * 60: raise ValueError(f'relevé précédent trop ancien ({age / 60:.0f} min)')
+        if age > economie.AGE_LEGER_MAX_S: raise ValueError(f'relevé précédent trop ancien ({age / 60:.0f} min)')
         for r in prev['repos']:
             for k, nd in r['nodes'].items(): PREV[(r['repo'], int(k))] = nd
         PREV_PRLOG = prev.get('prlog') or []
