@@ -15,6 +15,8 @@
 //     Québec » les a tous fait sauter. Pour qu'un même signal ne réveille pas deux fois quand deux passages tombent à quelques
 //     minutes d'écart, un motif identique déjà posté sur la boîte dans les 6 dernières heures n'est pas reposté.
 //     Tâches MoKarade/.github#143 et #194.
+// Sur une PR fusionnée, une tâche fermée ou le filet, il lit aussi les preuves différées DUES du dépôt (`preuve-attendue-auto.mjs`, §10 quater) : une tâche en
+// `preuve-attendue` dont l'heure est passée et dont les lignes `**Contrôle**` (http, actions) réussissent s'accepte seule, sans minuteur de plus (tâche #700).
 // Puis il lance `boite-reacteur.yml` d'app-template, qui commente la boîte (app-template#58) en `github-actions[bot]` :
 // ce commentaire réveille le Coordinateur (un commentaire du compte de Marc ne réveille personne).
 //
@@ -45,6 +47,7 @@ import { prAttendantMarc } from './attend-marc.mjs';
 import { dispense, extraireTachesCompletes } from './tache-liee.mjs';
 import { PLACES_PAR_DEPOT } from './capacite.mjs';
 import { accepterApresFusion } from './acceptation-auto.mjs';
+import { accepterPreuvesAttendues, LUES_EVENEMENT, LUES_FILET } from './preuve-attendue-auto.mjs';
 
 export const DEPOT_BOITE = 'MoKarade/app-template';
 export const WORKFLOW_BOITE = 'boite-reacteur.yml';
@@ -237,11 +240,27 @@ export function signeLibre(depot, travauxEnCours) {
   return '';
 }
 
+// Les événements qui passent par le Réacteur et pendant lesquels une preuve différée DUE peut se lire (tâche MoKarade/.github#700, §10 quater) :
+// aucun minuteur en plus. Les autres (CI rouge, ouverture de PR…) n'y touchent pas.
+export const TYPES_PREUVE_DIFFEREE = new Set(['pr_fusionnee', 'tache_fermee', 'filet']);
+
+/**
+ * Décide quoi faire d'un événement, puis lit les preuves différées dues du dépôt (scripts/preuve-attendue-auto.mjs). Le résultat ne change pas
+ * quand rien n'est accepté ni refusé par erreur : la clé `differees` n'apparaît que s'il y a quelque chose à dire.
+ */
+export async function decider({ api, evt, maintenant = new Date(), accepter = accepterApresFusion, accepterDifferees = accepterPreuvesAttendues, jetonLecture = '' }) {
+  const d = await deciderEvenement({ api, evt, maintenant, accepter });
+  if (!TYPES_PREUVE_DIFFEREE.has(evt.type)) return d;
+  const config = { deploiement: evt.deploiement === 'aucun' ? 'aucun' : 'vercel', workflows: String(evt.workflows ?? '').split(',').map((x) => x.trim()).filter(Boolean) };
+  const differees = await accepterDifferees({ api, depot: evt.depot, maintenant, config, jeton: jetonLecture, lues: evt.type === 'filet' ? LUES_FILET : LUES_EVENEMENT }).catch((e) => ({ acceptees: [], ignorees: [], erreur: e.message }));
+  return differees.acceptees.length > 0 || differees.erreur ? { ...d, differees } : d;
+}
+
 /**
  * Décide quoi faire d'un événement. Rend { action: 'reveiller', motif } | { action: 'relance', run } | { action: 'balayer' } | { action: 'rien', raison }.
  * `evt` : { type, depot, pr, issue, raison, evenement, sha, run, brancheRun, brancheDefaut, forcer }.
  */
-export async function decider({ api, evt, maintenant = new Date(), accepter = accepterApresFusion }) {
+async function deciderEvenement({ api, evt, maintenant, accepter }) {
   const { type, depot } = evt;
   if (type === 'filet') return filet({ api, evt, maintenant });
   if (type === 'pr_ouverte') return { action: 'balayer' };
@@ -309,8 +328,10 @@ export async function decider({ api, evt, maintenant = new Date(), accepter = ac
 }
 
 /** Exécute la décision. `journal` reçoit les lignes à afficher ; rend un résumé court. */
-export async function traiter({ api, evt, jetonReveil, journal = console.log, maintenant = new Date() }) {
-  const d = await decider({ api, evt, maintenant });
+export async function traiter({ api, evt, jetonReveil, journal = console.log, maintenant = new Date(), jetonLecture = '', accepterDifferees }) {
+  const d = await decider({ api, evt, maintenant, jetonLecture, ...(accepterDifferees ? { accepterDifferees } : {}) });
+  if (d.differees?.acceptees.length) journal(`Réacteur : preuve différée lue et acceptée automatiquement sur ${d.differees.acceptees.map((n) => `#${n}`).join(', ')} (docs/cycle-de-vie-tache.md §10 quater).`);
+  if (d.differees?.erreur) journal(`::warning::Réacteur : preuves différées non lues (${d.differees.erreur}). Un fil prouvera.`);
   if (d.acceptation?.statut === 'acceptee') journal(`Réacteur : tâche #${d.acceptation.tache} acceptée automatiquement (docs/cycle-de-vie-tache.md §10 ter).`);
   else if (d.acceptation?.statut === 'erreur') journal(`::warning::Réacteur : acceptation automatique non faite (${d.acceptation.motifs.join(' ; ')}). Un fil prouvera.`);
   if (d.action === 'rien') {
@@ -403,7 +424,7 @@ export async function main(env = process.env) {
     workflows: env.REVEIL_WORKFLOWS || '',
   };
   try {
-    await traiter({ api: apiGitHub(env.GITHUB_TOKEN), evt, jetonReveil: env.REVEIL_TOKEN });
+    await traiter({ api: apiGitHub(env.GITHUB_TOKEN), evt, jetonReveil: env.REVEIL_TOKEN, jetonLecture: env.GITHUB_TOKEN });
   } catch (e) {
     // Jamais de rouge : un échec ici ne doit pas se rejouer. Le filet de 6 h du Coordinateur reprend la main.
     console.log(`::warning::Réacteur : réveil non fait (${e.message}). Le filet de 6 h reprend la main.`);

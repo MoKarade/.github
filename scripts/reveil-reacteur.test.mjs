@@ -638,3 +638,35 @@ test('PR fusionnée : l’acceptation automatique qui échoue ne retarde ni n’
   const e = await decider({ api, evt: { type: 'pr_fusionnee', depot: 'MoKarade/JobAI', pr: '7' }, accepter: async () => ({ statut: 'ignoree', motifs: ['x'] }) });
   assert.equal('acceptation' in e, false);
 });
+
+test('preuves différées : lues sur la PR fusionnée, la tâche fermée et le filet, jamais sur une CI rouge ; rien de neuf, le résultat ne change pas', async () => {
+  const appels = [];
+  const accepterDifferees = async (o) => { appels.push(o); return { acceptees: [201], ignorees: [] }; };
+  const jamais = async () => ({ statut: 'ignoree', motifs: [] });
+  for (const evt of [{ type: 'pr_fusionnee', pr: '7' }, { type: 'tache_fermee', issue: '90', raison: 'completed' }, { type: 'filet' }]) {
+    const d = await decider({ api: faux().api, evt: { depot: 'MoKarade/JobAI', ...evt }, accepter: jamais, accepterDifferees, jetonLecture: 'jeton' });
+    assert.deepEqual(d.differees, { acceptees: [201], ignorees: [] }, evt.type);
+  }
+  assert.equal(appels.length, 3);
+  assert.equal(appels[0].jeton, 'jeton');
+  assert.ok(appels[2].lues > appels[0].lues, 'le filet lit plus de tâches qu’un événement');
+  assert.equal(appels[0].config.deploiement, 'vercel');
+  const avant = appels.length;
+  const rouge = await decider({ api: faux().api, evt: { type: 'pr_ouverte', depot: 'MoKarade/JobAI', pr: '7' }, accepterDifferees });
+  assert.deepEqual(rouge, { action: 'balayer' });
+  assert.equal(appels.length, avant);
+  const rien = await decider({ api: faux().api, evt: { type: 'tache_fermee', depot: 'MoKarade/JobAI', issue: '90', raison: 'completed' }, accepterDifferees: async () => ({ acceptees: [], ignorees: [{ tache: 5, motifs: ['x'] }] }) });
+  assert.deepEqual(rien, { action: 'reveiller', motif: 'RÉACTEUR : MoKarade/JobAI libre ; tâche MoKarade/JobAI#90 fermée' });
+});
+
+test('preuves différées : une erreur est un avertissement, le réveil part quand même', async () => {
+  const journal = [];
+  const envoyes = [];
+  const api = async (methode, chemin, corps) => { if (methode === 'POST') { envoyes.push(chemin); return null; } return null; };
+  const r = await traiter({ api, evt: { type: 'tache_fermee', depot: 'MoKarade/JobAI', issue: '90', raison: 'completed' }, jetonReveil: 'x', journal: (l) => journal.push(l), accepterDifferees: async () => { throw new Error('HTTP 502'); } });
+  assert.equal(r.reveille, true);
+  assert.ok(journal.some((l) => l.startsWith('::warning::') && l.includes('HTTP 502')));
+  const bon = [];
+  await traiter({ api, evt: { type: 'tache_fermee', depot: 'MoKarade/JobAI', issue: '90', raison: 'completed' }, jetonReveil: 'x', journal: (l) => bon.push(l), accepterDifferees: async () => ({ acceptees: [201], ignorees: [] }) });
+  assert.ok(bon.some((l) => l.includes('#201') && l.includes('acceptée automatiquement')));
+});
