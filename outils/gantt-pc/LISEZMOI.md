@@ -72,7 +72,7 @@ Une lecture en échec s'écrit `erreur`, jamais « vert » ; `incomplet` = plafo
 `prets` (clé `r#n`, comme `prlog`) : dernier `ready_for_review` avant la fusion, `null` = lue et jamais brouillon, clé absente = pas encore lue. `en_ligne` : le déploiement dont le commit
 est le commit de fusion (`ms` de `prlog`), avec `sha`, `env`, `cree_le` et `pret_le` (statut `success` = en ligne) ; une fusion sans déploiement (build sauté) n'a pas d'entrée.
 `couvert_depuis` : plus ancien déploiement lu par dépôt (avant, l'absence ne prouve rien) ; `restant` : PR pas encore lues. Résultats mémorisés à vie dans `etapes-cache.json`
-(perdu : le passé se relit par paquets) ; au plus 60 lectures comptées par tour (20 au tour économe), fusions les plus récentes d'abord. Tests : `python -X utf8 -m unittest test_etapes.py`.
+(perdu : le passé se relit par paquets) ; fusions des 35 derniers jours seulement, les plus récentes d'abord ; au plus 60 lectures comptées par tour quand le compte GitHub a 3 500 appels ou plus, 15 en dessous, aucune (étape sautée) sous 1 500. Tests : `python -X utf8 -m unittest test_etapes.py`.
 
 ## Suivre et arrêter
 
