@@ -9,10 +9,18 @@ $Journal = Join-Path $Etat 'tour.log'
 New-Item -ItemType Directory -Force $Etat | Out-Null
 # journal borné : on garde les 2 000 dernières lignes
 if ((Test-Path $Journal) -and (Get-Item $Journal).Length -gt 1MB) { Get-Content $Journal -Tail 2000 | Set-Content "$Journal.tmp" -Encoding utf8; Move-Item "$Journal.tmp" $Journal -Force }
-git -C $Depot pull --ff-only --quiet 2>&1 | Out-Null
+$maj = (git -C $Depot pull --ff-only --quiet 2>&1 | Out-String).Trim()
+if ($LASTEXITCODE -ne 0) {
+    # pull refusé (copie locale modifiée, historique divergent, réseau) : on le dit, puis on remet le clone DÉDIÉ à l'identique de main
+    "$(Get-Date -Format s) pull ÉCHEC : $(($maj -split "`n")[0])" | Add-Content $Journal -Encoding utf8
+    git -C $Depot fetch --quiet origin main 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) { git -C $Depot reset --hard --quiet FETCH_HEAD 2>&1 | Out-Null }
+    if ($LASTEXITCODE -ne 0) { "$(Get-Date -Format s) remise à niveau ÉCHEC : le tour continue avec le code déjà copié" | Add-Content $Journal -Encoding utf8 }
+}
+$sha = (git -C $Depot rev-parse --short HEAD 2>&1 | Out-String).Trim()
 Copy-Item (Join-Path $Depot 'outils\gantt-pc\*.py') $Etat -Force
 $py = (Get-Command python -ErrorAction SilentlyContinue).Source
 if (-not $py) { $py = (Get-Command py -ErrorAction SilentlyContinue).Source }
-"$(Get-Date -Format s) tour" | Add-Content $Journal -Encoding utf8
+"$(Get-Date -Format s) tour, code $sha" | Add-Content $Journal -Encoding utf8
 & $py -X utf8 (Join-Path $Etat 'tour.py') --drive $Drive 2>&1 | Add-Content $Journal -Encoding utf8
 exit $LASTEXITCODE
