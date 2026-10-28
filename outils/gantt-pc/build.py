@@ -260,6 +260,10 @@ else: print('couts_manuels omis :', _cm_raison, file=sys.stderr)
 try:
     with open(D + 'prs-ouvertes.json', encoding='utf-8') as _f: comp['prs_ouvertes'] = json.load(_f)
 except (OSError, ValueError) as _e: print('prs_ouvertes omis :', type(_e).__name__, file=sys.stderr)
+# Étapes (etapes.py, .github#689) : heure « PR prête » et heure « en ligne » des PR fusionnées ; absent ou illisible : la page le dit
+try:
+    with open(D + 'etapes.json', encoding='utf-8') as _f: comp['etapes'] = json.load(_f)
+except (OSError, ValueError) as _e: print('etapes omis :', type(_e).__name__, file=sys.stderr)
 
 # la file du script : écrite à chaque construction, pour la routine (prochaines.json) et pour la page (embarquée)
 pro, err = prochaines(D + 'prochaines' + OUT + '.json')

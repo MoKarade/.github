@@ -72,6 +72,12 @@ Notes de LIA (28/10/2026, tâche .github#681, choix « A » de Marc) : `lia_note
 le secret que le PC a déjà) et réveille le Coordinateur par `boite-reacteur.yml` quand le nombre de notes non lues monte, puis en rappel toutes les 4 h tant qu'il en reste. `notesLia: null`
 = inconnu (MemoryAI injoignable) : rien n'est déclenché, jamais pris pour 0. Réveil raté : pas enregistré, nouvel essai au tour suivant. État : `lia-notes-etat.json`. Tests : `python -X utf8 -m unittest test_lia_notes.py`.
 
+Étapes (28/10/2026, tâche .github#689) : `etapes.py` écrit `etapes.json`, rangé par `build.py` dans `donnees.json` sous `etapes`, pour la durée moyenne de chaque étape de la page.
+`prets` (clé `r#n`, comme `prlog`) : dernier `ready_for_review` avant la fusion, `null` = lue et jamais brouillon, clé absente = pas encore lue. `en_ligne` : le déploiement dont le commit
+est le commit de fusion (`ms` de `prlog`), avec `sha`, `env`, `cree_le` et `pret_le` (statut `success` = en ligne) ; une fusion sans déploiement (build sauté) n'a pas d'entrée.
+`couvert_depuis` : plus ancien déploiement lu par dépôt (avant, l'absence ne prouve rien) ; `restant` : PR pas encore lues. Résultats mémorisés à vie dans `etapes-cache.json`
+(perdu : le passé se relit par paquets) ; au plus 60 lectures comptées par tour (20 au tour économe), fusions les plus récentes d'abord. Tests : `python -X utf8 -m unittest test_etapes.py`.
+
 ## Suivre et arrêter
 
 - Journal : `C:\dev\_pc-local\gantt-releve\tour.log` ; dernier résultat : `_Gantt\etat.json` dans le Drive.
