@@ -184,6 +184,8 @@ export const ETIQUETTE_PAR_JULES = 'par-jules';
 export const COULEUR_PAR_JULES = '9b7be0';
 export const PIED_JULES = /jules\.google\.com\/task\/\d/; // avec le numéro : le critère écrit en toutes lettres (sans numéro) dans le corps d'une PR de Claude n'en est pas un
 export const BOT_JULES = 'google-labs-jules[bot]';
+export const CLE_NON_JULES = 'nonjules:';
+export const DELAI_NON_JULES_MS = 15 * 60_000; // âge minimal d'une PR avant de la déclarer « pas de Jules » pour de bon
 export const COMMENTAIRES_MAX = 20; // PR ouvertes dont on lit les commentaires par dépôt et par tour
 
 /** Le corps d'une PR porte-t-il le pied de page de Jules ? (Le commentaire du bot se lit à part, par `marquerParJules`.) */
@@ -194,7 +196,7 @@ export const piedDeJules = (corps) => PIED_JULES.test(String(corps ?? ''));
  * n'est lu que pour une PR OUVERTE sans pied de page (une lecture par PR et par tour, au plus `COMMENTAIRES_MAX`). Une PR déjà étiquetée n'est pas relue.
  * L'étiquette est créée au premier besoin (le dépôt neuf n'en a pas). @returns {{ marquees: string[] }}
  */
-export function marquerParJules({ depot, gh, aBlanc = false }) {
+export function marquerParJules({ depot, gh, aBlanc = false, etat = null, maintenant = new Date() }) {
   const court = depot.replace('MoKarade/', '');
   const sortie = { marquees: [] };
   const liste = (r) => (Array.isArray(r) ? r : []);
@@ -208,9 +210,12 @@ export function marquerParJules({ depot, gh, aBlanc = false }) {
     vues.add(p.number);
     if (noms(p.labels).includes(ETIQUETTE_PAR_JULES)) continue;
     let jules = piedDeJules(p.body);
-    if (!jules && p.state === 'open' && lectures < COMMENTAIRES_MAX) {
+    const cle = `${CLE_NON_JULES}${depot}#${p.number}`;
+    if (!jules && p.state === 'open' && lectures < COMMENTAIRES_MAX && !(etat && etat[cle])) {
       lectures += 1;
       jules = liste(gh('GET', `repos/${depot}/issues/${p.number}/comments?per_page=100`)).some((c) => c.user?.login === BOT_JULES);
+      // Jules annonce sa PR dès l'ouverture : passé ce délai, une PR sans trace n'est pas la sienne et n'est plus relue (ses commentaires changent à chaque tour, le cache HTTP ne l'évite pas).
+      if (!jules && etat && maintenant - Date.parse(p.created_at) >= DELAI_NON_JULES_MS) etat[cle] = true;
     }
     if (!jules) continue;
     if (!aBlanc) {
@@ -221,6 +226,14 @@ export function marquerParJules({ depot, gh, aBlanc = false }) {
       gh('POST', `repos/${depot}/issues/${p.number}/labels`, { 'labels[]': ETIQUETTE_PAR_JULES });
     }
     sortie.marquees.push(`${court}#${p.number}`);
+  }
+  if (etat) {
+    // l'état ne garde que les PR encore ouvertes
+    const ouvertesNum = new Set(ouvertes.map((p) => p.number));
+    for (const k of Object.keys(etat)) {
+      const m = k.startsWith(`${CLE_NON_JULES}${depot}#`) ? Number(k.slice(`${CLE_NON_JULES}${depot}#`.length)) : null;
+      if (m !== null && !ouvertesNum.has(m)) delete etat[k];
+    }
   }
   return sortie;
 }

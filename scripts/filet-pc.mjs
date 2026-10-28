@@ -526,7 +526,7 @@ export function tourJulesSuivi({ fichierEtat, executer = false, aBlanc = false, 
         const r = suivreDepot({ depot, gh: appel, etat, maintenant, aBlanc: aBlanc || !executer });
         for (const k of ['acceptees', 'nettoyees', 'holds', 'signaux']) total[k].push(...r[k]);
         total.vu += r.vu;
-        try { total.parJules.push(...marquerParJules({ depot, gh: appel, aBlanc: aBlanc || !executer }).marquees); } catch (e) { echecs.push(`${depot.replace('MoKarade/', '')} par-jules (${String(e.message).replace(/\s+/g, ' ').slice(0, 60)})`); } // un échec ici ne coupe pas le reste du dépôt
+        try { total.parJules.push(...marquerParJules({ depot, gh: appel, aBlanc: aBlanc || !executer, etat, maintenant }).marquees); } catch (e) { echecs.push(`${depot.replace('MoKarade/', '')} par-jules (${String(e.message).replace(/\s+/g, ' ').slice(0, 60)})`); } // un échec ici ne coupe pas le reste du dépôt
         total.menage.push(...menageFermees({ depot, gh: appel, aBlanc: aBlanc || !executer }));
         total.perimees.push(...retirerPerimees({ depot, gh: appel, aBlanc: aBlanc || !executer })); // une étiquette périmée libère la tâche avant qu'on la complète
         const c = completerDepot({ depot, gh: appel, etat, maintenant, aBlanc: aBlanc || !executer }); // avant le marquage : une tâche complétée est réservée dans le même tour
