@@ -96,6 +96,41 @@ export function boitesDuReveil({ evt, boites = BOITES, directes = BOITES_DIRECTE
   if (!fil || !TYPES_POUR_LE_FIL.has(evt.type)) return [NUMERO_BOITE];
   return directes.has(evt.depot) ? [fil] : [NUMERO_BOITE, fil];
 }
+// Hubperso porte deux fils (le dépôt et la Page chantier) : une seconde boîte, app-template#210, est pour les tâches qui touchent le chantier
+// (tâche MoKarade/.github#769, décision du 28/10/2026 22:15Z). Un fil n'est jamais réveillé pour ce qui ne le regarde pas, et rien ne se perd :
+// dans le doute (tâche illisible, aucune tâche citée), le réveil va à la boîte du dépôt, la #203.
+export const BOITE_PAGE_CHANTIER = 210;
+export const DEPOT_PAGE_CHANTIER = 'MoKarade/Hubperso';
+export const LABEL_PAGE_CHANTIER = 'fil:page-chantier';
+const FICHIERS_CHANTIER = /chantier\/|gantt/i;
+
+/** La tâche (issue GitHub : labels + corps) regarde-t-elle la Page chantier ? Étiquette `fil:page-chantier`, ou un chemin chantier dans « Fichiers touchés ». */
+export function regardeLaPageChantier(issue) {
+  if (!issue) return false;
+  const noms = (issue.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
+  if (noms.includes(LABEL_PAGE_CHANTIER)) return true;
+  const corps = String(issue.body ?? '');
+  const debut = corps.search(/\*\*Fichiers (?:touchés|permis)\*\*/);
+  if (debut < 0) return false;
+  // La section va jusqu'au prochain titre en gras en début de ligne (**Source**, **Attend**…).
+  const reste = corps.slice(debut + 2);
+  const fin = reste.search(/\n\*\*[^*\n]+\*\*/);
+  return FICHIERS_CHANTIER.test(fin < 0 ? reste : reste.slice(0, fin));
+}
+
+/**
+ * Pour Hubperso : les numéros de boîte du réveil, d'après les tâches en jeu. Toutes pour la Page chantier -> sa boîte seule ;
+ * mélange -> les deux ; aucune tâche, ou aucune lisible -> la boîte du dépôt. `lire(n)` rend l'issue ou null (jamais d'exception attendue).
+ */
+export async function boitesDuDepotAvecChantier({ sujets, lire, boiteDepot }) {
+  const numeros = [...new Set((sujets ?? []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  if (numeros.length === 0) return [boiteDepot];
+  const verdicts = [];
+  for (const n of numeros) verdicts.push(regardeLaPageChantier(await lire(n).catch(() => null)));
+  if (verdicts.every(Boolean)) return [BOITE_PAGE_CHANTIER];
+  if (verdicts.some(Boolean)) return [boiteDepot, BOITE_PAGE_CHANTIER];
+  return [boiteDepot];
+}
 export const DEPOT_GITHUB = 'MoKarade/.github';
 // Les deux balayages de `.github` qu'une planification GitHub ne lance presque jamais (MoKarade/.github#148) : sans entrée,
 // chacun relit toutes les PR ouvertes. Lancés après le réveil, sur les seuls événements d'une PR ou d'une tâche.
@@ -373,7 +408,7 @@ async function deciderEvenement({ api, evt, maintenant, accepter }) {
     const motif = construireMotif([signeLibre(depot, en), suite.ligne, ligneJules(dit), `tâche ${depot}#${n} prête`]);
     // Une modification de plus du même corps ne repose pas le même réveil.
     if (evt.forcer !== 'true' && (await dejaSignale({ api, motif, maintenant, depot }))) return { action: 'rien', raison: `déjà signalé sur la boîte dans les ${FENETRE_FILET_H} dernières heures`, ...dit };
-    return { action: 'reveiller', motif, file: suite.file, ...dit };
+    return { action: 'reveiller', motif, file: suite.file, sujets: [n], ...dit };
   }
   // Un déploiement de production réussi : la tâche de la PR fusionnée sur ce commit s'accepte seule si sa règle le permet (la PR a pu fusionner avant la fin du déploiement).
   if (type === 'deploiement') {
@@ -408,7 +443,7 @@ async function deciderEvenement({ api, evt, maintenant, accepter }) {
     const dit = await julesDe({ api, depot, maintenant, file: suite.brut });
     // Un dépôt dont les deux places sont prises n'a rien de neuf à dire, sauf une tâche abandonnée dont il faut vérifier la raison.
     if (en >= PLACES_PAR_DEPOT && !abandon) return { action: 'rien', raison: 'dépôt encore occupé', ...dit };
-    return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), suite.ligne, ligneJules(dit), `tâche ${depot}#${evt.issue} fermée${abandon}`]), ...(suite.file ? { file: suite.file } : {}), ...dit };
+    return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), suite.ligne, ligneJules(dit), `tâche ${depot}#${evt.issue} fermée${abandon}`]), sujets: [Number(evt.issue), suite.brut?.suivante].filter(Boolean), ...(suite.file ? { file: suite.file } : {}), ...dit };
   }
 
   if (type === 'pr_fusionnee') {
@@ -437,7 +472,7 @@ async function deciderEvenement({ api, evt, maintenant, accepter }) {
     // Dépôt dont les deux places sont prises et rien à prouver : la fusion n'apprend rien au Coordinateur.
     if (en >= PLACES_PAR_DEPOT && preuves.length === 0) return { action: 'rien', raison: 'dépôt encore occupé', ...dit, ...jules };
     const acceptee = acceptation.statut === 'acceptee' ? `tâche ${depot}#${acceptation.tache} acceptée seule` : '';
-    return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), suite.ligne, ligneJules(jules), `PR #${evt.pr} fusionnée`, acceptee, ...preuves]), ...dit, ...jules, ...(suite.file ? { file: suite.file } : {}) };
+    return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), suite.ligne, ligneJules(jules), `PR #${evt.pr} fusionnée`, acceptee, ...preuves]), sujets: [...tachesExclues, suite.brut?.suivante].filter(Boolean), ...dit, ...jules, ...(suite.file ? { file: suite.file } : {}) };
   }
 
   if (type === 'ci_rouge') {
@@ -501,7 +536,12 @@ export async function traiter({ api, evt, jetonReveil, journal = console.log, ma
   // Une boîte par cible : la #58 (Coordinateur) sans entrée neuve, pour qu'une ancienne version de `boite-reacteur.yml` l'accepte ; la boîte du dépôt avec `boite`.
   // Un échec sur la boîte du dépôt est un avertissement tant que la #58 a reçu le réveil ; si elle est la seule cible, l'échec remonte comme avant.
   let echecReveil = null;
-  const cibles = boitesDuReveil({ evt, boites, directes });
+  let cibles = boitesDuReveil({ evt, boites, directes });
+  // Hubperso : deux fils, donc deux boîtes ; la tâche en jeu dit laquelle réveiller (seulement quand le dépôt est réveillé en direct par sa boîte).
+  if (evt.depot === DEPOT_PAGE_CHANTIER && boites[evt.depot] && directes.has(evt.depot) && TYPES_POUR_LE_FIL.has(evt.type)) {
+    const apres = await boitesDuDepotAvecChantier({ sujets: d.sujets, lire: (n) => api('GET', `/repos/${evt.depot}/issues/${n}`), boiteDepot: boites[evt.depot] });
+    cibles = apres;
+  }
   const reveilles = [];
   for (const numero of cibles) {
     try {
