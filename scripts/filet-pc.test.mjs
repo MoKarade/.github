@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
-import { DEPOTS_FILET, annulerSignalements, dateQuebec, evaluerFilet, evaluerOublis, evaluerQuotaMort, evaluerQuotidien, grouperOublis, lancerFilet, ligneOubli, motifDesOublis, motifDuFilet, motifDuQuota, reveiller, tour, tourOublis, tourQuota, tourQuotidien, tourLiens, LIENS_PAR_TOUR, evaluerFile, motifDeLaFile, tourFile, versionDuCode, MODULES_VERSION, tourAcceptationMarquee, tourPreuvesRetard } from './filet-pc.mjs';
+import { DEPOTS_FILET, annulerSignalements, dateQuebec, evaluerFilet, evaluerOublis, evaluerQuotaMort, evaluerQuotidien, grouperOublis, lancerFilet, ligneOubli, motifDesOublis, motifDuFilet, motifDuQuota, reveiller, tour, tourOublis, tourQuota, tourQuotidien, tourLiens, LIENS_PAR_TOUR, evaluerFile, motifDeLaFile, tourFile, versionDuCode, MODULES_VERSION, tourAcceptationMarquee, tourPreuvesRetard, ligneAppels } from './filet-pc.mjs';
 
 const T0 = new Date('2026-10-17T18:00:00Z');
 const apres = (min, base = T0) => new Date(base.getTime() + min * 60_000);
@@ -594,4 +594,10 @@ test('preuves-retard : le tour envoie le réveil, se tait 4 h ; un échec n’en
 
 test('preuves-retard : fichier absent, la ligne le dit sans lever', () => {
   assert.match(tourPreuvesRetard({ fichierDefauts: join(tmpdir(), 'nexiste-pas', 'defauts-preuve.json'), fichierEtat: join(tmpdir(), 'x.json'), maintenant: T0 }), /illisible/);
+});
+
+test('ligneAppels : total compté, 304 gratuits, rôles les plus lourds d\'abord, rôles à zéro tus (.github#741)', () => {
+  const l = ligneAppels({ comptees: 12, n304: 30, req: 42 }, [['réveil', 0], ['file', 3], ['jules-suivi', 8], ['preuves', 1], ['liens', 0]]);
+  assert.equal(l, 'appels filet : 12 comptés (30 en 304 gratuits sur 42) [jules-suivi 8, file 3, preuves 1]');
+  assert.equal(ligneAppels({ comptees: 0, n304: 5, req: 5 }, [['file', 0]]), 'appels filet : 0 comptés (5 en 304 gratuits sur 5)');
 });
