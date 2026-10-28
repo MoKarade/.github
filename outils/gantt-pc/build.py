@@ -256,6 +256,10 @@ except Exception: comp['quota'] = None
 _cm, _cm_raison = couts_manuels.lire()
 if _cm is not None: comp['couts_manuels'] = _cm
 else: print('couts_manuels omis :', _cm_raison, file=sys.stderr)
+# PR ouvertes (prs_ouvertes.py, .github#679) : fichier écrit par le tour juste avant ; absent ou illisible = clé omise, la page dit « non lu » au lieu d'une liste inventée
+try:
+    with open(D + 'prs-ouvertes.json', encoding='utf-8') as _f: comp['prs_ouvertes'] = json.load(_f)
+except (OSError, ValueError) as _e: print('prs_ouvertes omis :', type(_e).__name__, file=sys.stderr)
 
 # la file du script : écrite à chaque construction, pour la routine (prochaines.json) et pour la page (embarquée)
 pro, err = prochaines(D + 'prochaines' + OUT + '.json')
