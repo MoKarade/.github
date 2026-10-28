@@ -151,6 +151,13 @@ class Pages(unittest.TestCase):
         self.assertEqual(len(appels), 5)         # jamais plus que le maximum
 
 
+class Fenetre(unittest.TestCase):
+    def test_seules_les_fusions_recentes_comptent(self):
+        prlog = [{'r': 'a', 'n': 1, 'm': '2000-03-01T00:00:00Z'}, {'r': 'a', 'n': 2, 'm': '2000-01-01T00:00:00Z'}, {'r': 'a', 'n': 3, 'm': None}]
+        self.assertEqual([x['n'] for x in E.recentes(prlog, '2000-03-10T00:00:00Z')], [1])
+        self.assertEqual([x['n'] for x in E.recentes(prlog, '2000-03-10T00:00:00Z', jours=100)], [1, 2])
+
+
 class Plafond(unittest.TestCase):
     def test_defaut_option_et_refus(self):
         self.assertEqual(E.plafond_de({}), E.PLAFOND_APPELS)
