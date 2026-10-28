@@ -61,13 +61,55 @@ export function executantDe({ etiquettes = [], assignes = [], auteurPr = null })
   return auteurPr ? 'fil' : null;
 }
 
+/** Effectifs par auteur → { total, fil, Jules, Copilot, inconnu, parts } : parts entières en % (null si aucune tâche). */
+export function depuisEffectifs({ fil = 0, Jules = 0, Copilot = 0, inconnu = 0 }) {
+  const n = { fil, Jules, Copilot, inconnu };
+  const total = fil + Jules + Copilot + inconnu;
+  const part = (x) => (total ? Math.round((100 * x) / total) : null);
+  return { total, ...n, parts: { fil: part(n.fil), Jules: part(n.Jules), Copilot: part(n.Copilot), inconnu: part(n.inconnu) } };
+}
+
 /** Répartition des tâches par auteur : effectifs et parts entières en % (null si aucune tâche). */
 export function repartition(taches) {
   const n = { fil: 0, Jules: 0, Copilot: 0, inconnu: 0 };
   for (const t of taches) n[executantDe(t) ?? 'inconnu'] += 1;
-  const total = taches.length;
-  const part = (x) => (total ? Math.round((100 * x) / total) : null);
-  return { total, ...n, parts: { fil: part(n.fil), Jules: part(n.Jules), Copilot: part(n.Copilot), inconnu: part(n.inconnu) } };
+  return depuisEffectifs(n);
+}
+
+// ---------- ligne cachée du cumul ----------
+// Chaque rapport publié porte l'état du cumul à la date `fin` : le suivant la lit, ne relit que les tâches acceptées
+// depuis cette date et additionne. Elle est lue comme une DONNÉE : tout ce qui n'est pas un état cohérent est refusé.
+
+const LIGNE_CACHEE = /<!--\s*cumul-par-auteur\s*:\s*(\{.*?\})\s*-->/s;
+
+/** La ligne à écrire à la fin du corps du rapport. */
+export function ligneCachee(cumul, fin) {
+  const { total, fil, Jules, Copilot, inconnu } = cumul;
+  return `<!-- cumul-par-auteur : ${JSON.stringify({ fin: new Date(fin).toISOString(), depuis: new Date(cumul.depuis).toISOString(), total, fil, Jules, Copilot, inconnu })} -->`;
+}
+
+/**
+ * Lit la ligne cachée d'un corps de rapport : { etat: 'ok', base } | { etat: 'absente' } | { etat: 'illisible', raison }.
+ * `base.fin` doit être antérieure à `maintenant` (sinon le rapport précédent date du futur : on ne s'en sert pas).
+ */
+export function lireLigneCachee(corps, maintenant) {
+  const m = LIGNE_CACHEE.exec(corps ?? '');
+  if (!m) return { etat: 'absente' };
+  let v;
+  try {
+    v = JSON.parse(m[1]);
+  } catch {
+    return { etat: 'illisible', raison: 'JSON invalide' };
+  }
+  const fin = Date.parse(v?.fin);
+  const depuis = Date.parse(v?.depuis);
+  const entiers = [v?.total, v?.fil, v?.Jules, v?.Copilot, v?.inconnu];
+  if (Number.isNaN(fin) || Number.isNaN(depuis)) return { etat: 'illisible', raison: 'date invalide' };
+  if (!entiers.every((x) => Number.isInteger(x) && x >= 0)) return { etat: 'illisible', raison: 'effectif invalide' };
+  if (v.fil + v.Jules + v.Copilot + v.inconnu !== v.total) return { etat: 'illisible', raison: 'le total ne correspond pas aux auteurs' };
+  if (depuis > fin) return { etat: 'illisible', raison: 'début après la fin' };
+  if (fin > maintenant) return { etat: 'illisible', raison: 'fin dans le futur' };
+  return { etat: 'ok', base: { fin, depuis, total: v.total, fil: v.fil, Jules: v.Jules, Copilot: v.Copilot, inconnu: v.inconnu } };
 }
 
 const texteRepartition = (r) => {
@@ -109,7 +151,7 @@ export function cycleRouge(runs) {
 
 const REF_TACHE = /T[âa]che\s*:\s*(?:MoKarade\/[\w.-]+)?#(\d+)|\bCloses #(\d+)/i;
 
-export function calculer({ depots, maintenant, cumulDepuis = CUMUL_DEPUIS }) {
+export function calculer({ depots, maintenant, cumulDepuis = CUMUL_DEPUIS, base = null }) {
   const debut = maintenant - 7 * JOUR;
   const dansFenetre = (iso) => iso && temps(iso) >= debut && temps(iso) <= maintenant;
   const lisibles = depots.filter((d) => d.lisible);
@@ -122,10 +164,17 @@ export function calculer({ depots, maintenant, cumulDepuis = CUMUL_DEPUIS }) {
   const parDepot = Object.fromEntries(lisibles.map((d) => [d.nom, acceptees.filter((t) => t.depot === d.nom).length]));
   const parExecutant = repartition(acceptees);
   // Cumul depuis la première livraison de la mission .github#703, sur la même population que la semaine.
-  const debutCumul = Math.max(cumulDepuis, maintenant - CUMUL_MAX_JOURS * JOUR);
+  // Avec `base` (ligne cachée du rapport précédent) : base + tâches acceptées STRICTEMENT après sa `fin` (pas de double
+  // compte à la frontière). Sans base : lecture complète depuis `cumulDepuis`, bornée à CUMUL_MAX_JOURS.
+  const depart = base ? base.fin : cumulDepuis;
+  const debutCumul = Math.max(depart, maintenant - CUMUL_MAX_JOURS * JOUR);
+  const apres = (t) => (base ? temps(t) > debutCumul : temps(t) >= debutCumul);
   const cumulees = [];
-  for (const d of lisibles) for (const t of d.taches) if (t.acceptee && temps(t.fermeLe) >= debutCumul && temps(t.fermeLe) <= maintenant) cumulees.push(t);
-  const cumul = { depuis: debutCumul, limite: debutCumul > cumulDepuis, ...repartition(cumulees) };
+  for (const d of lisibles) for (const t of d.taches) if (t.acceptee && apres(t.fermeLe) && temps(t.fermeLe) <= maintenant) cumulees.push(t);
+  const nouvelles = repartition(cumulees);
+  const cumul = base
+    ? { depuis: base.depuis, limite: debutCumul > depart, repris: true, nouvelles: nouvelles.total, ...depuisEffectifs(Object.fromEntries(['fil', 'Jules', 'Copilot', 'inconnu'].map((k) => [k, base[k] + nouvelles[k]]))) }
+    : { depuis: debutCumul, limite: debutCumul > cumulDepuis, repris: false, nouvelles: nouvelles.total, ...nouvelles };
 
   // Qualité
   const retours = [];
@@ -208,7 +257,9 @@ export function rendre(r, { premierLundi = false, maintenant = r.fenetre.fin } =
   const v = r.vitesse;
   l.push('## Vitesse', '');
   l.push(`- Tâches acceptées : **${v.acceptees}** — ${texteRepartition(v.parExecutant)}.`);
-  l.push(`- Cumul depuis le ${jourQuebec(v.cumul.depuis)} (première livraison de la mission .github#703)${v.cumul.limite ? `, lecture limitée aux ${CUMUL_MAX_JOURS} derniers jours` : ''} : **${v.cumul.total}** — ${texteRepartition(v.cumul)}.`);
+  const origineCumul = v.cumul.repris ? `repris du rapport précédent, plus ${v.cumul.nouvelles} tâche(s) acceptée(s) depuis` : `relu en entier : ${r.cumulSource ?? 'aucun rapport précédent'}`;
+  l.push(`- Cumul depuis le ${jourQuebec(v.cumul.depuis)} (première livraison de la mission .github#703 ; ${origineCumul})${v.cumul.limite ? `, lecture limitée aux ${CUMUL_MAX_JOURS} derniers jours` : ''} : **${v.cumul.total}** — ${texteRepartition(v.cumul)}.`);
+  if (r.lecture) l.push(`- Lecture de l'API pour ce rapport : **${r.lecture.taches}** appels pour relire les tâches acceptées (commentaire « Acceptée » + PR), ${r.lecture.total} appels au total.`);
   l.push('- Quota Claude consommé : non mesuré (aucune source de lecture, rien n\'est estimé).');
   const depots = Object.entries(v.parDepot).filter(([, n]) => n > 0).map(([d, n]) => `${d} ${n}`);
   l.push(`- Par dépôt : ${depots.length ? depots.join(', ') : 'aucune'}.`);
@@ -276,7 +327,7 @@ export async function lire(gh, chemin, cle) {
 
 const noms = (o) => (o.labels ?? []).map((x) => (typeof x === 'string' ? x : x.name));
 
-export async function collecterDepot(gh, depot, maintenant, conformiteDe, cumulDepuis = CUMUL_DEPUIS) {
+export async function collecterDepot(gh, depot, maintenant, conformiteDe, cumulDepuis = CUMUL_DEPUIS, compteur = { taches: 0 }) {
   const R = `repos/MoKarade/${depot}`;
   try {
     await gh(['api', R, '--jq', '.full_name']);
@@ -294,12 +345,14 @@ export async function collecterDepot(gh, depot, maintenant, conformiteDe, cumulD
 
   const taches = [];
   for (const i of recents.filter((x) => x.state === 'closed' && x.state_reason === 'completed' && noms(x).includes('niveau:tâche') && temps(x.closed_at) >= Math.min(debut, debutCumul))) {
+    compteur.taches += 1;
     const commentaires = await lire(gh, `${R}/issues/${i.number}/comments?per_page=100`);
     const accept = commentaires.find((c) => /^\*\*Acceptée\*\*/.test(c.body ?? ''));
     let prFusionLe = null;
     let auteurPr = null;
     const pr = /PR #(\d+)/.exec(accept?.body ?? '');
     if (pr) {
+      compteur.taches += 1;
       try {
         const lu = JSON.parse(await gh(['api', `${R}/pulls/${pr[1]}`, '--jq', '{m: .merged_at, a: .user.login}']));
         prFusionLe = lu.m;
@@ -367,10 +420,27 @@ async function main() {
       return null;
     }
   };
+  // Le rapport le plus récent porte, s'il date d'une version qui l'écrit, l'état du cumul (ligne cachée) : on repart de là.
+  const precedents = JSON.parse(await ghReel(['issue', 'list', '--state', 'all', '--label', 'rapport', '--json', 'number,body', '--limit', '1']));
+  const lu = lireLigneCachee(precedents[0]?.body, maintenant);
+  const base = lu.etat === 'ok' ? lu.base : null;
+  const cumulSource = precedents.length === 0
+    ? 'aucun rapport précédent'
+    : lu.etat === 'absente'
+      ? `le rapport #${precedents[0].number} ne porte pas de ligne cachée du cumul`
+      : lu.etat === 'illisible'
+        ? `la ligne cachée du rapport #${precedents[0].number} est illisible (${lu.raison})`
+        : null;
+  let appels = 0;
+  const gh = (args) => {
+    appels += 1;
+    return ghReel(args);
+  };
+  const compteur = { taches: 0 };
   const depots = [];
-  for (const d of DEPOTS) depots.push(await collecterDepot(ghReel, d, maintenant, conformiteDe));
-  const rapport = calculer({ depots, maintenant });
-  const corps = rendre(rapport, { premierLundi: estPremierLundi(maintenant) });
+  for (const d of DEPOTS) depots.push(await collecterDepot(gh, d, maintenant, conformiteDe, base ? base.fin : CUMUL_DEPUIS, compteur));
+  const rapport = { ...calculer({ depots, maintenant, base }), cumulSource, lecture: { taches: compteur.taches, total: appels } };
+  const corps = `${rendre(rapport, { premierLundi: estPremierLundi(maintenant) })}\n\n${ligneCachee(rapport.vitesse.cumul, maintenant)}`;
   const titre = titreRapport(rapport.fenetre.debut);
   if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, `# ${titre}\n\n${corps}\n`);
   if (env.RAPPORT_SANS_ISSUE) {
