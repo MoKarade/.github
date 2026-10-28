@@ -1018,3 +1018,52 @@ test('boitesDuReveil : la CI rouge de Hubperso reste au Coordinateur, la boîte 
   assert.deepEqual(boitesDuReveil({ evt: { type: 'ci_rouge', depot: HUB } }), [NUMERO_BOITE]);
   assert.deepEqual(boitesDuReveil({ evt: { type: 'tache_fermee', depot: HUB } }), [BOITES[HUB]]);
 });
+
+// Repli sans jeton (tâche MoKarade/.github#772) : la boîte locale du dépôt, commentée avec le jeton du job.
+import { BRANCHE_BOITE_LOCALE, reveilLocal } from './reveil-reacteur.mjs';
+
+const MEM = 'MoKarade/MemoryAI';
+const boiteLocale = (extra = {}) => ({ number: 440, draft: true, head: { ref: BRANCHE_BOITE_LOCALE }, ...extra });
+
+test('traiter : sans REVEIL_TOKEN, une tâche fermée commente la boîte locale du dépôt (jeton du job), jamais le workflow d’app-template', async () => {
+  const { api, ecritures } = faux({ [`/repos/${MEM}/pulls`]: [boiteLocale()] });
+  const lignes = [];
+  const r = await traiter({ api, evt: { type: 'tache_fermee', depot: MEM, issue: '9', raison: 'completed' }, jetonReveil: '', journal: (l) => lignes.push(l) });
+  assert.equal(r.reveille, true);
+  assert.equal(r.locale, 440);
+  assert.equal(ecritures.length, 1);
+  assert.equal(ecritures[0].chemin, `/repos/${MEM}/issues/440/comments`);
+  assert.equal(ecritures[0].jeton, undefined, 'le jeton du job, pas un jeton de réveil');
+  assert.match(ecritures[0].corps.body, /^RÉACTEUR : /);
+  assert.ok(lignes.some((l) => l.includes('boîte locale #440')));
+});
+
+test('reveilLocal : rien pour la CI rouge, le filet ou une note LIA (Coordinateur) ; rien sans boîte brouillon ; une erreur est un avertissement', async () => {
+  const journal = [];
+  const j = (l) => journal.push(l);
+  const donnees = { [`/repos/${MEM}/pulls`]: [boiteLocale()] };
+  for (const type of ['ci_rouge', 'filet', 'note_lia', 'garde_fou_rouge']) {
+    const f = faux(donnees);
+    assert.equal(await reveilLocal({ api: f.api, evt: { type, depot: MEM }, texte: 'x', journal: j }), null, type);
+    assert.equal(f.ecritures.length, 0, type);
+  }
+  for (const pulls of [[], null, [boiteLocale({ draft: false })], [boiteLocale({ head: { ref: 'claude/boite-autre' } })]]) {
+    const f = faux({ [`/repos/${MEM}/pulls`]: pulls });
+    assert.equal(await reveilLocal({ api: f.api, evt: { type: 'tache_fermee', depot: MEM }, texte: 'x', journal: j }), null);
+    assert.equal(f.ecritures.length, 0, 'ni commentaire sur une boîte hors brouillon ou d’une autre branche');
+  }
+  const casse = async (methode) => { if (methode === 'GET') return [boiteLocale()]; throw new Error('HTTP 403'); };
+  assert.equal(await reveilLocal({ api: casse, evt: { type: 'tache_fermee', depot: MEM }, texte: 'x', journal: j }), null);
+  assert.ok(journal.some((l) => l.startsWith('::warning::') && l.includes('403')));
+});
+
+test('traiter : sans jeton ni boîte locale, avertissement comme avant ; avec jeton, la boîte locale n’est pas lue', async () => {
+  const lignes = [];
+  const r = await traiter({ boites: {}, api: faux().api, evt: { type: 'tache_fermee', depot: 'MoKarade/CarAI', issue: '1' }, jetonReveil: '', journal: (l) => lignes.push(l) });
+  assert.equal(r.reveille, false);
+  assert.ok(lignes.some((l) => l.startsWith('::warning::') && l.includes('REVEIL_TOKEN')));
+  const lectures = [];
+  const api = async (methode, chemin) => { lectures.push(`${methode} ${chemin}`); return null; };
+  await traiter({ boites: {}, api, evt: { type: 'tache_fermee', depot: 'MoKarade/CarAI', issue: '1' }, jetonReveil: 'jeton', journal: () => {} });
+  assert.ok(!lectures.some((l) => l.includes('/pulls?state=open&head=')), 'avec le jeton, rien ne change');
+});
