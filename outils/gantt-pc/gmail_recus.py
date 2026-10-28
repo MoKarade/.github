@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """Reçus Gmail de Marc, lus UNE fois par semaine (28/10/2026, choix « A » de Marc ; tâche .github#660).
 
-Lecture SEULE (`gmail.readonly`, voir gmail_auth.py) des en-têtes et de l'extrait des courriels de reçu des fournisseurs connus ; résultat
-rangé dans un fichier PRIVÉ du PC, `C:\\dev\\_pc-local\\recus-gmail.json` (variable GMAIL_RECUS_FILE). Rien n'entre dans le dépôt (public).
-Pas de fausse donnée : un montant n'est gardé que s'il est UNIQUE dans l'extrait et porte un marqueur de devise, sinon `montant: None` et
-`a_verifier: True` ; un « $ » seul laisse la devise à `None` ; ni objet, ni extrait, ni expéditeur gardés ; fournisseur inconnu = ignoré.
+Lecture SEULE (`gmail.readonly`, voir gmail_auth.py) de l'en-tête et du texte des courriels de reçu des fournisseurs connus ; le texte ne vit
+qu'en mémoire. Résultat rangé dans un fichier PRIVÉ du PC, `C:\\dev\\_pc-local\\recus-gmail.json` (variable GMAIL_RECUS_FILE), jamais dans le dépôt.
+Pas de fausse donnée : le montant est celui qui suit un libellé connu (« Amount paid », « Total : », « paiement de »…) ; sans libellé, il faut un
+montant unique avec devise ; sinon `montant: None`. Un « $ » seul laisse `devise: None` (`devise_probable` donne la monnaie habituelle du
+fournisseur, une SUPPOSITION) et le reçu reste `a_verifier`. Ni objet, ni texte, ni expéditeur gardés ; fournisseur inconnu = ignoré.
 Cadence : une lecture réussie par 7 jours, nouvel essai toutes les 6 h après un échec ; `passer` est appelée par le tour (aucun minuteur
 de plus), rend une phrase courte (vide = rien à dire) et ne lève jamais. Stdlib seulement ; I/O injectable (tests fictifs).
 """
 from __future__ import annotations
 
+import base64
 import datetime
+import html
 import json
 import os
 import re
@@ -24,6 +27,7 @@ CHEMIN_DEFAUT = r'C:\dev\_pc-local\recus-gmail.json'
 INTERVALLE_H = 7 * 24
 REESSAI_H = 6
 JOURS_PREMIERE, JOURS_ENSUITE = 60, 21      # recouvrement : un courriel arrivé tard n'échappe pas à la lecture suivante ; dédoublonné par id
+VERSION = 2          # change quand la lecture des montants change : le fichier d'une version plus ancienne est relu en entier au prochain tour
 MAX_PAGES, MAX_MESSAGES, MAX_GARDES = 3, 150, 200
 
 # (mot cherché dans l'expéditeur + l'objet, nom rangé) — le premier qui correspond gagne
@@ -32,10 +36,17 @@ FOURNISSEURS = (('anthropic', 'Anthropic'), ('vercel', 'Vercel'), ('windsurf', '
                 ('cloudflare', 'Cloudflare'), ('github', 'GitHub'))
 DOMAINES = 'anthropic.com OR stripe.com OR vercel.com OR windsurf.com OR codeium.com OR github.com OR google.com OR cloudflare.com'
 OBJET_RECU = re.compile(r're[cç]u|receipt|invoice|facture|paiement|payment|billing|statement', re.I)
-DEVISES = {'us$': 'USD', 'usd': 'USD', 'ca$': 'CAD', 'c$': 'CAD', 'cad': 'CAD', '$': None}
-_M = r'(?:US\$|USD|CA\$|C\$|CAD|\$)'
+REMBOURSEMENT = re.compile(r'refund|rembours', re.I)
+CORRECTION = re.compile(r'correction|avoir', re.I)            # « Correction to your Vercel invoices » : pas une dépense
+DEVISES = {'us$': 'USD', '$us': 'USD', 'usd': 'USD', 'ca$': 'CAD', 'c$': 'CAD', '$ca': 'CAD', 'cad': 'CAD', '$': None}
+DEVISE_PROBABLE = {'Vercel': 'USD', 'Google Play': 'CAD'}      # SUPPOSITION, uniquement quand le courriel ne dit que « $ »
+_M = r'(?:US\$|CA\$|C\$|\$\s?CA|\$\s?US|USD|CAD|\$)'
 _N = r'(?:\d{1,3}(?:[ \u00a0\u202f,.]\d{3})+|\d+)(?:[.,]\d{2})'
-MONTANT = re.compile(rf'(?P<pre>{_M})\s?(?P<n1>{_N})|(?P<n2>{_N})\s?(?P<post>{_M})', re.I)
+MONTANT_SRC = rf'(?:(?P<pre>{_M})\s?(?P<n1>{_N})(?:\s?(?P<s1>USD|CAD)\b)?|(?P<n2>{_N})\s?(?P<post>{_M}))'
+MONTANT = re.compile(MONTANT_SRC, re.I)
+# libellés qui précèdent immédiatement LE montant payé, du plus sûr au moins sûr (« Total des dépenses… » et « Total excluding tax » ne suivent pas de montant)
+LIBELLES = tuple(re.compile(l + r'\s*' + MONTANT_SRC, re.I) for l in (r'(?<![\w-])Amount paid', r'(?<![\w-])Montant pay[ée]', r'(?<![\w-])paiement de', r'(?<![\w-])payment of', r'(?<![\w-])Total\s*:?'))
+LIBELLES_REMBOURSEMENT = tuple(re.compile(l + r'\s*' + MONTANT_SRC, re.I) for l in (r'Refund(?:ed)? from[^$\d]{0,40}', r'Rembours[^$\d]{0,40}'))
 
 
 def _nombre(texte: str) -> float | None:
@@ -50,15 +61,53 @@ def _nombre(texte: str) -> float | None:
     return float(f'{entier}.{m.group(2)}')
 
 
+def _valeur(m) -> tuple[float | None, str | None]:
+    """(valeur, devise) d'une correspondance MONTANT ; un code de devise après le nombre (« $4.00 USD ») l'emporte sur « $ »."""
+    marque = re.sub(r'\s', '', (m.group('s1') or m.group('pre') or m.group('post') or '')).lower()
+    return _nombre(m.group('n1') or m.group('n2')), DEVISES.get(marque)
+
+
 def montants(texte: str) -> set[tuple[float, str | None]]:
     """Montants AVEC marqueur de devise trouvés dans le texte : {(valeur, devise ou None)}. Sans marqueur, rien (évite dates et numéros)."""
     trouves = set()
     for m in MONTANT.finditer(texte or ''):
-        n = _nombre(m.group('n1') or m.group('n2'))
-        marque = (m.group('pre') or m.group('post') or '').lower()
+        n, devise = _valeur(m)
         if n is not None and n > 0:
-            trouves.add((n, DEVISES.get(marque)))
+            trouves.add((n, devise))
     return trouves
+
+
+def montant_paye(texte: str, rembourse: bool = False) -> tuple[float | None, str | None]:
+    """(montant, devise) : celui qui suit un libellé connu (zéro permis : essai gratuit) ; sinon l'unique montant du texte ; sinon (None, None)."""
+    for lib in (LIBELLES_REMBOURSEMENT if rembourse else LIBELLES):
+        m = lib.search(texte or '')
+        if m:
+            n, devise = _valeur(m)
+            if n is not None:
+                return n, devise
+    trouves = montants(texte)
+    return next(iter(trouves)) if len(trouves) == 1 else (None, None)
+
+
+def corps_texte(charge) -> str:
+    """Texte d'un message Gmail (format `full`) : les parties text/plain, sinon le HTML sans balises ; '' si rien. Les pièces jointes ne sont jamais lues."""
+    brut = {'text/plain': [], 'text/html': []}
+    pile = [charge]
+    while pile:
+        p = pile.pop(0)
+        if not isinstance(p, dict):
+            continue
+        pile = (p.get('parts') if isinstance(p.get('parts'), list) else []) + pile
+        corps = p.get('body') if isinstance(p.get('body'), dict) else {}
+        if p.get('mimeType') in brut and isinstance(corps.get('data'), str):
+            try:
+                brut[p['mimeType']].append(base64.urlsafe_b64decode(corps['data'] + '=' * (-len(corps['data']) % 4)).decode('utf-8', 'replace'))
+            except ValueError:
+                pass
+    if brut['text/plain']:
+        return '\n'.join(brut['text/plain'])
+    sans_script = re.sub(r'(?is)<(script|style).*?</\1>', ' ', '\n'.join(brut['text/html']))
+    return html.unescape(re.sub(r'<[^>]+>', ' ', sans_script))
 
 
 def fournisseur(expediteur: str, objet: str) -> str | None:
@@ -77,7 +126,7 @@ def date_iso(internal_ms) -> str | None:
 
 
 def en_recu(msg: dict) -> dict | None:
-    """Message Gmail (format metadata) -> {id, date, fournisseur, montant, devise, a_verifier} ou None (pas un reçu connu)."""
+    """Message Gmail (format full) -> {id, date, instant, fournisseur, type, montant, devise, devise_probable, a_verifier} ou None (pas un reçu connu)."""
     if not isinstance(msg, dict) or not isinstance(msg.get('id'), str):
         return None
     charge = msg.get('payload')
@@ -85,13 +134,14 @@ def en_recu(msg: dict) -> dict | None:
     ent = {str(h.get('name', '')).lower(): str(h.get('value', '')) for h in entetes if isinstance(h, dict)} if isinstance(entetes, list) else {}
     objet, de = ent.get('subject', ''), ent.get('from', '')
     nom, date = fournisseur(de, objet), date_iso(msg.get('internalDate'))
-    if not nom or not date or not OBJET_RECU.search(objet):
+    rembourse = bool(REMBOURSEMENT.search(objet))
+    if not nom or not date or CORRECTION.search(objet) or not (rembourse or OBJET_RECU.search(objet)):
         return None
-    trouves = montants(f'{objet} {msg.get("snippet") or ""}')
-    if len(trouves) == 1:
-        (valeur, devise), = trouves
-        return {'id': msg['id'], 'date': date, 'fournisseur': nom, 'montant': valeur, 'devise': devise, 'a_verifier': devise is None}
-    return {'id': msg['id'], 'date': date, 'fournisseur': nom, 'montant': None, 'devise': None, 'a_verifier': True}
+    montant, devise = montant_paye(corps_texte(charge) or f'{objet} {msg.get("snippet") or ""}', rembourse)
+    probable = DEVISE_PROBABLE.get(nom) if devise is None and montant is not None else None
+    return {'id': msg['id'], 'date': date, 'instant': datetime.datetime.fromtimestamp(int(msg['internalDate']) / 1000, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'fournisseur': nom, 'type': 'remboursement' if rembourse else 'recu', 'montant': montant, 'devise': devise, 'devise_probable': probable,
+            'a_verifier': montant is None or devise is None}
 
 
 def requete_gmail(jours: int) -> str:
@@ -128,7 +178,7 @@ def lire_messages(acces: str, jours: int, requete=gmail_auth.http) -> list[dict]
             break
     recus = []
     for i in ids[:MAX_MESSAGES]:
-        url = f'{API}/{urllib.parse.quote(i)}?format=metadata&metadataHeaders=From&metadataHeaders=Subject'
+        url = f'{API}/{urllib.parse.quote(i)}?format=full'
         r = en_recu(_get(url, acces, requete))
         if r:
             recus.append(r)
@@ -167,8 +217,8 @@ def _heures(depuis: str | None, maintenant: str) -> float | None:
 
 
 def a_lire(etat: dict | None, maintenant: str) -> bool:
-    """Première fois ; ou dernier essai en échec depuis 6 h ; ou dernière lecture réussie depuis 7 jours."""
-    if not etat:
+    """Première fois ; ou fichier d'une ancienne VERSION ; ou dernier essai en échec depuis 6 h ; ou dernière lecture réussie depuis 7 jours."""
+    if not etat or etat.get('v') != VERSION:
         return True
     if etat.get('erreur'):
         h = _heures(etat.get('tentative'), maintenant)
@@ -195,14 +245,14 @@ def passer(maintenant: str, p: str | None = None, chemin_c: str | None = None, c
             return ''
         try:
             acces = gmail_auth.jeton_d_acces(chemin_c, chemin_j, requete, deproteger, proteger)
-            recus = lire_messages(acces, JOURS_ENSUITE if etat and etat.get('lu_le') else JOURS_PREMIERE, requete)
+            recus = lire_messages(acces, JOURS_ENSUITE if etat and etat.get('lu_le') and etat.get('v') == VERSION else JOURS_PREMIERE, requete)
         except ErreurGmail as e:
             if e.code in ('client_absent', 'jeton_absent'):
                 return ''                                            # pas encore autorisé : rien à dire à chaque tour
-            ecrire_etat({**(etat or {}), 'v': 1, 'tentative': maintenant, 'erreur': e.code, 'recus': (etat or {}).get('recus', [])}, p)
+            ecrire_etat({**(etat or {}), 'v': VERSION, 'tentative': maintenant, 'erreur': e.code, 'recus': (etat or {}).get('recus', [])}, p)
             return 'Gmail : ' + ('autorisation à refaire (geste de Marc)' if e.code == 'reautoriser' else f'échec ({e.code})')
         liste, neufs = fusionner((etat or {}).get('recus', []), recus)
-        ecrire_etat({'v': 1, 'lu_le': maintenant, 'tentative': maintenant, 'erreur': None, 'recus': liste}, p)
+        ecrire_etat({'v': VERSION, 'lu_le': maintenant, 'tentative': maintenant, 'erreur': None, 'recus': liste}, p)
         return f'Gmail : {len(recus)} reçu(s) lu(s), {neufs} nouveau(x)'
     except Exception as e:                                           # jamais bloquer le tour ; se DIT
         return f'Gmail : ÉCHEC {type(e).__name__}'
