@@ -127,6 +127,15 @@ Une tâche n'est **prenable** que si elle remplit cinq conditions :
 - aucune PR ouverte ne la cite ;
 - son « Fini quand » est vérifiable, et prouvable dans l'heure ou couvert par une preuve programmée (§10).
 
+## 5 quinquies. La file se calcule à l'événement, pas sur le tour du PC (demande de Marc, 28/10/2026, MoKarade/.github#703 et #711)
+
+Avant, la file était `prochaines.json`, écrit par le relevé du PC toutes les 10 minutes : PC éteint ou tour raté, plus de file, donc plus de départ (création → départ : 8 h 51 en moyenne le 28/10). Maintenant, `scripts/file-depot.mjs` lit les issues et les PR OUVERTES d'un seul dépôt avec le jeton du job (1 000 appels par heure et par dépôt, pas les 5 000 partagés du compte de Marc), en fait le même relevé à un dépôt que `fetch.py` et le passe à `calculer` de `prochaine-tache.mjs` : un seul calcul de la file, deux sources de données.
+
+- **Qui l'appelle** : le Réacteur du dépôt (`reveil-reacteur.mjs`), sur une PR fusionnée ou une tâche fermée. Le réveil du Coordinateur ajoute « suivante : #n », le NUMÉRO seulement, jamais le titre (règle .github#136). Le Coordinateur revérifie la tâche en direct avant de la lancer, comme avant.
+- **Ce qui est rendu** : `{ statut, suivante, suivantes, places, eligibleDepuis, illisibles }`. `eligibleDepuis` est le plus tard entre la création de la tâche, la fermeture de sa dernière dépendance et la libération d'une place quand les places étaient pleines : c'est le point de départ des trois délais (en file, avant d'être pris, preuve) que la page « En cours » mesure, cible 10 minutes.
+- **Prudence** : une dépendance « Attend : dépôt#n » est lue sur son dépôt ; illisible (dépôt privé, panne), la tâche n'est PAS lancée, jamais comptée libre. Un dépôt en `incident` ne rend aucune suivante. Une lecture qui échoue rend `illisible` et le réveil part sans suivante : le Coordinateur lit le Gantt comme avant.
+- **Ce que ce calcul sait de moins que le relevé du PC** : la hiérarchie (les préférences « même mission » et « même chantier », rangs 4 à 6, ne s'appliquent pas : l'ordre est preuve due, `prio:1`, sécurité, puis prio puis numéro) ; les PR fusionnées sans tâche acceptée (déjà signalées par « preuve à poser ») ; le frein de quota, que l'appelant passe s'il le connaît (sans lui, palier normal : sa source n'a pas changé).
+
 ## 5 bis. Frein de quota (décision de Marc, 16/10/2026, MoKarade/.github#184)
 
 Le même script lit le pourcentage hebdomadaire du quota Claude (`quota.json`, relevé chaque heure par la tâche du PC, .github#45, latence d'une heure au plus) et écrit le palier dans `prochaines.json` : `frein` vaut `normal`, `1` ou `2`, et `frein_detail` dit le pourcentage, la date de la mesure et la raison. Aucune IA dans ce calcul.

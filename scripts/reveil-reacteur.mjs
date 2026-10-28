@@ -48,6 +48,7 @@ import { dispense, extraireTachesCompletes } from './tache-liee.mjs';
 import { PLACES_PAR_DEPOT } from './capacite.mjs';
 import { accepterApresFusion } from './acceptation-auto.mjs';
 import { accepterPreuvesAttendues, LUES_EVENEMENT, LUES_FILET } from './preuve-attendue-auto.mjs';
+import { fileDuDepot } from './file-depot.mjs';
 
 export const DEPOT_BOITE = 'MoKarade/app-template';
 export const WORKFLOW_BOITE = 'boite-reacteur.yml';
@@ -233,6 +234,16 @@ async function lireOccupations({ api, depot, tachesExclues }) {
   }
 }
 
+/**
+ * La tâche suivante du dépôt à cet instant (scripts/file-depot.mjs, lue avec le jeton du job, jamais sur le tour du PC) : { ligne, file }.
+ * `ligne` : « suivante : #n », le NUMÉRO seulement (règle MoKarade/.github#136) ; vide si le dépôt n'a rien de prenable, est en incident ou n'a pas pu être lu
+ * (une lecture qui échoue ne devine rien : le réveil part sans suivante, le Coordinateur lit le Gantt comme avant).
+ */
+async function suivanteDe({ api, depot, maintenant, exclure = [] }) {
+  const file = await fileDuDepot({ api, depot, maintenant, exclure, libereA: maintenant.toISOString() }).catch(() => null);
+  return file?.suivante ? { ligne: `suivante : #${file.suivante}`, file } : { ligne: '', file: null };
+}
+
 /** « D libre » sans travail, « D : une place libre » avec un seul ; rien quand les deux places sont prises. */
 export function signeLibre(depot, travauxEnCours) {
   if (travauxEnCours <= 0) return `${depot} libre`;
@@ -270,7 +281,8 @@ async function deciderEvenement({ api, evt, maintenant, accepter }) {
     const en = await travaux({ api, depot });
     // Un dépôt dont les deux places sont prises n'a rien de neuf à dire, sauf une tâche abandonnée dont il faut vérifier la raison.
     if (en >= PLACES_PAR_DEPOT && !abandon) return { action: 'rien', raison: 'dépôt encore occupé' };
-    return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), `tâche ${depot}#${evt.issue} fermée${abandon}`]) };
+    const suite = await suivanteDe({ api, depot, maintenant });
+    return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), suite.ligne, `tâche ${depot}#${evt.issue} fermée${abandon}`]), ...(suite.file ? { file: suite.file } : {}) };
   }
 
   if (type === 'pr_fusionnee') {
@@ -297,7 +309,8 @@ async function deciderEvenement({ api, evt, maintenant, accepter }) {
     // Dépôt dont les deux places sont prises et rien à prouver : la fusion n'apprend rien au Coordinateur.
     if (en >= PLACES_PAR_DEPOT && preuves.length === 0) return { action: 'rien', raison: 'dépôt encore occupé', ...dit };
     const acceptee = acceptation.statut === 'acceptee' ? `tâche ${depot}#${acceptation.tache} acceptée seule` : '';
-    return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), `PR #${evt.pr} fusionnée`, acceptee, ...preuves]), ...dit };
+    const suite = await suivanteDe({ api, depot, maintenant, exclure: tachesExclues });
+    return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), suite.ligne, `PR #${evt.pr} fusionnée`, acceptee, ...preuves]), ...dit, ...(suite.file ? { file: suite.file } : {}) };
   }
 
   if (type === 'ci_rouge') {

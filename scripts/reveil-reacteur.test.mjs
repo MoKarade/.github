@@ -670,3 +670,50 @@ test('preuves différées : une erreur est un avertissement, le réveil part qua
   await traiter({ api, evt: { type: 'tache_fermee', depot: 'MoKarade/JobAI', issue: '90', raison: 'completed' }, jetonReveil: 'x', journal: (l) => bon.push(l), accepterDifferees: async () => ({ acceptees: [201], ignorees: [] }) });
   assert.ok(bon.some((l) => l.includes('#201') && l.includes('acceptée automatiquement')));
 });
+
+// ---- La file du dépôt à l'événement (tâche MoKarade/.github#711) : le réveil nomme la suivante, par son numéro seulement.
+const LISTE = `/repos/${DEPOT}/issues?state=open&per_page=100&page=1`;
+const tachePrete = (n, extra = {}) => ({
+  number: n, title: `Titre secret de la tâche ${n}`, state: 'open', created_at: '2026-10-28T10:00:00Z', html_url: `https://github.com/${DEPOT}/issues/${n}`,
+  labels: [{ name: 'niveau:tâche' }], body: `**Fini quand** : la route répond 200\n\n**Fichiers touchés** :\n- \`src/t${n}.mjs\`\n\n**Attend** : aucune\n`, ...extra,
+});
+
+test('tâche fermée : le réveil nomme la tâche suivante par son numéro, jamais par son titre (règle .github#136)', async () => {
+  const api = faux({ [LISTE]: [tachePrete(12), tachePrete(14)] }).api;
+  const d = await decider({ api, evt: { type: 'tache_fermee', depot: DEPOT, issue: '90', raison: 'completed' } });
+  assert.equal(d.action, 'reveiller');
+  assert.equal(d.motif, `RÉACTEUR : ${DEPOT} libre ; suivante : #12 ; tâche ${DEPOT}#90 fermée`);
+  assert.doesNotMatch(d.motif, /Titre secret/);
+  assert.equal(d.file.suivante, 12);
+});
+
+test('tâche fermée : dépôt libre sans tâche prenable, dépendance illisible ou lecture en panne = le réveil d’avant, sans suivante', async () => {
+  const evt = { type: 'tache_fermee', depot: DEPOT, issue: '90', raison: 'completed' };
+  const sans = await decider({ api: faux({ [LISTE]: [] }).api, evt });
+  assert.equal(sans.motif, `RÉACTEUR : ${DEPOT} libre ; tâche ${DEPOT}#90 fermée`);
+  assert.equal(sans.file, undefined);
+  const illisible = tachePrete(12, { body: tachePrete(12).body.replace('aucune', 'MoKarade/Prive#5') });
+  const dep = await decider({ api: faux({ [LISTE]: [illisible] }).api, evt });
+  assert.equal(dep.motif, `RÉACTEUR : ${DEPOT} libre ; tâche ${DEPOT}#90 fermée`);
+  const panne = await decider({ api: faux({ [LISTE]: new Error('HTTP 502') }).api, evt });
+  assert.equal(panne.motif, `RÉACTEUR : ${DEPOT} libre ; tâche ${DEPOT}#90 fermée`);
+});
+
+test('PR fusionnée : la tâche qu’elle vient de livrer ne tient plus de place, la suivante est nommée', async () => {
+  const livree = tachePrete(40, { labels: [{ name: 'niveau:tâche' }, { name: 'en-cours' }] });
+  const donnees = {
+    [`/repos/${DEPOT}/pulls/7`]: { number: 7, body: 'Tâche : #40', user: humain, merged_at: '2026-10-28T20:00:00Z' },
+    [`/repos/${DEPOT}/issues/40`]: tache({ number: 40 }),
+    [LISTE]: [livree, tachePrete(12)],
+  };
+  const d = await decider({ api: faux(donnees).api, evt: { type: 'pr_fusionnee', depot: DEPOT, pr: '7' }, accepter: async () => ({ statut: 'ignoree' }) });
+  assert.equal(d.action, 'reveiller');
+  assert.match(d.motif, /^RÉACTEUR : .* ; suivante : #12 ; PR #7 fusionnée/);
+  assert.doesNotMatch(d.motif, /Titre secret/);
+});
+
+test('le Réacteur nomme la suivante sans que le PC tourne : aucune lecture de prochaines.json ni de Drive', () => {
+  const source = readFileSync(new URL('./file-depot.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /from 'node:fs'|googleapis|from '.*drive/i);
+  assert.doesNotMatch(source, /readFileSync|existsSync/);
+});
