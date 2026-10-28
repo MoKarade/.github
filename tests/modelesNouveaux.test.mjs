@@ -12,6 +12,8 @@ import {
   lireListeModelesAnthropic,
   rechercherModelesApp,
   lireTachesApp,
+  ouvrirTacheMigration,
+  executer,
   PARENT_MISSION,
 } from '../scripts/modeles-nouveaux.mjs';
 
@@ -154,4 +156,163 @@ test('lireTachesApp ne rend que les issues, pas les PR', async () => {
   const json = [{ title: 'Migration de x vers le modèle y' }, { title: 'PR', pull_request: {} }];
   const taches = await lireTachesApp({ depot: 'MoKarade/JobAI', fetchFn: async () => reponse(200, json) });
   assert.deepEqual(taches, [{ title: 'Migration de x vers le modèle y' }]);
+});
+
+test('executer en essai à blanc rend 1 tâche et ne fait aucun POST', async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const appels = [];
+  globalThis.fetch = async (url, options = {}) => {
+    appels.push({ url, options });
+    if (url.includes('api.anthropic.com')) {
+      return reponse(200, { data: [{ id: 'claude-sonnet-5-5' }, { id: 'claude-3-5-sonnet-20241022' }] });
+    }
+    if (url.includes('search/code')) {
+      return reponse(200, {
+        items: [{ path: 'src/llm.js', text_matches: [{ fragment: 'const m = "claude-3-5-sonnet-20241022";' }] }],
+      });
+    }
+    if (url.includes('/issues')) {
+      return reponse(200, []);
+    }
+    return reponse(404, {});
+  };
+
+  const aOuvrir = await executer({
+    aBlanc: true,
+    apps: [{ nom: 'emploi', depot: 'MoKarade/JobAI' }],
+    apiKey: 'test-key',
+    ghToken: 'test-token',
+    pause: async () => {},
+  });
+
+  assert.equal(aOuvrir.length, 1);
+  const posts = appels.filter((a) => a.options?.method?.toUpperCase() === 'POST');
+  assert.equal(posts.length, 0);
+});
+
+test('executer en passage réel ouvre exactement 1 issue avec le bon titre et labels', async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const appels = [];
+  globalThis.fetch = async (url, options = {}) => {
+    appels.push({ url, options });
+    if (url.includes('api.anthropic.com')) {
+      return reponse(200, { data: [{ id: 'claude-sonnet-5-5' }, { id: 'claude-3-5-sonnet-20241022' }] });
+    }
+    if (url.includes('search/code')) {
+      return reponse(200, {
+        items: [{ path: 'src/llm.js', text_matches: [{ fragment: 'const m = "claude-3-5-sonnet-20241022";' }] }],
+      });
+    }
+    if (url.includes('/issues') && options.method?.toUpperCase() !== 'POST') {
+      return reponse(200, []);
+    }
+    if (url === 'https://api.github.com/repos/MoKarade/JobAI/issues' && options.method?.toUpperCase() === 'POST') {
+      return reponse(201, { id: 1 });
+    }
+    return reponse(404, {});
+  };
+
+  const aOuvrir = await executer({
+    aBlanc: false,
+    apps: [{ nom: 'emploi', depot: 'MoKarade/JobAI' }],
+    apiKey: 'test-key',
+    ghToken: 'test-token',
+    pause: async () => {},
+  });
+
+  assert.equal(aOuvrir.length, 1);
+  const posts = appels.filter((a) => a.options?.method?.toUpperCase() === 'POST');
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].url, 'https://api.github.com/repos/MoKarade/JobAI/issues');
+  const body = JSON.parse(posts[0].options.body);
+  assert.equal(body.title, 'Migration de emploi vers le modèle claude-sonnet-5-5');
+  assert.deepEqual(body.labels, ['niveau:tâche']);
+});
+
+test('executer ne fait aucun POST si l’issue existe déjà même fermée', async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const appels = [];
+  globalThis.fetch = async (url, options = {}) => {
+    appels.push({ url, options });
+    if (url.includes('api.anthropic.com')) {
+      return reponse(200, { data: [{ id: 'claude-sonnet-5-5' }, { id: 'claude-3-5-sonnet-20241022' }] });
+    }
+    if (url.includes('search/code')) {
+      return reponse(200, {
+        items: [{ path: 'src/llm.js', text_matches: [{ fragment: 'const m = "claude-3-5-sonnet-20241022";' }] }],
+      });
+    }
+    if (url.includes('/issues')) {
+      return reponse(200, [{ title: 'Migration de emploi vers le modèle claude-sonnet-5-5', state: 'closed' }]);
+    }
+    return reponse(404, {});
+  };
+
+  const aOuvrir = await executer({
+    aBlanc: false,
+    apps: [{ nom: 'emploi', depot: 'MoKarade/JobAI' }],
+    apiKey: 'test-key',
+    ghToken: 'test-token',
+    pause: async () => {},
+  });
+
+  assert.equal(aOuvrir.length, 0);
+  const posts = appels.filter((a) => a.options?.method?.toUpperCase() === 'POST');
+  assert.equal(posts.length, 0);
+});
+
+test('executer est rejeté si la liste Anthropic répond HTTP 401 et ne fait aucun POST', async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const appels = [];
+  globalThis.fetch = async (url, options = {}) => {
+    appels.push({ url, options });
+    return reponse(401, { message: 'Unauthorized' });
+  };
+
+  await assert.rejects(
+    executer({
+      aBlanc: false,
+      apps: [{ nom: 'emploi', depot: 'MoKarade/JobAI' }],
+      apiKey: 'test-key',
+      ghToken: 'test-token',
+      pause: async () => {},
+    }),
+    /HTTP 401/,
+  );
+
+  const posts = appels.filter((a) => a.options?.method?.toUpperCase() === 'POST');
+  assert.equal(posts.length, 0);
+});
+
+test('ouvrirTacheMigration rejette si la réponse est HTTP 422', async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () => reponse(422, { message: 'Unprocessable Entity' });
+
+  await assert.rejects(
+    ouvrirTacheMigration({
+      task: { depot: 'MoKarade/JobAI', titre: 'Migration', corps: 'corps', labels: ['niveau:tâche'] },
+      ghToken: 'test-token',
+    }),
+    /HTTP 422/,
+  );
 });
