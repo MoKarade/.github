@@ -46,6 +46,11 @@ test('dispense : la boîte du Réacteur (brouillon sur sa branche) et rien d’a
   assert.equal(dispense({ user: humain, head: { ref: 'claude/boite-reacteur' }, draft: true }), 'boîte du Réacteur');
   assert.equal(dispense({ user: humain, head: { ref: 'claude/boite-reacteur' }, draft: false }), null);
   assert.equal(dispense({ user: humain, head: { ref: 'claude/autre' }, draft: true }), null);
+  assert.equal(dispense({ user: humain, head: { ref: 'claude/boite-hub-contract' }, draft: true }), 'boîte du Réacteur');
+  assert.equal(dispense({ user: humain, head: { ref: 'claude/boite-.github' }, draft: true }), 'boîte du Réacteur');
+  assert.equal(dispense({ user: humain, head: { ref: 'claude/boite-hub-contract' }, draft: false }), null, 'sortie du brouillon : tâche exigée');
+  assert.equal(dispense({ user: humain, head: { ref: 'claude/boites-par-depot' }, draft: true }), null);
+  assert.equal(dispense({ user: humain, head: { ref: 'claude/boite-a/../b' }, draft: true }), null);
 });
 
 test('defautDeLaTache : ouverte avec niveau:tâche ou refus motivé', () => {
