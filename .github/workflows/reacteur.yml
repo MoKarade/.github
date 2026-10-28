@@ -15,6 +15,13 @@ name: Réacteur
 # Filet quotidien (MoKarade/.github#143 et #194) : deux passages par jour, à toute heure (aucune garde d'heure), le même workflow
 # commun relit le dépôt avec le jeton du job (PR rouge depuis plus de 30 min, incident ouvert, branche par défaut rouge) et ne
 # réveille que s'il y a un signal qui n'a pas déjà été posté sur la boîte dans les 6 dernières heures.
+# Phase 4, « rien ne dépend d'un minuteur » (tâche MoKarade/.github#712, demande de Marc du 28/10/2026) : plus de `schedule` ici. Chaque chose qui devait attendre
+# une passe a son événement : une tâche qui s'ouvre, change ou perd une étiquette (`tache_ouverte`, ou `tache_reservee` pour `faisable-jules`, qui part chez Jules), un
+# déploiement de production réussi (`deploiement` : la tâche de la PR fusionnée s'accepte seule), un commentaire (`commentaire` : une preuve différée due se lit),
+# la fin d'un cron d'app (`repository_dispatch` `fin-de-cron`), une note de LIA (`note-lia`). Le filet (`filet`) ne part plus que sur `workflow_dispatch` ou sur un
+# `repository_dispatch` `filet` : le battement externe de la tâche #720 sera le seul minuteur, et il vit hors de GitHub.
+# `check_suite` et `merge_group` ne sont pas écoutés : la fin d'un contrôle passe déjà par `workflow_run` (CI, Garde-fou) et Mergify fait seul sa file ; ils n'auraient
+# rien à décider de plus.
 on:
   pull_request:
     types: [closed, opened, reopened, ready_for_review, edited]
@@ -23,16 +30,18 @@ on:
     workflows: [CI, Garde-fou]
     types: [completed]
   issues:
-    types: [closed]
-  schedule:
-    # Deux passages par jour, vers 6 h au Québec (10 h UTC en heure d'été, 11 h UTC en heure d'hiver). Le script agit à CHAQUE
-    # passage, même en retard de plusieurs heures (le 17/10/2026 GitHub a lancé ces crons avec 3 h de retard, MoKarade/.github#194) ;
-    # le second ne reposte pas un signal que le premier vient de poser.
-    # Minute 11, jamais 0 : GitHub n'a lancé AUCUN des passages `0 10` et `0 11` du 17/10/2026 (heures rondes), alors que les
-    # planifications à minute décalée de .github tournent (MoKarade/.github#143, même leçon que le commentaire tâche liée, #144).
-    - cron: '11 10 * * *'
-    - cron: '11 11 * * *'
+    types: [closed, opened, edited, labeled, unlabeled]
+  deployment_status:
+  issue_comment:
+    types: [created]
+  repository_dispatch:
+    types: [fin-de-cron, note-lia, filet]
   workflow_dispatch:
+
+# Une rafale d'étiquettes ou de modifications sur la même tâche ne lance qu'un passage (le dernier) ; la fermeture a son propre groupe et n'est jamais annulée.
+concurrency:
+  group: reacteur-${{ github.event_name == 'issues' && format('issue-{0}-{1}', github.event.issue.number, github.event.action == 'closed' && 'closed' || 'maj') || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'issues' && github.event.action != 'closed' }}
 
 permissions: {}
 
@@ -40,7 +49,7 @@ jobs:
   preuve:
     name: Garde-fou de preuve
     # Seules les issues `niveau:tâche` comptent ; chantiers et missions n'ont pas de preuve de ce type.
-    if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'niveau:tâche')
+    if: github.event_name == 'issues' && github.event.action == 'closed' && contains(github.event.issue.labels.*.name, 'niveau:tâche')
     permissions:
       contents: read
       issues: write
@@ -63,8 +72,11 @@ jobs:
       (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
       (github.event_name == 'pull_request' && github.event.action != 'closed' && github.event.pull_request.user.type != 'Bot') ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.actor.type != 'Bot') ||
-      (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'niveau:tâche') && contains(fromJSON('["acceptee","abandon"]'), needs.preuve.outputs.statut)) ||
-      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      (github.event_name == 'issues' && github.event.action == 'closed' && contains(github.event.issue.labels.*.name, 'niveau:tâche') && contains(fromJSON('["acceptee","abandon"]'), needs.preuve.outputs.statut)) ||
+      (github.event_name == 'issues' && github.event.action != 'closed' && contains(github.event.issue.labels.*.name, 'niveau:tâche')) ||
+      (github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production') ||
+      (github.event_name == 'issue_comment' && !github.event.issue.pull_request && github.event.comment.user.type != 'Bot' && contains(github.event.issue.labels.*.name, 'preuve-attendue')) ||
+      github.event_name == 'repository_dispatch' || github.event_name == 'workflow_dispatch')
     permissions:
       contents: read
       # write : le commentaire « Fusionnée et acceptée automatiquement » sur la PR (tâche MoKarade/.github#418)
@@ -79,17 +91,26 @@ jobs:
     secrets: inherit
     with:
       runner: ${{ github.event.repository.visibility == 'public' && '"ubuntu-latest"' || '["self-hosted","pc-marc"]' }}
-      type: ${{ github.event_name == 'pull_request' && (github.event.action == 'closed' && 'pr_fusionnee' || 'pr_ouverte') || github.event_name == 'issues' && 'tache_fermee' || github.event_name == 'workflow_run' && (github.event.workflow_run.name == 'Garde-fou' && 'garde_fou_rouge' || 'ci_rouge') || 'filet' }}
+      type: >-
+        ${{ github.event_name == 'pull_request' && (github.event.action == 'closed' && 'pr_fusionnee' || 'pr_ouverte')
+        || github.event_name == 'issues' && (github.event.action == 'closed' && 'tache_fermee' || github.event.action == 'labeled' && github.event.label.name == 'faisable-jules' && 'tache_reservee' || 'tache_ouverte')
+        || github.event_name == 'workflow_run' && (github.event.workflow_run.name == 'Garde-fou' && 'garde_fou_rouge' || 'ci_rouge')
+        || github.event_name == 'deployment_status' && 'deploiement'
+        || github.event_name == 'issue_comment' && 'commentaire'
+        || github.event_name == 'repository_dispatch' && (github.event.action == 'fin-de-cron' && 'fin_de_cron' || github.event.action == 'note-lia' && 'note_lia' || 'filet')
+        || 'filet' }}
       depot: ${{ github.repository }}
       pr: ${{ format('{0}', github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number) }}
       issue: ${{ format('{0}', github.event.issue.number) }}
+      # Identifiant envoyé par l'app (`client_payload.note` ou `client_payload.cron`) : le script n'en garde que lettres, chiffres, point, tiret, souligné.
+      signal: ${{ format('{0}', github.event.client_payload.note || github.event.client_payload.cron) }}
       raison: ${{ github.event.issue.state_reason }}
       evenement: ${{ github.event.workflow_run.event }}
-      sha: ${{ github.event.workflow_run.head_sha }}
+      sha: ${{ github.event.workflow_run.head_sha || github.event.deployment.sha }}
       run: ${{ format('{0}', github.event.workflow_run.id) }}
       branche-run: ${{ github.event.workflow_run.head_branch }}
       branche-defaut: ${{ github.event.repository.default_branch }}
       # .github ne se déploie nulle part (comme son garde-fou de preuve ci-dessus) : sans cela l'acceptation automatique attend
       # un déploiement Vercel qui n'existera jamais et laisse la tâche à un fil (essai réel du 21/10/2026, .github#402).
       deploiement: aucun
-      forcer: ${{ github.event_name == 'workflow_dispatch' && 'true' || '' }}
+      forcer: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' && github.event.action == 'filet') && 'true' || '' }}

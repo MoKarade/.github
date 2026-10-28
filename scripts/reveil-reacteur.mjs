@@ -280,7 +280,12 @@ export function signeLibre(depot, travauxEnCours) {
 
 // Les événements qui passent par le Réacteur et pendant lesquels une preuve différée DUE peut se lire (tâche MoKarade/.github#700, §10 quater) :
 // aucun minuteur en plus. Les autres (CI rouge, ouverture de PR…) n'y touchent pas.
-export const TYPES_PREUVE_DIFFEREE = new Set(['pr_fusionnee', 'tache_fermee', 'filet']);
+export const TYPES_PREUVE_DIFFEREE = new Set(['pr_fusionnee', 'tache_fermee', 'filet', 'deploiement', 'commentaire', 'fin_de_cron']);
+// Les événements ajoutés pour que RIEN n'attende un minuteur (tâche MoKarade/.github#712) : ils ne réveillent que si quelque chose vient d'être
+// accepté ou si une tâche vient de devenir prenable ; sinon rien, et surtout pas de message de plus sur la boîte.
+export const TYPES_EVENEMENT_NOUVEAU = new Set(['tache_ouverte', 'deploiement', 'commentaire', 'fin_de_cron', 'note_lia']);
+// Un identifiant venu d'un `repository_dispatch` (note LIA, cron d'app) : lettres, chiffres, point, tiret, souligné ; sinon rien n'en sort.
+export const signalSur = (v) => (/^[0-9A-Za-z._-]{1,40}$/.test(String(v ?? '')) ? String(v) : '');
 
 /**
  * Décide quoi faire d'un événement, puis lit les preuves différées dues du dépôt (scripts/preuve-attendue-auto.mjs). Le résultat ne change pas
@@ -291,7 +296,25 @@ export async function decider({ api, evt, maintenant = new Date(), accepter = ac
   if (!TYPES_PREUVE_DIFFEREE.has(evt.type)) return d;
   const config = { deploiement: evt.deploiement === 'aucun' ? 'aucun' : 'vercel', workflows: String(evt.workflows ?? '').split(',').map((x) => x.trim()).filter(Boolean) };
   const differees = await accepterDifferees({ api, depot: evt.depot, maintenant, config, jeton: jetonLecture, lues: evt.type === 'filet' ? LUES_FILET : LUES_EVENEMENT }).catch((e) => ({ acceptees: [], ignorees: [], erreur: e.message }));
+  if (differees.acceptees.length > 0 && d.action === 'rien' && TYPES_EVENEMENT_NOUVEAU.has(evt.type)) {
+    // Une acceptation faite par un événement qui ne réveillait personne libère une place (la fermeture par le jeton du job ne lance aucun autre workflow) : on le dit ici.
+    const apres = await reveilApresAcceptation({ api, depot: evt.depot, maintenant, taches: differees.acceptees });
+    return apres ? { ...d, ...apres, differees } : { ...d, differees };
+  }
   return differees.acceptees.length > 0 || differees.erreur ? { ...d, differees } : d;
+}
+
+/**
+ * Le réveil d'une tâche que le Réacteur vient d'accepter seul hors d'une PR fusionnée (déploiement READY, preuve différée due) : « D libre ; suivante : #n ;
+ * tâche D#n acceptée seule », et Jules reçoit sa tâche. Dépôt dont les deux places sont prises : rien (même règle qu'à la fusion). Rend null si rien à dire.
+ */
+async function reveilApresAcceptation({ api, depot, maintenant, taches }) {
+  const en = await travaux({ api, depot });
+  const suite = await suivanteDe({ api, depot, maintenant });
+  const dit = await julesDe({ api, depot, maintenant, file: suite.brut });
+  if (en >= PLACES_PAR_DEPOT) return Object.keys(dit).length ? { raison: 'dépôt encore occupé', ...dit } : null;
+  const lignes = taches.map((n) => `tâche ${depot}#${n} acceptée seule`);
+  return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), suite.ligne, ligneJules(dit), ...lignes]), ...(suite.file ? { file: suite.file } : {}), ...dit };
 }
 
 /**
@@ -303,6 +326,42 @@ async function deciderEvenement({ api, evt, maintenant, accepter }) {
   if (type === 'filet') return filet({ api, evt, maintenant });
   if (type === 'pr_ouverte') return { action: 'balayer' };
   if (type === 'garde_fou_rouge') return { action: 'balayer', workflows: WORKFLOWS_GARDE_FOU_ROUGE };
+  // Une tâche s'ouvre, change ou perd une étiquette : si elle devient LA suivante d'un dépôt qui a une place, le Coordinateur le sait tout de suite (tâche #712).
+  if (type === 'tache_ouverte') {
+    const n = Number(evt.issue);
+    const issue = await api('GET', `/repos/${depot}/issues/${n}`);
+    const noms = (issue?.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
+    if (!issue || issue.state !== 'open' || !noms.includes(LABEL_TACHE)) return { action: 'rien', raison: 'pas une tâche ouverte' };
+    const en = await travaux({ api, depot });
+    const suite = await suivanteDe({ api, depot, maintenant });
+    const dit = await julesDe({ api, depot, maintenant, file: suite.brut });
+    if (en >= PLACES_PAR_DEPOT) return { action: 'rien', raison: 'dépôt encore occupé', ...dit };
+    if (suite.brut?.suivante !== n) return { action: 'rien', raison: 'cette tâche n’est pas la suivante', ...dit };
+    const motif = construireMotif([signeLibre(depot, en), suite.ligne, ligneJules(dit), `tâche ${depot}#${n} prête`]);
+    // Une modification de plus du même corps ne repose pas le même réveil.
+    if (evt.forcer !== 'true' && (await dejaSignale({ api, motif, maintenant }))) return { action: 'rien', raison: `déjà signalé sur la boîte dans les ${FENETRE_FILET_H} dernières heures`, ...dit };
+    return { action: 'reveiller', motif, file: suite.file, ...dit };
+  }
+  // Un déploiement de production réussi : la tâche de la PR fusionnée sur ce commit s'accepte seule si sa règle le permet (la PR a pu fusionner avant la fin du déploiement).
+  if (type === 'deploiement') {
+    const prs = (await api('GET', `/repos/${depot}/commits/${evt.sha}/pulls`).catch(() => null)) ?? [];
+    const config = { deploiement: evt.deploiement === 'aucun' ? 'aucun' : 'vercel', workflows: String(evt.workflows ?? '').split(',').map((x) => x.trim()).filter(Boolean) };
+    for (const pr of prs.filter((p) => p.merged_at)) {
+      const a = await accepter({ api, depot, numeroPr: pr.number, config, essais: 1, pause: 0 }).catch((e) => ({ statut: 'erreur', motifs: [e.message] }));
+      if (a.statut === 'acceptee') {
+        const apres = await reveilApresAcceptation({ api, depot, maintenant, taches: [a.tache] });
+        return { ...(apres ?? { action: 'rien', raison: 'tâche acceptée, dépôt encore occupé' }), acceptation: a };
+      }
+    }
+    return { action: 'rien', raison: 'déploiement sans tâche à accepter' };
+  }
+  // Un commentaire « Preuve attendue » et la fin d'un cron d'app : seules les preuves différées dues se lisent (`decider`), rien d'autre ne bouge.
+  if (type === 'commentaire' || type === 'fin_de_cron') return { action: 'rien', raison: type === 'commentaire' ? 'commentaire lu (preuves différées)' : `fin de cron ${signalSur(evt.signal) || 'inconnu'} lue (preuves différées)` };
+  // Une note de LIA est arrivée : le Coordinateur est réveillé avec un identifiant seulement (règle MoKarade/.github#136).
+  if (type === 'note_lia') {
+    const note = signalSur(evt.signal);
+    return { action: 'reveiller', motif: construireMotif([`note LIA reçue sur ${depot}`, note ? `note ${note}` : '']) };
+  }
   // Une tâche vient d'être réservée à Jules (étiquette `faisable-jules` posée) : il la prend tout de suite si le dépôt le permet, sans réveiller personne.
   if (type === 'tache_reservee') {
     const dit = await julesDe({ api, depot, maintenant });
@@ -472,6 +531,7 @@ export async function main(env = process.env) {
     forcer: env.REVEIL_FORCER || '',
     deploiement: env.REVEIL_DEPLOIEMENT || '',
     workflows: env.REVEIL_WORKFLOWS || '',
+    signal: env.REVEIL_SIGNAL || '',
   };
   try {
     await traiter({ api: apiGitHub(env.GITHUB_TOKEN), evt, jetonReveil: env.REVEIL_TOKEN, jetonLecture: env.GITHUB_TOKEN });
