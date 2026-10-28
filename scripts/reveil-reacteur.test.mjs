@@ -54,7 +54,7 @@ test('preuveAPoser : ouverte, niveau tâche, ni preuve-attendue ni « Acceptée 
 test('tâche fermée : « D libre », jamais de tâche suivante ; abandon signalé', async () => {
   const { api } = faux();
   const a = await decider({ api, evt: { type: 'tache_fermee', depot: 'MoKarade/JobAI', issue: '90', raison: 'completed' } });
-  assert.deepEqual(a, { action: 'reveiller', motif: 'RÉACTEUR : MoKarade/JobAI libre ; tâche MoKarade/JobAI#90 fermée' });
+  assert.deepEqual(a, { action: 'reveiller', motif: 'RÉACTEUR : MoKarade/JobAI libre ; tâche MoKarade/JobAI#90 fermée', sujets: [90] });
   const b = await decider({ api, evt: { type: 'tache_fermee', depot: 'MoKarade/JobAI', issue: '90', raison: 'not_planned' } });
   assert.match(b.motif, /abandonnée/);
 });
@@ -668,7 +668,7 @@ test('preuves différées : lues sur la PR fusionnée, la tâche fermée et le f
   assert.deepEqual(rouge, { action: 'balayer' });
   assert.equal(appels.length, avant);
   const rien = await decider({ api: faux().api, evt: { type: 'tache_fermee', depot: 'MoKarade/JobAI', issue: '90', raison: 'completed' }, accepterDifferees: async () => ({ acceptees: [], ignorees: [{ tache: 5, motifs: ['x'] }] }) });
-  assert.deepEqual(rien, { action: 'reveiller', motif: 'RÉACTEUR : MoKarade/JobAI libre ; tâche MoKarade/JobAI#90 fermée' });
+  assert.deepEqual(rien, { action: 'reveiller', motif: 'RÉACTEUR : MoKarade/JobAI libre ; tâche MoKarade/JobAI#90 fermée', sujets: [90] });
 });
 
 test('preuves différées : une erreur est un avertissement, le réveil part quand même', async () => {
@@ -958,4 +958,63 @@ test('traiter : dépôt direct, la boîte du dépôt est seule ; son échec remo
     return null;
   };
   await assert.rejects(traiter({ api, evt: { type: 'tache_fermee', depot: 'MoKarade/JobAI', issue: '9', raison: 'completed' }, jetonReveil: 'jeton', journal: () => {}, directes: new Set(['MoKarade/JobAI']) }), /HTTP 500/);
+});
+
+// Hubperso a deux fils : la boîte de la Page chantier (app-template#210) reçoit les tâches qui touchent le chantier (tâche MoKarade/.github#769).
+import { BOITE_PAGE_CHANTIER, boitesDuDepotAvecChantier, regardeLaPageChantier } from './reveil-reacteur.mjs';
+
+const HUB = 'MoKarade/Hubperso';
+const issueChantier = { labels: [{ name: 'niveau:tâche' }], body: '**Avant** : x\n**Fichiers touchés** :\n- `app/chantier/page.tsx`\n- `tests/chantier.test.ts`\n**Source** : y' };
+const issueDepot = { labels: [{ name: 'niveau:tâche' }], body: '**Fichiers touchés** :\n- `lib/acces.ts`\n**Source** : un mot chantier/ ici ne compte pas' };
+
+test('regardeLaPageChantier : étiquette ou chemin chantier dans « Fichiers touchés », rien d’autre', () => {
+  assert.equal(regardeLaPageChantier(issueChantier), true);
+  assert.equal(regardeLaPageChantier({ labels: [{ name: 'fil:page-chantier' }], body: '' }), true);
+  assert.equal(regardeLaPageChantier({ labels: [], body: '**Fichiers touchés** : `app/api/gantt/route.ts`' }), true);
+  assert.equal(regardeLaPageChantier(issueDepot), false, 'un chemin cité hors de la section ne compte pas');
+  assert.equal(regardeLaPageChantier({ labels: [], body: 'chantier/ dans le texte seulement' }), false);
+  assert.equal(regardeLaPageChantier(null), false);
+});
+
+test('boitesDuDepotAvecChantier : tout chantier -> #210 seule ; mélange -> les deux ; aucune tâche ou illisible -> la boîte du dépôt', async () => {
+  const lire = (m) => async (n) => { if (!(n in m)) throw new Error('HTTP 500'); return m[n]; };
+  const base = { boiteDepot: 203 };
+  assert.deepEqual(await boitesDuDepotAvecChantier({ ...base, sujets: [1], lire: lire({ 1: issueChantier }) }), [BOITE_PAGE_CHANTIER]);
+  assert.deepEqual(await boitesDuDepotAvecChantier({ ...base, sujets: [1, 2], lire: lire({ 1: issueChantier, 2: issueChantier }) }), [BOITE_PAGE_CHANTIER]);
+  assert.deepEqual(await boitesDuDepotAvecChantier({ ...base, sujets: [1, 2], lire: lire({ 1: issueChantier, 2: issueDepot }) }), [203, BOITE_PAGE_CHANTIER]);
+  assert.deepEqual(await boitesDuDepotAvecChantier({ ...base, sujets: [2], lire: lire({ 2: issueDepot }) }), [203]);
+  assert.deepEqual(await boitesDuDepotAvecChantier({ ...base, sujets: [], lire: lire({}) }), [203]);
+  assert.deepEqual(await boitesDuDepotAvecChantier({ ...base, sujets: undefined, lire: lire({}) }), [203]);
+  assert.deepEqual(await boitesDuDepotAvecChantier({ ...base, sujets: [9], lire: lire({}) }), [203], 'lecture en échec : la boîte du dépôt, rien ne se perd');
+  assert.deepEqual(await boitesDuDepotAvecChantier({ ...base, sujets: ['x', -1, 0], lire: lire({}) }), [203]);
+  assert.equal(BOITE_PAGE_CHANTIER, 210);
+  assert.ok(!Object.values(BOITES).includes(BOITE_PAGE_CHANTIER), 'la boîte de la Page chantier n’est pas une boîte de dépôt');
+});
+
+test('traiter : tâche chantier fermée chez Hubperso -> la boîte #210 seule, pas la #203 ni la #58', async () => {
+  const { api, ecritures } = faux({ [`/repos/${HUB}/issues/5`]: issueChantier });
+  await traiter({ api, evt: { type: 'tache_fermee', depot: HUB, issue: '5', raison: 'completed' }, jetonReveil: 'jeton', journal: () => {} });
+  const boites = ecritures.filter((e) => e.chemin.endsWith(`/workflows/${WORKFLOW_BOITE}/dispatches`)).map((e) => e.corps.inputs.boite);
+  assert.deepEqual(boites, [String(BOITE_PAGE_CHANTIER)]);
+});
+
+test('traiter : tâche du dépôt fermée chez Hubperso -> la #203 ; tâche illisible -> la #203 aussi', async () => {
+  for (const donnees of [{ [`/repos/${HUB}/issues/5`]: issueDepot }, { [`/repos/${HUB}/issues/5`]: new Error('HTTP 500') }]) {
+    const { api, ecritures } = faux(donnees);
+    await traiter({ api, evt: { type: 'tache_fermee', depot: HUB, issue: '5', raison: 'completed' }, jetonReveil: 'jeton', journal: () => {} });
+    const boites = ecritures.filter((e) => e.chemin.endsWith(`/workflows/${WORKFLOW_BOITE}/dispatches`)).map((e) => e.corps.inputs.boite);
+    assert.deepEqual(boites, [String(BOITES[HUB])]);
+  }
+});
+
+test('traiter : seul Hubperso a une seconde boîte (JobAI, même tâche chantier -> sa boîte de dépôt)', async () => {
+  const { api, ecritures } = faux({ '/repos/MoKarade/JobAI/issues/5': issueChantier });
+  await traiter({ api, evt: { type: 'tache_fermee', depot: 'MoKarade/JobAI', issue: '5', raison: 'completed' }, jetonReveil: 'jeton', journal: () => {} });
+  const boites = ecritures.filter((e) => e.chemin.endsWith(`/workflows/${WORKFLOW_BOITE}/dispatches`)).map((e) => e.corps.inputs.boite);
+  assert.deepEqual(boites, [String(BOITES['MoKarade/JobAI'])]);
+});
+
+test('boitesDuReveil : la CI rouge de Hubperso reste au Coordinateur, la boîte #210 n’est jamais une cible du dépôt', () => {
+  assert.deepEqual(boitesDuReveil({ evt: { type: 'ci_rouge', depot: HUB } }), [NUMERO_BOITE]);
+  assert.deepEqual(boitesDuReveil({ evt: { type: 'tache_fermee', depot: HUB } }), [BOITES[HUB]]);
 });
