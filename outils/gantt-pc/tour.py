@@ -199,7 +199,11 @@ def releve(econome=False, quota_complet=True, drive=None):
     elif (fd.get('age_heures') or 0) > 3: quota += f' · quota Claude : mesure vieille de {fd["age_heures"]} h (tâche Quota-Claude arrêtée ?)'
     rv = lire('backlog.json').get('relectures_vide')      # pages vides de GitHub relues pendant ce relevé (.github#494) : se DIT, une panne de lecture ne se devine pas
     relectures = '' if rv is None else f' · relectures de pages vides : {rv}'
-    return 0, f'OK {maintenant()} relevé {mode} {asof} · prochaines.json {p["calcule_le"]} {file} · fiabilité : {fid}{relectures}{quota}{filet}{rep}'
+    # .github#741 : le coût en appels REST du relevé se lit dans la ligne OK. Relevé sauté : le journal date d'un tour précédent, on n'y lit rien.
+    try: appels = '' if sauter else economie.ligne_appels(open(D + '.refresh-fetch.log', encoding='utf-8', errors='replace').read())
+    except OSError: appels = ''
+    appels = f' · lecture GitHub : {appels}' if appels else ''
+    return 0, f'OK {maintenant()} relevé {mode} {asof}{appels} · prochaines.json {p["calcule_le"]} {file} · fiabilité : {fid}{relectures}{quota}{filet}{rep}'
 
 # Drive absent (22/10/2026, .github#529) : le lecteur G: n'était plus monté de 18:31Z à 19:20Z ; le tour écrivait « OK » dans son état local puis
 # plantait au dépôt (FileNotFoundError), et la page est restée 56 min sur le relevé de 18:25Z sans que rien ne le dise.
