@@ -19,6 +19,12 @@ export const DEPOTS = ['.github', 'app-template', 'batchchef-', 'CarAI', 'DriveA
 const HEURE = 3_600_000;
 const JOUR = 24 * HEURE;
 const FUSEAU = 'America/Toronto';
+// Première livraison de la mission .github#703 (phase 4) : #706 « Acceptée » le 2026-10-28 21:07:40Z. Le cumul par auteur
+// part de là. La lecture des issues ne remonte pas au-delà de CUMUL_MAX_JOURS : passé ce délai le cumul glisse et le
+// rapport le dit (« lecture limitée »), il ne présente jamais un total tronqué comme complet.
+export const CUMUL_DEPUIS = Date.parse('2026-10-28T21:07:40Z');
+export const CUMUL_MAX_JOURS = 42;
+export const AUTEURS = ['fil', 'Jules', 'Copilot'];
 
 // ---------- utilitaires purs ----------
 
@@ -41,6 +47,35 @@ export function duree(ms) {
 const jourQuebec = (date) => new Intl.DateTimeFormat('sv-SE', { timeZone: FUSEAU }).format(date);
 const temps = (iso) => new Date(iso).getTime();
 const etiquette = (o, nom) => o.etiquettes.includes(nom);
+
+/**
+ * Qui a fait une tâche acceptée : 'Jules', 'Copilot', 'fil' (fil Claude, ses PR portent le jeton de Marc) ou null.
+ * Signaux, du plus direct au moins direct : étiquette `jules`, assigné ou auteur de la PR citée dans « Acceptée »
+ * (`jules`, `copilot`, avec ou sans « [bot] »). Sans aucun de ces signaux (pas de PR citée, PR illisible) l'auteur est
+ * INCONNU (null) : on ne le range pas dans « fil » par défaut.
+ */
+export function executantDe({ etiquettes = [], assignes = [], auteurPr = null }) {
+  const signaux = [...assignes, auteurPr].filter(Boolean).map((x) => x.toLowerCase());
+  if (etiquettes.includes('jules') || signaux.some((x) => x.includes('jules'))) return 'Jules';
+  if (signaux.some((x) => x.includes('copilot'))) return 'Copilot';
+  return auteurPr ? 'fil' : null;
+}
+
+/** Répartition des tâches par auteur : effectifs et parts entières en % (null si aucune tâche). */
+export function repartition(taches) {
+  const n = { fil: 0, Jules: 0, Copilot: 0, inconnu: 0 };
+  for (const t of taches) n[executantDe(t) ?? 'inconnu'] += 1;
+  const total = taches.length;
+  const part = (x) => (total ? Math.round((100 * x) / total) : null);
+  return { total, ...n, parts: { fil: part(n.fil), Jules: part(n.Jules), Copilot: part(n.Copilot), inconnu: part(n.inconnu) } };
+}
+
+const texteRepartition = (r) => {
+  if (r.total === 0) return 'aucune';
+  const ligne = [['fil Claude', 'fil'], ['Jules', 'Jules'], ['Copilot', 'Copilot']].map(([nom, k]) => `${nom} ${r[k]} (${r.parts[k]} %)`);
+  if (r.inconnu) ligne.push(`auteur non établi ${r.inconnu} (${r.parts.inconnu} %)`);
+  return ligne.join(', ');
+};
 
 export const titreRapport = (debutFenetre) => `Rapport de la semaine du ${jourQuebec(debutFenetre)}`;
 
@@ -74,7 +109,7 @@ export function cycleRouge(runs) {
 
 const REF_TACHE = /T[âa]che\s*:\s*(?:MoKarade\/[\w.-]+)?#(\d+)|\bCloses #(\d+)/i;
 
-export function calculer({ depots, maintenant }) {
+export function calculer({ depots, maintenant, cumulDepuis = CUMUL_DEPUIS }) {
   const debut = maintenant - 7 * JOUR;
   const dansFenetre = (iso) => iso && temps(iso) >= debut && temps(iso) <= maintenant;
   const lisibles = depots.filter((d) => d.lisible);
@@ -85,7 +120,12 @@ export function calculer({ depots, maintenant }) {
   const delaisAcceptation = acceptees.map((t) => temps(t.fermeLe) - temps(t.creeLe));
   const delaisPreuve = acceptees.filter((t) => t.acceptee.prFusionLe).map((t) => temps(t.acceptee.le) - temps(t.acceptee.prFusionLe));
   const parDepot = Object.fromEntries(lisibles.map((d) => [d.nom, acceptees.filter((t) => t.depot === d.nom).length]));
-  const parExecutant = { fil: acceptees.filter((t) => !etiquette(t, 'jules')).length, Jules: acceptees.filter((t) => etiquette(t, 'jules')).length };
+  const parExecutant = repartition(acceptees);
+  // Cumul depuis la première livraison de la mission .github#703, sur la même population que la semaine.
+  const debutCumul = Math.max(cumulDepuis, maintenant - CUMUL_MAX_JOURS * JOUR);
+  const cumulees = [];
+  for (const d of lisibles) for (const t of d.taches) if (t.acceptee && temps(t.fermeLe) >= debutCumul && temps(t.fermeLe) <= maintenant) cumulees.push(t);
+  const cumul = { depuis: debutCumul, limite: debutCumul > cumulDepuis, ...repartition(cumulees) };
 
   // Qualité
   const retours = [];
@@ -132,6 +172,7 @@ export function calculer({ depots, maintenant }) {
       acceptees: acceptees.length,
       parDepot,
       parExecutant,
+      cumul,
       acceptation: { mediane: mediane(delaisAcceptation), max: delaisAcceptation.length ? Math.max(...delaisAcceptation) : null },
       preuve: {
         n: delaisPreuve.length,
@@ -166,7 +207,9 @@ export function rendre(r, { premierLundi = false, maintenant = r.fenetre.fin } =
 
   const v = r.vitesse;
   l.push('## Vitesse', '');
-  l.push(`- Tâches acceptées : **${v.acceptees}** (fil : ${v.parExecutant.fil}, Jules : ${v.parExecutant.Jules}).`);
+  l.push(`- Tâches acceptées : **${v.acceptees}** — ${texteRepartition(v.parExecutant)}.`);
+  l.push(`- Cumul depuis le ${jourQuebec(v.cumul.depuis)} (première livraison de la mission .github#703)${v.cumul.limite ? `, lecture limitée aux ${CUMUL_MAX_JOURS} derniers jours` : ''} : **${v.cumul.total}** — ${texteRepartition(v.cumul)}.`);
+  l.push('- Quota Claude consommé : non mesuré (aucune source de lecture, rien n\'est estimé).');
   const depots = Object.entries(v.parDepot).filter(([, n]) => n > 0).map(([d, n]) => `${d} ${n}`);
   l.push(`- Par dépôt : ${depots.length ? depots.join(', ') : 'aucune'}.`);
   l.push(`- Création → acceptation : médiane ${duree(v.acceptation.mediane)}, maximum ${duree(v.acceptation.max)}.`);
@@ -233,7 +276,7 @@ export async function lire(gh, chemin, cle) {
 
 const noms = (o) => (o.labels ?? []).map((x) => (typeof x === 'string' ? x : x.name));
 
-export async function collecterDepot(gh, depot, maintenant, conformiteDe) {
+export async function collecterDepot(gh, depot, maintenant, conformiteDe, cumulDepuis = CUMUL_DEPUIS) {
   const R = `repos/MoKarade/${depot}`;
   try {
     await gh(['api', R, '--jq', '.full_name']);
@@ -242,26 +285,30 @@ export async function collecterDepot(gh, depot, maintenant, conformiteDe) {
     if (/HTTP 404|Not Found/i.test(`${err.stderr ?? ''} ${err.message}`)) return { nom: depot, lisible: false };
     throw err;
   }
-  const depuis = new Date(maintenant - 30 * JOUR).toISOString();
+  const depuis = new Date(maintenant - Math.max(30, CUMUL_MAX_JOURS) * JOUR).toISOString();
   const debut = maintenant - 7 * JOUR;
   const recents = (await lire(gh, `${R}/issues?state=all&since=${depuis}&per_page=100`)).filter((i) => !i.pull_request);
   const ouvertes = (await lire(gh, `${R}/issues?state=open&per_page=100`)).filter((i) => !i.pull_request);
+  const debutCumul = Math.max(cumulDepuis, maintenant - CUMUL_MAX_JOURS * JOUR);
   const norm = (i) => ({ numero: i.number, titre: i.title, etiquettes: noms(i), creeLe: i.created_at, majLe: i.updated_at, fermeLe: i.closed_at, parent: Boolean(i.parent_issue_url), corps: i.body ?? '' });
 
   const taches = [];
-  for (const i of recents.filter((x) => x.state === 'closed' && x.state_reason === 'completed' && noms(x).includes('niveau:tâche') && temps(x.closed_at) >= debut)) {
+  for (const i of recents.filter((x) => x.state === 'closed' && x.state_reason === 'completed' && noms(x).includes('niveau:tâche') && temps(x.closed_at) >= Math.min(debut, debutCumul))) {
     const commentaires = await lire(gh, `${R}/issues/${i.number}/comments?per_page=100`);
     const accept = commentaires.find((c) => /^\*\*Acceptée\*\*/.test(c.body ?? ''));
     let prFusionLe = null;
+    let auteurPr = null;
     const pr = /PR #(\d+)/.exec(accept?.body ?? '');
     if (pr) {
       try {
-        prFusionLe = JSON.parse(await gh(['api', `${R}/pulls/${pr[1]}`, '--jq', '{m: .merged_at}'])).m;
+        const lu = JSON.parse(await gh(['api', `${R}/pulls/${pr[1]}`, '--jq', '{m: .merged_at, a: .user.login}']));
+        prFusionLe = lu.m;
+        auteurPr = lu.a ?? null;
       } catch {
         prFusionLe = null;
       }
     }
-    taches.push({ ...norm(i), acceptee: accept ? { le: accept.created_at, prFusionLe } : null });
+    taches.push({ ...norm(i), assignes: (i.assignees ?? []).map((a) => a.login), auteurPr, acceptee: accept ? { le: accept.created_at, prFusionLe } : null });
   }
 
   const prsBrutes = (await lire(gh, `${R}/pulls?state=all&sort=updated&direction=desc&per_page=40`)).filter((p) => temps(p.updated_at) >= maintenant - 30 * JOUR);
