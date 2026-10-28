@@ -77,6 +77,16 @@ class Releve(unittest.TestCase):
         self.assertEqual(r['en_ligne']['a#5']['pret_le'], '2000-01-01T10:20:01Z')
         self.assertEqual((r['restant'], r['erreurs'], r['couvert_depuis']), (0, [], {'a': '2000-01-01T10:20:00Z'}))
 
+    def test_en_parallele_meme_resultat_que_en_serie(self):
+        prs = [{'r': 'a', 'n': i, 'm': f'2000-01-{i:02d}T10:10:00Z', 'ms': f'abc123{i}'} for i in range(1, 9)]
+        evenements = {str(i): [ev('ready_for_review', f'2000-01-{i:02d}T10:00:00Z')] for i in range(1, 9)}
+        deploiements = {'Depot-A': [dep(i, f'abc123{i}', f'2000-01-{i:02d}T10:20:00Z') for i in range(1, 9)]}
+        statuts = {str(i): [st('success', f'2000-01-{i:02d}T10:20:01Z')] for i in range(1, 9)}
+        serie = E.releve(prs, self.DEPOTS, {}, self.faux(evenements, deploiements, statuts), 'T', paralleles=1)
+        para = E.releve(prs, self.DEPOTS, {}, self.faux(evenements, deploiements, statuts), 'T', paralleles=5)
+        self.assertEqual(serie, para)
+        self.assertEqual((len(para['prets']), len(para['en_ligne'])), (8, 8))
+
     def test_resultats_memorises_aucune_relecture(self):
         cache = {}
         pr = [{'r': 'a', 'n': 5, 'm': '2000-01-01T10:10:00Z', 'ms': 'abc1234'}]
