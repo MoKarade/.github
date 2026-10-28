@@ -38,6 +38,12 @@ const PREFIXE_COMMIT = /^(?:(?:feat|fix|docs|refactor|chore|test|ci|perf|build|s
 const FUSION = /^Merge (?:pull request|branch)\b/;
 const MACHINE_GITHUB = /ubuntu-|macos-|windows-/;
 
+// Dépôts PRIVÉS PAR DÉCISION de Marc (écrite, datée) : être public et tourner sur les machines GitHub y est sans objet
+// (le robot de tests du PC sert la CI). Les autres sous-contrôles des lignes 1 et 2 (branche protégée, timeouts, pas de
+// `paths:`) restent vérifiés. Ajouter un dépôt ici exige la décision de Marc, jamais une déduction.
+export const PRIVES_VOULUS = { 'mokarade/driveai': 'privé par décision de Marc (documents sensibles)' };
+const priveVoulu = (nom) => PRIVES_VOULUS[String(nom ?? '').toLowerCase()] ?? null;
+
 const ok = (texte) => ({ ok: true, texte });
 const ko = (texte) => ({ ok: false, texte });
 const inconnu = (texte) => ({ ok: null, texte });
@@ -159,6 +165,7 @@ export function evaluer(ctx) {
   {
     const s = [];
     if (depot?.prive === undefined || depot?.prive === null) s.push(inconnu('visibilité illisible (API)'));
+    else if (depot.prive && priveVoulu(depot.nom)) s.push(ok(`sans objet : ${priveVoulu(depot.nom)}`));
     else s.push(depot.prive ? ko('dépôt privé') : ok('dépôt public'));
     if (!protection) s.push(inconnu('protection de la branche illisible (API)'));
     else if (!protection.protegee) s.push(ko(`branche ${depot?.branche ?? 'par défaut'} non protégée`));
@@ -185,7 +192,8 @@ export function evaluer(ctx) {
       if (/^\s*pull_request\b/m.test(entete) && /^\s+paths(?:-ignore)?:/m.test(entete)) avecPaths.push(f);
     }
     if (workflows.length) {
-      s.push(horsGithub.length ? ko(`runs-on sans machine GitHub : ${[...new Set(horsGithub)].join(', ')}`) : ok('toutes les machines sont GitHub'));
+      if (depot?.prive && priveVoulu(depot.nom)) s.push(ok(`sans objet : machines du PC admises (${priveVoulu(depot.nom)})`));
+      else s.push(horsGithub.length ? ko(`runs-on sans machine GitHub : ${[...new Set(horsGithub)].join(', ')}`) : ok('toutes les machines sont GitHub'));
       s.push(sansTimeout.length ? ko(`job sans timeout-minutes : ${sansTimeout.join(', ')}`) : ok('timeout-minutes sur chaque job'));
       s.push(avecPaths.length ? ko(`paths: sur un déclencheur de PR : ${avecPaths.join(', ')}`) : ok('aucun paths: sur les PR'));
     }
