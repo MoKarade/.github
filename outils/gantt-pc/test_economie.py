@@ -26,4 +26,17 @@ class SauterLePlein(unittest.TestCase):
         self.assertFalse(economie.sauter_le_plein(False, releve('2026-10-28T20:33:00Z'), MAINT))
         self.assertFalse(economie.sauter_le_plein(False, None, MAINT))
 
+class LigneAppels(unittest.TestCase):
+    def test_derniere_ligne_comptee_du_journal(self):
+        j = "workflows en file : 3 signalé(s)\nléger : 12 appels comptés (40 en 304 gratuits sur 52), 3.1 s, 400 reprises\n"
+        self.assertEqual(economie.ligne_appels(j), 'léger : 12 appels comptés (40 en 304 gratuits sur 52), 3.1 s, 400 reprises')
+
+    def test_plusieurs_lignes_la_derniere_gagne(self):
+        j = "plein : 280 appels comptés (0 en 304 gratuits sur 280), 90 s\nléger : 9 appels comptés (1 en 304 gratuits sur 10), 2 s\n"
+        self.assertTrue(economie.ligne_appels(j).startswith('léger : 9'))
+
+    def test_absente_ou_vide_rend_vide_jamais_un_zero(self):
+        for j in ('', None, 'rien à voir\nautre ligne'):
+            self.assertEqual(economie.ligne_appels(j), '')
+
 if __name__ == '__main__': unittest.main()
