@@ -115,7 +115,10 @@ def releve(econome=False, quota_complet=True, drive=None):
     quota = ''
     # jauges Claude et coût API seules (≈ 1 appel GitHub) quand le compte est entamé : à froid, toutes les jauges coûtent ≈ 2 900 appels
     # (mesuré le 17/10, cache ETag vide), de quoi vider le jeton de Marc. La jauge Claude est celle que lit le frein de quota.
-    seule = [] if quota_complet else ['--seulement=claude,api']
+    # 28/10/2026 : la jauge Actions en fait partie, mais en mode RAPIDE (36 h, lectures conditionnelles : quelques appels, les 304 sont gratuits) ;
+    # sans elle, un compte entamé (sous 3 500) la laissait vieillir d'une heure ou plus alors que la page la montre « en direct ».
+    seule = [] if quota_complet else ['--seulement=claude,api,actions']
+    rapide = rapide or bool(seule)
     if lancer([PY, 'quota.py'] + (['--rapide'] if rapide else []) + seule, '.refresh-quota.log', 900) == 0:
         if not rapide and not seule: touche('.dernier-quota-plein')
     else: quota = ' · quota : ÉCHEC ' + queue('.refresh-quota.log', 200)

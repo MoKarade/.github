@@ -52,7 +52,14 @@ Google Drive pour ordinateur ne doit pas être en pause : sinon les fichiers res
 Python pour Windows n'a pas de base de fuseaux horaires (sans le paquet `tzdata`) : `quota.py` replie alors sur la règle d'heure
 d'Amérique du Nord, comme `build.py`. Sans ce repli, il mourait à chaque tour et le Drive n'avait pas de `quota.json` (17/10, .github#188).
 Un échec de `quota.py` s'écrit désormais dans `etat.json` (« quota : ÉCHEC … »). Sous 3 500 appels GitHub restants, seules les jauges
-Claude et coût API sont relevées (≈ 1 appel) : à froid, toutes les jauges coûtent ≈ 2 900 appels.
+Claude, coût API et Actions (en mode rapide : 36 h, lectures conditionnelles, quelques appels) sont relevées : à froid, toutes les jauges coûtent ≈ 2 900 appels.
+Avant le 28/10/2026 l'Actions n'en faisait pas partie : un compte entamé la laissait vieillir.
+
+Page Chantier à jour, données réelles (28/10/2026, demande de Marc) : `quota.json` porte UN taux USD→CAD (`taux_usd_cad` : `taux`, `date`, `source`, `releve`),
+lu par `taux_change.py` dans la série FXUSDCAD de la Banque du Canada (gratuite, relue au plus toutes les 6 h, jamais inventé : en panne, le dernier taux garde
+`perime` et `erreur`). `jauges.api.taux_hub_usd_cad` est le taux que le hub applique ; tant qu'il diffère, c'est un écart à corriger dans Hubperso (`lib/usage.ts`).
+`jauges.api.cumul_as_of` n'est PAS la date du relevé : c'est la mesure la plus ancienne parmi les apps lues par le hub (`lib/coutCumule.ts`) ; la date du passage
+est `jauges.api.releve`. Une app qui ne dépense plus garde donc légitimement une date ancienne.
 
 ## Suivre et arrêter
 
