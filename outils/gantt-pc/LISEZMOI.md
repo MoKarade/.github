@@ -68,6 +68,12 @@ annule, vert ou aucun ; nombres de contrôles ; `noms_en_file` = jobs qui attend
 recopiés de Mergify, rien deviné). Les PR de test de la file Mergify sont comptées dans `brouillons_mergify`. `deploiements` : le dernier de chaque dépôt (ou `erreur`, ou `null`).
 Une lecture en échec s'écrit `erreur`, jamais « vert » ; `incomplet` = plafond de lectures atteint (80, ou 30 au tour économe), les PR restantes sont `non_lu`. Tests : `python -X utf8 -m unittest test_prs_ouvertes.py`.
 
+Étapes (28/10/2026, tâche .github#689) : `etapes.py` écrit `etapes.json`, rangé par `build.py` dans `donnees.json` sous `etapes`, pour la durée moyenne de chaque étape de la page.
+`prets` (clé `r#n`, comme `prlog`) : dernier `ready_for_review` avant la fusion, `null` = lue et jamais brouillon, clé absente = pas encore lue. `en_ligne` : le déploiement dont le commit
+est le commit de fusion (`ms` de `prlog`), avec `sha`, `env`, `cree_le` et `pret_le` (statut `success` = en ligne) ; une fusion sans déploiement (build sauté) n'a pas d'entrée.
+`couvert_depuis` : plus ancien déploiement lu par dépôt (avant, l'absence ne prouve rien) ; `restant` : PR pas encore lues. Résultats mémorisés à vie dans `etapes-cache.json`
+(perdu : le passé se relit par paquets) ; au plus 60 lectures comptées par tour (20 au tour économe), fusions les plus récentes d'abord. Tests : `python -X utf8 -m unittest test_etapes.py`.
+
 ## Suivre et arrêter
 
 - Journal : `C:\dev\_pc-local\gantt-releve\tour.log` ; dernier résultat : `_Gantt\etat.json` dans le Drive.
