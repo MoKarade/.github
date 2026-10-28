@@ -35,8 +35,10 @@ def lire_notes(secret, requete=_requete):
     try: code, texte = requete(URL_HUB, secret)
     except (OSError, ValueError) as e: return None, f'lecture impossible ({type(e).__name__})'
     if code != 200: return None, f'{RAISONS.get(code, "réponse inattendue")} (HTTP {code})'
-    try: n = json.loads(texte).get('notesLia')
-    except (ValueError, AttributeError): return None, 'réponse illisible'
+    try: corps = json.loads(texte)
+    except ValueError: return None, 'réponse illisible'
+    if not isinstance(corps, dict) or 'notesLia' not in corps: return None, 'réponse sans notesLia'      # clé absente (hub d'une autre forme) ≠ null (« inconnu »)
+    n = corps['notesLia']
     if isinstance(n, bool) or not (n is None or (isinstance(n, int) and n >= 0)): return None, 'notesLia invalide'
     return n, ''
 
