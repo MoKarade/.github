@@ -19,7 +19,8 @@ name: Surveillance des apps
 # compare la liste des modèles Anthropic aux identifiants `claude-…` du code des apps et ouvre dans l'app une tâche
 # de migration quand un modèle plus récent existe dans une famille qu'elle utilise. Il lit ANTHROPIC_API_KEY (liste
 # des modèles, gratuite) et RELECTURE_PAT (recherche de code, lecture et ouverture des tâches dans les apps). Une
-# clé absente ou une liste illisible rend le pas rouge avec un message : jamais une tâche inventée.
+# clé absente ou une liste illisible rend le pas rouge avec un message : jamais une tâche inventée. Lancé à la main
+# avec `modeles-a-blanc`, il imprime les tâches qu'il ouvrirait sans rien écrire.
 #
 # Lancement d'essai (preuve « une panne ouvre l'issue, le retour la ferme ») : « Run workflow » avec
 # un nom et une URL de santé ; seule cette app simulée est sondée. Avec `retour-essai` (un projet Vercel d'essai),
@@ -61,6 +62,11 @@ on:
         description: 'Essai du retour en arrière : nom d’un projet Vercel d’essai, utilisé avec url-essai (vide : aucune app n’est touchée en lancement d’essai)'
         required: false
         default: ''
+      modeles-a-blanc:
+        description: 'Nouveaux modèles : imprimer les tâches de migration qui seraient ouvertes, sans rien écrire'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -122,4 +128,5 @@ jobs:
         env:
           GH_PAT: ${{ secrets.RELECTURE_PAT }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: node scripts/modeles-nouveaux.mjs
+          A_BLANC: ${{ inputs.modeles-a-blanc && '--a-blanc' || '' }}
+        run: node scripts/modeles-nouveaux.mjs $A_BLANC
