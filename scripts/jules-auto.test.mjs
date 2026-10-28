@@ -174,40 +174,40 @@ const ghFactice = ({ issue = { state: 'open', labels: [] }, ouvertes = {}, prs =
   return { gh, appels };
 };
 
-test('confierAJules pose l’étiquette jules et un commentaire, après avoir vérifié le dépôt en direct', () => {
+test('confierAJules pose l’étiquette jules et un commentaire, après avoir vérifié le dépôt en direct', async () => {
   const { gh, appels } = ghFactice();
-  const r = confierAJules({ repo: 'CarAI', n: 7 }, gh);
+  const r = await confierAJules({ repo: 'CarAI', n: 7 }, gh);
   assert.equal(r.statut, 'confiee');
   const ecritures = appels.filter(([m]) => m === 'POST');
   assert.equal(ecritures[0][1], 'repos/MoKarade/CarAI/issues/7/labels');
-  assert.deepEqual(ecritures[0][2], { 'labels[]': 'jules' });
+  assert.deepEqual(ecritures[0][2], { labels: ['jules'] });
   assert.match(ecritures[1][2].body, /faisable-jules/);
 });
 
-test('confierAJules ne fait rien si le dépôt est gelé ou l’issue écartée, et rien à blanc ; un travail en cours ne l’arrête plus', () => {
+test('confierAJules ne fait rien si le dépôt est gelé ou l’issue écartée, et rien à blanc ; un travail en cours ne l’arrête plus', async () => {
   // 23/10/2026 : Jules part même dans un dépôt occupé par un fil (seuls les fichiers déjà pris comptent)
   const occupe = ghFactice({ ouvertes: { 'en-cours': [{ number: 3 }] } });
-  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, occupe.gh).statut, 'confiee');
+  assert.equal((await confierAJules({ repo: 'CarAI', n: 7 }, occupe.gh)).statut, 'confiee');
   const gele = ghFactice();
-  assert.match(confierAJules({ repo: 'MemoryAI', n: 7 }, gele.gh).raison, /dépôt gelé/);
+  assert.match((await confierAJules({ repo: 'MemoryAI', n: 7 }, gele.gh)).raison, /dépôt gelé/);
   assert.equal(gele.appels.some(([m]) => m === 'POST'), false);
   const pr = ghFactice({ ouvertes: { 'en-cours': [{ number: 3, pull_request: {} }] } });
-  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, pr.gh).statut, 'confiee', 'une PR étiquetée n’est pas une issue de travail');
+  assert.equal((await confierAJules({ repo: 'CarAI', n: 7 }, pr.gh)).statut, 'confiee', 'une PR étiquetée n’est pas une issue de travail');
   const marc = ghFactice({ issue: { state: 'open', labels: [{ name: 'qui:marc' }] } });
-  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, marc.gh).raison, /qui:marc/);
+  assert.match((await confierAJules({ repo: 'CarAI', n: 7 }, marc.gh)).raison, /qui:marc/);
   const blanc = ghFactice();
-  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, blanc.gh, { aBlanc: true }).raison, 'à blanc');
+  assert.equal((await confierAJules({ repo: 'CarAI', n: 7 }, blanc.gh, { aBlanc: true })).raison, 'à blanc');
   assert.equal(blanc.appels.some(([m]) => m === 'POST'), false);
 });
 
-test('confierAJules attend une PR ouverte, sauf celles des robots et la boîte du Réacteur', () => {
+test('confierAJules attend une PR ouverte, sauf celles des robots et la boîte du Réacteur', async () => {
   const humaine = ghFactice({ prs: [{ number: 12, user: { login: 'MoKarade', type: 'User' } }] });
-  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, humaine.gh).raison, /PR #12 ouverte/);
+  assert.match((await confierAJules({ repo: 'CarAI', n: 7 }, humaine.gh)).raison, /PR #12 ouverte/);
   const robot = ghFactice({ prs: [{ number: 13, user: { login: 'dependabot[bot]', type: 'Bot' } }] });
-  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, robot.gh).statut, 'confiee');
+  assert.equal((await confierAJules({ repo: 'CarAI', n: 7 }, robot.gh)).statut, 'confiee');
   const boite = ghFactice({ prs: [{ number: 58, user: { login: 'MoKarade', type: 'User' } }] });
-  assert.equal(confierAJules({ repo: 'app-template', n: 7 }, boite.gh).statut, 'confiee');
-  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, ghFactice({ prs: [{ number: 58, user: { login: 'MoKarade', type: 'User' } }] }).gh).raison, /PR #58/, 'la boîte n’est exclue que dans app-template');
+  assert.equal((await confierAJules({ repo: 'app-template', n: 7 }, boite.gh)).statut, 'confiee');
+  assert.match((await confierAJules({ repo: 'CarAI', n: 7 }, ghFactice({ prs: [{ number: 58, user: { login: 'MoKarade', type: 'User' } }] }).gh)).raison, /PR #58/, 'la boîte n’est exclue que dans app-template');
 });
 
 // ---- Deux places par dépôt (décision de Marc, 21/10/2026) --------------------------------------------------------------------------------
@@ -242,56 +242,62 @@ test('choisirPourJules : la 2e place compte dans le plafond des trois Jules', ()
   assert.equal(r.choix.length, 3);
 });
 
-test('confierAJules part dans un dépôt occupé si les fichiers de l’autre travail sont disjoints, rien s’ils sont communs', () => {
+test('confierAJules part dans un dépôt occupé si les fichiers de l’autre travail sont disjoints, rien s’ils sont communs', async () => {
   const travail = (corpsIssue, extra = {}) => ({ number: 3, body: corpsIssue, ...extra });
   const issue = { state: 'open', labels: [], body: corps(7, 'carai') }; // lib/format.test.ts
   const disjoint = ghFactice({ issue, ouvertes: { 'en-cours': [travail('**Fichiers touchés** :\n- `app/page.tsx`')] } });
-  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, disjoint.gh).statut, 'confiee');
+  assert.equal((await confierAJules({ repo: 'CarAI', n: 7 }, disjoint.gh)).statut, 'confiee');
   assert.equal(disjoint.appels.some(([m]) => m === 'POST'), true);
   const commun = ghFactice({ issue, ouvertes: { 'en-cours': [travail('**Fichiers permis** :\n- `lib/format.test.ts`')] } });
-  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, commun.gh).raison, /fichiers déjà pris \(issue #3 en cours : fichier-commun:lib\/format\.test\.ts\)/);
+  assert.match((await confierAJules({ repo: 'CarAI', n: 7 }, commun.gh)).raison, /fichiers déjà pris \(issue #3 en cours : fichier-commun:lib\/format\.test\.ts\)/);
   const inconnu = ghFactice({ issue, ouvertes: { jules: [travail('sans gabarit')] } });
-  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, inconnu.gh).statut, 'confiee', 'une tâche sans fichiers déclarés ne dit rien : seule sa PR comptera');
+  assert.equal((await confierAJules({ repo: 'CarAI', n: 7 }, inconnu.gh)).statut, 'confiee', 'une tâche sans fichiers déclarés ne dit rien : seule sa PR comptera');
   assert.equal(inconnu.appels.some(([m]) => m === 'POST'), true);
 });
 
-test('confierAJules : deux travaux ne l’arrêtent pas ; une tâche et sa PR sont lues ensemble ; une PR seule est lue par ses fichiers réels', () => {
+test('confierAJules : deux travaux ne l’arrêtent pas ; une tâche et sa PR sont lues ensemble ; une PR seule est lue par ses fichiers réels', async () => {
   const issue = { state: 'open', labels: [], body: corps(7, 'carai') };
   const a = { number: 3, body: '**Fichiers touchés** :\n- `app/a.ts`' };
   const b = { number: 4, body: '**Fichiers touchés** :\n- `app/b.ts`' };
   const deux = ghFactice({ issue, ouvertes: { 'en-cours': [a], jules: [b] } });
-  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, deux.gh).statut, 'confiee');
+  assert.equal((await confierAJules({ repo: 'CarAI', n: 7 }, deux.gh)).statut, 'confiee');
   const prDeA = { number: 20, user: { login: 'MoKarade', type: 'User' }, body: 'Tâche : #3' };
   const une = ghFactice({ issue, ouvertes: { 'en-cours': [a] }, prs: [prDeA], fichiersPr: { 20: ['app/a.ts'] } });
-  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, une.gh).statut, 'confiee');
+  assert.equal((await confierAJules({ repo: 'CarAI', n: 7 }, une.gh)).statut, 'confiee');
   const prSeule = { number: 21, user: { login: 'MoKarade', type: 'User' }, body: 'sans tâche' };
   const avecPr = ghFactice({ issue, ouvertes: { 'en-cours': [a] }, prs: [prDeA, prSeule], fichiersPr: { 20: ['app/a.ts'], 21: ['lib/format.test.ts'] } });
-  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, avecPr.gh).raison, /PR #21 ouverte : fichier-commun/);
+  assert.match((await confierAJules({ repo: 'CarAI', n: 7 }, avecPr.gh)).raison, /PR #21 ouverte : fichier-commun/);
 });
 
-test('confierAJules : les fichiers RÉELS de la PR ouverte de l’autre travail comptent, déclarés ou non', () => {
+test('confierAJules : les fichiers RÉELS de la PR ouverte de l’autre travail comptent, déclarés ou non', async () => {
   const issue = { state: 'open', labels: [], body: corps(7, 'carai') }; // lib/format.test.ts
   const prDeA = { number: 20, user: { login: 'MoKarade', type: 'User' }, body: 'Tâche : #3' };
   const a = { number: 3, body: '**Fichiers touchés** :\n- `app/a.ts`' };
   const deborde = ghFactice({ issue, ouvertes: { 'en-cours': [a] }, prs: [prDeA], fichiersPr: { 20: ['app/a.ts', { filename: 'lib/neuf.ts', previous_filename: 'lib/format.test.ts' }] } });
-  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, deborde.gh).raison, /fichiers déjà pris \(PR #20 ouverte : fichier-commun:lib\/format\.test\.ts\)/, 'un renommage compte pour l’ancien chemin');
+  assert.match((await confierAJules({ repo: 'CarAI', n: 7 }, deborde.gh)).raison, /fichiers déjà pris \(PR #20 ouverte : fichier-commun:lib\/format\.test\.ts\)/, 'un renommage compte pour l’ancien chemin');
   const sage = ghFactice({ issue, ouvertes: { 'en-cours': [a] }, prs: [prDeA], fichiersPr: { 20: ['app/a.ts', 'app/a.test.ts'] } });
-  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, sage.gh).statut, 'confiee');
+  assert.equal((await confierAJules({ repo: 'CarAI', n: 7 }, sage.gh)).statut, 'confiee');
   const sansDeclaration = ghFactice({ issue, ouvertes: { 'en-cours': [{ number: 3, body: 'sans gabarit' }] }, prs: [prDeA], fichiersPr: { 20: ['app/a.ts'] } });
-  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, sansDeclaration.gh).statut, 'confiee', 'la PR dit ce que la tâche ne dit pas');
+  assert.equal((await confierAJules({ repo: 'CarAI', n: 7 }, sansDeclaration.gh)).statut, 'confiee', 'la PR dit ce que la tâche ne dit pas');
   const illisible = ghFactice({ issue, ouvertes: { 'en-cours': [{ number: 3, body: 'sans gabarit' }] }, prs: [prDeA] });
-  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, illisible.gh).raison, /fichiers-inconnus/, 'lecture impossible = inconnu = un seul');
+  assert.match((await confierAJules({ repo: 'CarAI', n: 7 }, illisible.gh)).raison, /fichiers-inconnus/, 'lecture impossible = inconnu = un seul');
   const tronquee = ghFactice({ issue, ouvertes: { 'en-cours': [{ number: 3, body: 'sans gabarit' }] }, prs: [prDeA], fichiersPr: { 20: Array.from({ length: 100 }, (_, i) => `f${i}.ts`) } });
-  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, tronquee.gh).raison, /fichiers-inconnus/, '100 fichiers : liste tronquée');
+  assert.match((await confierAJules({ repo: 'CarAI', n: 7 }, tronquee.gh)).raison, /fichiers-inconnus/, '100 fichiers : liste tronquée');
 });
 
-test('confierAJules : une PR seule (sans tâche) dont les fichiers sont lisibles laisse passer si disjoints, la garde sinon', () => {
+test('confierAJules : une PR seule (sans tâche) dont les fichiers sont lisibles laisse passer si disjoints, la garde sinon', async () => {
   const issue = { state: 'open', labels: [], body: corps(7, 'carai') };
   const prSeule = { number: 21, user: { login: 'MoKarade', type: 'User' }, body: 'sans tâche' };
   const disjointe = ghFactice({ issue, prs: [prSeule], fichiersPr: { 21: ['app/z.ts'] } });
-  assert.equal(confierAJules({ repo: 'CarAI', n: 7 }, disjointe.gh).statut, 'confiee');
+  assert.equal((await confierAJules({ repo: 'CarAI', n: 7 }, disjointe.gh)).statut, 'confiee');
   const commune = ghFactice({ issue, prs: [prSeule], fichiersPr: { 21: ['lib/format.test.ts'] } });
-  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, commune.gh).raison, /fichiers déjà pris \(PR #21 ouverte : fichier-commun:lib\/format\.test\.ts\)/);
+  assert.match((await confierAJules({ repo: 'CarAI', n: 7 }, commune.gh)).raison, /fichiers déjà pris \(PR #21 ouverte : fichier-commun:lib\/format\.test\.ts\)/);
   const inconnue = ghFactice({ issue, prs: [prSeule] });
-  assert.match(confierAJules({ repo: 'CarAI', n: 7 }, inconnue.gh).raison, /PR #21 ouverte : fichiers-inconnus/);
+  assert.match((await confierAJules({ repo: 'CarAI', n: 7 }, inconnue.gh)).raison, /PR #21 ouverte : fichiers-inconnus/);
+});
+
+test('foisConfiee compte les commentaires de confiage, ancien texte du filet du PC compris', async () => {
+  const { foisConfiee, MARQUE_CONFIEE } = await import('./jules-auto.mjs');
+  assert.equal(foisConfiee([{ body: `${MARQUE_CONFIEE} par le filet du PC (ancien).` }, { body: 'autre' }, { body: `${MARQUE_CONFIEE} par le Réacteur.` }]), 2);
+  assert.equal(foisConfiee(null), 0);
 });

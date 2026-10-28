@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Jules prend seul les tâches faisables (demande de Marc du 19/10/2026 : « full auto, mécaniquement, pour qu'il avance autant que possible
-// malgré le quota bas de Claude »). Jules ne consomme pas le quota Claude : le filet du PC (`filet-pc.mjs`) lui confie, à chaque tour, la
+// malgré le quota bas de Claude »). Jules ne consomme pas le quota Claude : le Réacteur (`reveil-reacteur.mjs`, à l'événement, depuis la tâche #704) lui confie la
 // première tâche RÉSERVÉE (étiquette `faisable-jules`, posée par qui écrit ou range la tâche : le filet ne devine pas) d'un dépôt LIBRE
 // dont le CORPS est une consigne complète au gabarit `docs/jules-gabarit-issue.md`. Aucune IA, aucun jugement : une tâche est confiable
 // ou elle ne l'est pas, et la raison s'écrit. Règles : plan du fil Jules, `commun/plans/2026-10-19_jules-automatique.md`.
@@ -27,6 +27,8 @@ export const CANDIDATES_MAX = 8;
 export const FOIS_MAX = 2;
 export const SIMULTANEES_MAX = 3;
 const BOITE = { depot: 'app-template', pr: 58 };
+// Début du commentaire posé en confiant (le filet du PC l'écrivait déjà ainsi) : sert à compter les confiages d'une tâche, SANS fichier d'état.
+export const MARQUE_CONFIEE = 'Confiée à Jules automatiquement';
 // Dépôts où Jules ne prend rien tant qu'on ne les dégèle pas (Marc, 23/10/2026 : MemoryAI est gelé). Retirer le dépôt de la liste = le dégeler.
 export const DEPOTS_GELES = new Set(['memoryai']);
 
@@ -185,9 +187,9 @@ export function choisirPourJules(prochaines, lireIssue, etat = {}) {
  * déjà pris (PR ouvertes hors robots et boîte du Réacteur, tâches en cours sans PR). Un travail en cours ne la retient pas. `gh(methode, chemin, corps)` rend l'objet JSON ou lève.
  * @returns {{ statut: 'confiee'|'sautee', raison?: string }}
  */
-export function confierAJules({ repo, n }, gh, { aBlanc = false } = {}) {
+export async function confierAJules({ repo, n }, gh, { aBlanc = false } = {}) {
   const base = `repos/${ORG}/${repo}`;
-  const issue = gh('GET', `${base}/issues/${n}`);
+  const issue = await gh('GET', `${base}/issues/${n}`);
   const etiquettes = (issue.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
   if (issue.state !== 'open') return { statut: 'sautee', raison: 'fermée' };
   if (DEPOTS_GELES.has(repo.toLowerCase())) return { statut: 'sautee', raison: 'dépôt gelé' };
@@ -196,16 +198,16 @@ export function confierAJules({ repo, n }, gh, { aBlanc = false } = {}) {
   // Les travaux du dépôt, lus EN DIRECT : issues `en-cours` ou `jules` ouvertes (avec leur corps, donc leurs fichiers) et PR ouvertes.
   const issuesTravail = new Map();
   for (const l of ETIQUETTES_QUI_OCCUPENT) {
-    const ouvertes = gh('GET', `${base}/issues?labels=${encodeURIComponent(l)}&state=open&per_page=30`);
+    const ouvertes = await gh('GET', `${base}/issues?labels=${encodeURIComponent(l)}&state=open&per_page=30`);
     for (const i of Array.isArray(ouvertes) ? ouvertes : []) if (!i.pull_request && i.number !== n) issuesTravail.set(i.number, i);
   }
-  const prs = gh('GET', `${base}/pulls?state=open&per_page=30`);
+  const prs = await gh('GET', `${base}/pulls?state=open&per_page=30`);
   const prsTravail = (Array.isArray(prs) ? prs : []).filter((p) => p.user?.type !== 'Bot' && !String(p.user?.login ?? '').endsWith('[bot]') && !(repo.toLowerCase() === BOITE.depot && p.number === BOITE.pr));
   // Jules part même si le dépôt a un travail en cours : il évite seulement les fichiers déjà touchés par une PR ouverte (déclarés ∪ réels pour la PR
   // d'une tâche en cours) ou déclarés par une tâche en cours sans PR. Fichiers de la PR illisibles ou tronqués : dans le doute, il attend.
-  const fichiersDe = (p) => {
+  const fichiersDe = async (p) => {
     try {
-      const fs = gh('GET', `${base}/pulls/${p.number}/files?per_page=100`);
+      const fs = await gh('GET', `${base}/pulls/${p.number}/files?per_page=100`);
       return Array.isArray(fs) && fs.length < 100 ? fs.flatMap((f) => [f.filename, f.previous_filename].filter(Boolean)) : null; // 100 fichiers : liste tronquée, elle ne prouve rien
     } catch { return null; }
   };
@@ -213,7 +215,7 @@ export function confierAJules({ repo, n }, gh, { aBlanc = false } = {}) {
   const tacheDe = (p) => extraireTaches(p.body, repo).filter((t) => t.depot.toLowerCase() === repo.toLowerCase()).map((t) => issuesTravail.get(t.numero)).find(Boolean);
   for (const p of prsTravail) {
     const autre = tacheDe(p);
-    const gene = raisonIncompatible(fichiersDuTravail(autre ? fichiersDeclares(autre.body) : null, fichiersDe(p)), miens);
+    const gene = raisonIncompatible(fichiersDuTravail(autre ? fichiersDeclares(autre.body) : null, await fichiersDe(p)), miens);
     if (gene) return { statut: 'sautee', raison: `fichiers déjà pris (PR #${p.number} ouverte : ${gene})` };
   }
   const prisParUnePr = new Set(prsTravail.map((p) => tacheDe(p)?.number).filter(Boolean));
@@ -224,9 +226,59 @@ export function confierAJules({ repo, n }, gh, { aBlanc = false } = {}) {
     if (gene) return { statut: 'sautee', raison: `fichiers déjà pris (issue #${t.number} en cours : ${gene})` };
   }
   if (aBlanc) return { statut: 'confiee', raison: 'à blanc' };
-  gh('POST', `${base}/issues/${n}/labels`, { 'labels[]': 'jules' });
-  gh('POST', `${base}/issues/${n}/comments`, {
-    body: `Confiée à Jules automatiquement par le filet du PC (tâche réservée \`faisable-jules\`, une place libre dans le dépôt, corps au gabarit). Le corps de l'issue est sa consigne. Claude relit la PR et pose la preuve « Acceptée ».`,
+  await gh('POST', `${base}/issues/${n}/labels`, { labels: ['jules'] });
+  await gh('POST', `${base}/issues/${n}/comments`, {
+    body: `${MARQUE_CONFIEE} par le Réacteur (tâche réservée \`faisable-jules\`, un événement du dépôt, corps au gabarit). Le corps de l'issue est sa consigne. Claude relit la PR et pose la preuve « Acceptée ».`,
   });
   return { statut: 'confiee' };
+}
+
+/** Combien de fois cette tâche a déjà été confiée : les commentaires de confiage de l'issue (pas de fichier d'état, rien ne dépend du PC). */
+export const foisConfiee = (commentaires) => (commentaires ?? []).filter((c) => String(c?.body ?? '').startsWith(MARQUE_CONFIEE)).length;
+
+/**
+ * Confie à Jules la première tâche réservée d'UN dépôt, à l'événement qui vient de se produire (tâche MoKarade/.github#704, docs/cycle-de-vie-tache.md §5 quater) :
+ * mêmes règles, mêmes plafonds, mêmes exclusions que le tour du PC (`choisirPourJules`, `confierAJules`), mais lues avec le jeton du job, jamais dans `prochaines.json`.
+ * `file` : le résultat de `fileDuDepot` (`reservees`, `julesEnCours`, `occupePar`, `incidents`). `api(methode, chemin, corps)` : chemin avec « / » initial.
+ * Les trois Jules du plafond se comptent sur toute l'organisation (recherche des issues ouvertes `jules`) ; un dépôt privé (DriveAI) que le jeton ne voit pas n'y
+ * est pas compté, et deux événements simultanés dans deux dépôts peuvent dépasser le plafond d'un : le quota de Jules (15) ne s'en ressent pas.
+ * Rend { statut: 'confiee'|'rien'|'illisible', ref?, raison?, pasPretes? } ; ne lève jamais.
+ */
+export async function confierJulesDuDepot({ api, depot, file, aBlanc = false }) {
+  const nom = String(depot).split('/').pop();
+  try {
+    const reservees = file?.reservees ?? [];
+    if (!file || file.statut === 'illisible') return { statut: 'illisible', raison: 'file du dépôt illisible' };
+    if (!reservees.length) return { statut: 'rien', raison: 'aucune tâche réservée' };
+    const propres = [...(file.julesEnCours ?? []), ...(file.occupePar ?? []).filter((o) => o.motif === 'jules')];
+    // Jules en cours dans toute l'organisation, hors ce dépôt (déjà dans `propres`) : une recherche, un appel.
+    const recherche = await api('GET', `/search/issues?q=${encodeURIComponent(`org:${ORG} is:issue is:open label:jules`)}&per_page=1`);
+    const total = Number(recherche?.total_count);
+    if (!Number.isFinite(total)) return { statut: 'illisible', raison: 'plafond des trois Jules non lisible' };
+    const ailleurs = Math.max(0, total - propres.length);
+    const lues = new Map();
+    const etat = { confies: {} };
+    for (const c of reservees.slice(0, CANDIDATES_MAX)) {
+      const i = await api('GET', `/repos/${depot}/issues/${c.n}`);
+      if (!i) continue;
+      lues.set(c.n, { state: i.state, labels: (i.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name)), body: i.body ?? '' });
+      const commentaires = await api('GET', `/repos/${depot}/issues/${c.n}/comments?per_page=100`);
+      etat.confies[c.ref] = { fois: foisConfiee(commentaires) };
+    }
+    const prochaines = {
+      depots: [
+        { repo: nom, reservees_jules: reservees, jules_en_cours: file.julesEnCours ?? [], occupe_par: file.occupePar ?? [], incidents: file.incidents ?? [] },
+        // Les Jules des autres dépôts : une entrée par tâche, sans réservée, pour que le plafond de trois les compte.
+        ...Array.from({ length: ailleurs }, (_, k) => ({ repo: `_ailleurs${k}`, jules_en_cours: [{ ref: `_${k}` }], reservees_jules: [] })),
+      ],
+    };
+    const lire = (_repo, n) => { const i = lues.get(n); if (!i) throw new Error('issue introuvable'); return i; };
+    const { choix, pasPretes } = choisirPourJules(prochaines, lire, etat);
+    if (!choix.length) return { statut: 'rien', raison: pasPretes[0] ? `${pasPretes[0].ref} ${pasPretes[0].raisons[0]}` : 'plafond, incident ou dépôt gelé', pasPretes };
+    const gh = (m, chemin, corps) => api(m, `/${chemin}`, corps);
+    const r = await confierAJules({ repo: nom, n: choix[0].n }, gh, { aBlanc });
+    return r.statut === 'confiee' ? { statut: 'confiee', ref: choix[0].ref, n: choix[0].n, aBlanc } : { statut: 'rien', raison: `${choix[0].ref} ${r.raison}`, pasPretes };
+  } catch (e) {
+    return { statut: 'illisible', raison: String(e.message).slice(0, 120) };
+  }
 }
