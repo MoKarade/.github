@@ -130,6 +130,10 @@ def releve(econome=False, quota_complet=True, drive=None):
     # Lectures à ETag, au plus 80 comptées (30 au tour économe, PR les plus récentes d'abord) ; un échec se DIT et ne bloque rien.
     if lancer([PY, 'prs_ouvertes.py'] + (['--plafond=30'] if econome else []), '.refresh-prs.log', 300) == 0: quota += ' · ' + (queue('.refresh-prs.log', 160) or 'PR ouvertes : sans sortie')
     else: quota += ' · PR ouvertes : ÉCHEC ' + queue('.refresh-prs.log', 200)
+    # 1 quater. étapes (etapes.py, .github#689) : heure « PR prête » et heure « en ligne » des PR fusionnées, mémorisées à vie ; rattrapage du passé par paquets
+    # (60 lectures comptées au plus, 20 au tour économe) ; un échec se DIT et ne bloque rien.
+    if lancer([PY, 'etapes.py'] + (['--plafond=20'] if econome else []), '.refresh-etapes.log', 300) == 0: quota += ' · ' + (queue('.refresh-etapes.log', 160) or 'Étapes : sans sortie')
+    else: quota += ' · Étapes : ÉCHEC ' + queue('.refresh-etapes.log', 200)
     # 2. file du script + données de la page
     if lancer([PY, 'build.py'], '.refresh-build.log', 600) != 0: return 1, f'ÉCHEC {maintenant()} build.py : {queue(".refresh-build.log")}'
     asof = lire('backlog.json')['asof']

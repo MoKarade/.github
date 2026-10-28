@@ -208,10 +208,10 @@ LIEN = {}
 PRLOG = []
 for repo, key, name in REPOS:
     ouvertes, fermees, fus, _, _ = LISTES[repo]
-    # au, b : auteur et branche de la PR. Jules ouvre ses PR au nom de Marc, et ni l'auteur, ni la branche, ni l'étiquette `jules` de la tâche ne le prouvent
+    # ms : 7 premiers caractères du commit de fusion, la clé pour retrouver son déploiement (etapes.py, .github#689). au, b : auteur et branche de la PR. Jules ouvre ses PR au nom de Marc, et ni l'auteur, ni la branche, ni l'étiquette `jules` de la tâche ne le prouvent
     # (Hubperso#195 : branche claude/, PR de Jules). j = 1 : critère du fil Jules (21/10/2026, jules/2026-10-21_pr-de-jules-30-jours.md) : le corps cite
     # jules.google.com/task/, ou la PR porte l'étiquette `par-jules` (posée là où le pied de page a été effacé, CarAI#24). `b` dit seulement « fil Claude »
-    nouveaux = [{'r': key, 'n': p['number'], 'c': p['created_at'], 'm': p['merged_at'], 'au': (p.get('user') or {}).get('login'), 'b': (p.get('head') or {}).get('ref'),
+    nouveaux = [{'r': key, 'n': p['number'], 'c': p['created_at'], 'm': p['merged_at'], 'ms': (p.get('merge_commit_sha') or '')[:7], 'au': (p.get('user') or {}).get('login'), 'b': (p.get('head') or {}).get('ref'),
                  'k': 'tache' if liens(p.get('body'), repo) else 'robot' if (p.get('user') or {}).get('type') == 'Bot' else 'autre',
                  **({'j': 1} if par_jules(p) else {})} for p in fus]
     if LEGER:
