@@ -27,6 +27,7 @@ CHEMIN_DEFAUT = r'C:\dev\_pc-local\recus-gmail.json'
 INTERVALLE_H = 7 * 24
 REESSAI_H = 6
 JOURS_PREMIERE, JOURS_ENSUITE = 60, 21      # recouvrement : un courriel arrivé tard n'échappe pas à la lecture suivante ; dédoublonné par id
+VERSION = 2          # change quand la lecture des montants change : le fichier d'une version plus ancienne est relu en entier au prochain tour
 MAX_PAGES, MAX_MESSAGES, MAX_GARDES = 3, 150, 200
 
 # (mot cherché dans l'expéditeur + l'objet, nom rangé) — le premier qui correspond gagne
@@ -216,8 +217,8 @@ def _heures(depuis: str | None, maintenant: str) -> float | None:
 
 
 def a_lire(etat: dict | None, maintenant: str) -> bool:
-    """Première fois ; ou dernier essai en échec depuis 6 h ; ou dernière lecture réussie depuis 7 jours."""
-    if not etat:
+    """Première fois ; ou fichier d'une ancienne VERSION ; ou dernier essai en échec depuis 6 h ; ou dernière lecture réussie depuis 7 jours."""
+    if not etat or etat.get('v') != VERSION:
         return True
     if etat.get('erreur'):
         h = _heures(etat.get('tentative'), maintenant)
@@ -244,14 +245,14 @@ def passer(maintenant: str, p: str | None = None, chemin_c: str | None = None, c
             return ''
         try:
             acces = gmail_auth.jeton_d_acces(chemin_c, chemin_j, requete, deproteger, proteger)
-            recus = lire_messages(acces, JOURS_ENSUITE if etat and etat.get('lu_le') else JOURS_PREMIERE, requete)
+            recus = lire_messages(acces, JOURS_ENSUITE if etat and etat.get('lu_le') and etat.get('v') == VERSION else JOURS_PREMIERE, requete)
         except ErreurGmail as e:
             if e.code in ('client_absent', 'jeton_absent'):
                 return ''                                            # pas encore autorisé : rien à dire à chaque tour
-            ecrire_etat({**(etat or {}), 'v': 1, 'tentative': maintenant, 'erreur': e.code, 'recus': (etat or {}).get('recus', [])}, p)
+            ecrire_etat({**(etat or {}), 'v': VERSION, 'tentative': maintenant, 'erreur': e.code, 'recus': (etat or {}).get('recus', [])}, p)
             return 'Gmail : ' + ('autorisation à refaire (geste de Marc)' if e.code == 'reautoriser' else f'échec ({e.code})')
         liste, neufs = fusionner((etat or {}).get('recus', []), recus)
-        ecrire_etat({'v': 1, 'lu_le': maintenant, 'tentative': maintenant, 'erreur': None, 'recus': liste}, p)
+        ecrire_etat({'v': VERSION, 'lu_le': maintenant, 'tentative': maintenant, 'erreur': None, 'recus': liste}, p)
         return f'Gmail : {len(recus)} reçu(s) lu(s), {neufs} nouveau(x)'
     except Exception as e:                                           # jamais bloquer le tour ; se DIT
         return f'Gmail : ÉCHEC {type(e).__name__}'

@@ -135,10 +135,11 @@ class FormatsDesFournisseurs(unittest.TestCase):
 class Cadence(unittest.TestCase):
     def test_premiere_fois_sept_jours_et_reessai(self):
         self.assertTrue(R.a_lire(None, MAINTENANT))
-        self.assertFalse(R.a_lire({'lu_le': '2000-01-10T12:00:00Z', 'recus': []}, MAINTENANT))
-        self.assertTrue(R.a_lire({'lu_le': '2000-01-08T11:00:00Z', 'recus': []}, MAINTENANT))
-        self.assertFalse(R.a_lire({'lu_le': '2000-01-01T00:00:00Z', 'erreur': 'reseau', 'tentative': '2000-01-15T09:00:00Z', 'recus': []}, MAINTENANT))
-        self.assertTrue(R.a_lire({'lu_le': '2000-01-01T00:00:00Z', 'erreur': 'reseau', 'tentative': '2000-01-15T05:00:00Z', 'recus': []}, MAINTENANT))
+        self.assertTrue(R.a_lire({'v': R.VERSION - 1, 'lu_le': '2000-01-15T11:00:00Z', 'recus': []}, MAINTENANT), 'ancienne version : relue tout de suite')
+        self.assertFalse(R.a_lire({'v': R.VERSION, 'lu_le': '2000-01-10T12:00:00Z', 'recus': []}, MAINTENANT))
+        self.assertTrue(R.a_lire({'v': R.VERSION, 'lu_le': '2000-01-08T11:00:00Z', 'recus': []}, MAINTENANT))
+        self.assertFalse(R.a_lire({'v': R.VERSION, 'lu_le': '2000-01-01T00:00:00Z', 'erreur': 'reseau', 'tentative': '2000-01-15T09:00:00Z', 'recus': []}, MAINTENANT))
+        self.assertTrue(R.a_lire({'v': R.VERSION, 'lu_le': '2000-01-01T00:00:00Z', 'erreur': 'reseau', 'tentative': '2000-01-15T05:00:00Z', 'recus': []}, MAINTENANT))
 
     def test_fusion_dedoublonne_trie_et_compte_les_neufs(self):
         anciens = [{'id': 'a', 'date': '2000-01-01'}, {'id': 'b', 'date': '2000-01-05'}]
