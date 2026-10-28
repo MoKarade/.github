@@ -202,3 +202,26 @@ test('collecterDepot : dépôt privé illisible ; dépôt lisible normalisé (is
   assert.equal(d.prs[0].runs[0].nom, 'CI');
   assert.equal(d.conformite.vert, 1);
 });
+
+test('gestes de Marc ouverts depuis plus de 7 jours : listés avec leur raison, « raison non écrite » si elle manque', () => {
+  const r = calculer({
+    maintenant: MAINTENANT,
+    depots: [
+      depotVide('a', {
+        ouvertes: [
+          ouverte(1, ['niveau:tâche', 'qui:marc'], { creeLe: il_y_a(9 * J), corps: 'Geste : ouvrir la page\nPourquoi lui seul : c\'est son compte' }),
+          ouverte(2, ['niveau:tâche', 'qui:marc'], { creeLe: il_y_a(8 * J), corps: 'Geste : ouvrir la page', commentaires: ['Pourquoi lui seul : décision d\'argent'] }),
+          ouverte(3, ['niveau:tâche', 'qui:marc'], { creeLe: il_y_a(10 * J), corps: 'Avant : x' }),
+          ouverte(4, ['niveau:tâche', 'qui:marc'], { creeLe: il_y_a(2 * J) }),
+          ouverte(5, ['niveau:tâche'], { creeLe: il_y_a(30 * J) }),
+        ],
+      }),
+    ],
+  });
+  assert.deepEqual(r.backlog.gestes.map((g) => g.numero), [1, 2, 3, 4]);
+  assert.deepEqual(r.backlog.gestesAnciens.map((g) => [g.numero, g.raison]), [[1, 'c\'est son compte'], [2, 'décision d\'argent'], [3, null]]);
+  const texte = rendre(r);
+  assert.match(texte, /Gestes de Marc ouverts depuis plus de 7 jours : \*\*3\*\*/);
+  assert.match(texte, /a#1 \(.*\) : c'est son compte/);
+  assert.match(texte, /a#3 \(.*\) : raison non écrite/);
+});
