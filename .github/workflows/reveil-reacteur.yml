@@ -42,7 +42,7 @@ on:
         type: string
         default: '"ubuntu-latest"'
       type:
-        description: 'pr_fusionnee | pr_ouverte | tache_fermee | ci_rouge | garde_fou_rouge | filet'
+        description: 'pr_fusionnee | pr_ouverte | tache_fermee | tache_ouverte | tache_reservee | deploiement | commentaire | fin_de_cron | note_lia | ci_rouge | garde_fou_rouge | filet'
         type: string
         required: true
       depot:
@@ -66,7 +66,7 @@ on:
         type: string
         default: ''
       sha:
-        description: 'Empreinte du commit de la CI rouge.'
+        description: 'Empreinte du commit de la CI rouge ou du déploiement réussi.'
         type: string
         default: ''
       run:
@@ -81,6 +81,10 @@ on:
         description: 'Branche par défaut du dépôt appelant.'
         type: string
         default: main
+      signal:
+        description: 'Identifiant envoyé par une app (note LIA, fin de cron) ; le script ne garde que lettres, chiffres, point, tiret, souligné.'
+        type: string
+        default: ''
       forcer:
         description: 'true : le filet reposte le réveil même si le même signal est déjà sur la boîte depuis moins de 6 h (lancement manuel, essais).'
         type: string
@@ -143,6 +147,7 @@ jobs:
           REVEIL_BRANCHE_RUN: ${{ inputs.branche-run }}
           REVEIL_BRANCHE_DEFAUT: ${{ inputs.branche-defaut }}
           REVEIL_FORCER: ${{ inputs.forcer }}
+          REVEIL_SIGNAL: ${{ inputs.signal }}
           REVEIL_DEPLOIEMENT: ${{ inputs.deploiement }}
           REVEIL_WORKFLOWS: ${{ inputs.workflows-deploiement }}
         run: node .reveil/scripts/reveil-reacteur.mjs
