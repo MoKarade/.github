@@ -35,7 +35,7 @@ def resume(echantillons):
 
 
 def restant_core():
-    out = subprocess.run(['gh', 'api', 'rate_limit', '--jq', '.resources.core | [.remaining, .reset] | @tsv'], capture_output=True, text=True, timeout=30)
+    out = subprocess.run(['gh', 'api', 'rate_limit', '--jq', '.resources.core | [.remaining, .reset] | @tsv'], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30)
     if out.returncode != 0: raise RuntimeError(f'gh api rate_limit a échoué : {(out.stderr or out.stdout).strip()[:200]}')
     r, reset = out.stdout.split()
     return int(r), int(reset)
@@ -46,11 +46,11 @@ def processus():
     try:
         if os.name == 'nt':
             filtre = ' -or '.join(f"$_.Name -like '{n}*'" for n in RACINE_PROCESSUS)
-            ps = f"Get-CimInstance Win32_Process | Where-Object {{ {filtre} }} | ForEach-Object {{ [pscustomobject]@{{ nom = $_.Name; cmd = [string]$_.CommandLine }} }} | ConvertTo-Json -Compress"
-            out = subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', ps], capture_output=True, text=True, timeout=30, creationflags=0x08000000)
+            ps = f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process | Where-Object {{ {filtre} }} | ForEach-Object {{ [pscustomobject]@{{ nom = $_.Name; cmd = [string]$_.CommandLine }} }} | ConvertTo-Json -Compress"
+            out = subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', ps], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30, creationflags=0x08000000)
             brut = json.loads(out.stdout or '[]')
         else:
-            out = subprocess.run(['ps', '-eo', 'comm=,args='], capture_output=True, text=True, timeout=30)
+            out = subprocess.run(['ps', '-eo', 'comm=,args='], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30)
             brut = [{'nom': l.split(None, 1)[0], 'cmd': l.split(None, 1)[1] if len(l.split(None, 1)) > 1 else ''} for l in out.stdout.splitlines() if l.strip()]
     except (OSError, subprocess.SubprocessError, ValueError):
         return []

@@ -42,4 +42,17 @@ class Processus(unittest.TestCase):
         self.assertTrue(all(len(p['cmd']) <= sonde_rest.LONGUEUR_COMMANDE for p in sonde_rest.processus()))
         self.assertFalse(any('sonde_rest' in p['cmd'] for p in sonde_rest.processus()))
 
+class Encodage(unittest.TestCase):
+    def test_tout_appel_systeme_force_utf8_et_remplace_les_octets_invalides(self):
+        # cp1252 (Windows) plante sur l'octet 0x90 d'une ligne de commande (28/10/2026) : jamais l'encodage du système
+        import subprocess, unittest.mock as m
+        appels = []
+        def faux(cmd, **kw):
+            appels.append(kw)
+            return subprocess.CompletedProcess(cmd, 0, stdout='4000\t1\n' if cmd[0] == 'gh' else '[]', stderr='')
+        with m.patch.object(sonde_rest.subprocess, 'run', faux):
+            sonde_rest.restant_core(); sonde_rest.processus()
+        self.assertTrue(len(appels) >= 2)
+        for kw in appels: self.assertEqual((kw.get('encoding'), kw.get('errors')), ('utf-8', 'replace'))
+
 if __name__ == '__main__': unittest.main()
