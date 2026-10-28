@@ -146,11 +146,18 @@ class Releve(unittest.TestCase):
     def test_plafond_marque_non_lu_les_pr_les_plus_anciennes(self):
         n = {'v': 0}
         def compter(): n['v'] += 5; return n['v']
-        r = P.releve(['a'], self.faux([pr(i) for i in (1, 2, 3, 4)], runs=[run('t')]), 'T', compter, plafond=12)
+        r = P.releve(['a'], self.faux([pr(i) for i in (1, 2, 3, 4)], runs=[run('t')]), 'T', compter, plafond=12, paralleles=1)
         self.assertTrue(r['incomplet'])
         non_lus = [x['n'] for x in r['prs'] if x['ci']['etat'] == 'non_lu']
         lus = [x['n'] for x in r['prs'] if x['ci']['etat'] != 'non_lu']
         self.assertEqual((sorted(lus), sorted(non_lus)), ([3, 4], [1, 2]))     # modifiées le plus récemment = numéros 4 et 3
+
+    def test_en_parallele_meme_resultat_que_en_serie(self):
+        prs = [pr(i, draft=i % 2 == 0) for i in range(1, 9)]
+        serie = P.releve(['b', 'a'], self.faux(prs, runs=[run('t')]), 'T', paralleles=1)
+        para = P.releve(['b', 'a'], self.faux(prs, runs=[run('t')]), 'T', paralleles=5)
+        self.assertEqual(serie, para)
+        self.assertEqual(len(para['prs']), 16)
 
     def test_ordre_par_depot_puis_numero(self):
         r = P.releve(['b', 'a'], self.faux([pr(3), pr(1)], runs=[]), 'T')
