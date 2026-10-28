@@ -915,14 +915,15 @@ import { BOITES, BOITES_DIRECTES, NUMERO_BOITE, TYPES_POUR_LE_FIL, boitesDuRevei
 
 test('boitesDuReveil : la #58 puis la boîte du dépôt ; la CI rouge et le filet restent au Coordinateur ; un dépôt direct ne passe plus par la #58', () => {
   const jobai = 'MoKarade/JobAI';
-  assert.deepEqual(boitesDuReveil({ evt: { type: 'tache_fermee', depot: jobai } }), [NUMERO_BOITE, BOITES[jobai]]);
+  assert.deepEqual(boitesDuReveil({ evt: { type: 'tache_fermee', depot: jobai }, directes: new Set() }), [NUMERO_BOITE, BOITES[jobai]]);
   assert.deepEqual(boitesDuReveil({ evt: { type: 'ci_rouge', depot: jobai } }), [NUMERO_BOITE]);
   assert.deepEqual(boitesDuReveil({ evt: { type: 'filet', depot: jobai } }), [NUMERO_BOITE]);
   assert.deepEqual(boitesDuReveil({ evt: { type: 'note_lia', depot: jobai } }), [NUMERO_BOITE]);
   assert.deepEqual(boitesDuReveil({ evt: { type: 'tache_ouverte', depot: 'MoKarade/inconnu' } }), [NUMERO_BOITE]);
   assert.deepEqual(boitesDuReveil({ evt: { type: 'pr_fusionnee', depot: jobai }, directes: new Set([jobai]) }), [BOITES[jobai]]);
-  assert.deepEqual([...BOITES_DIRECTES], ['MoKarade/Hubperso', 'MoKarade/MemoryAI', 'MoKarade/DriveAI', 'MoKarade/FinanceAI', 'MoKarade/batchchef-'], 'un dépôt direct seulement une fois son fil confirmé réveillé par sa boîte');
+  assert.deepEqual([...BOITES_DIRECTES], ['MoKarade/Hubperso', 'MoKarade/MemoryAI', 'MoKarade/DriveAI', 'MoKarade/FinanceAI', 'MoKarade/batchchef-', 'MoKarade/JobAI', 'MoKarade/CarAI'], 'un dépôt direct seulement une fois son fil confirmé réveillé par sa boîte');
   assert.deepEqual(boitesDuReveil({ evt: { type: 'pr_fusionnee', depot: 'MoKarade/Hubperso' } }), [BOITES['MoKarade/Hubperso']]);
+  assert.deepEqual(boitesDuReveil({ evt: { type: 'pr_fusionnee', depot: 'MoKarade/lia-ui' } }), [NUMERO_BOITE, BOITES['MoKarade/lia-ui']], 'lia-ui pas encore confirmé');
   assert.ok(TYPES_POUR_LE_FIL.has('pr_fusionnee') && !TYPES_POUR_LE_FIL.has('ci_rouge'));
   assert.equal(new Set(Object.values(BOITES)).size, Object.keys(BOITES).length, 'une boîte par dépôt, jamais partagée');
   assert.ok(!Object.values(BOITES).includes(NUMERO_BOITE));
@@ -931,7 +932,7 @@ test('boitesDuReveil : la #58 puis la boîte du dépôt ; la CI rouge et le file
 test('traiter : tâche fermée chez JobAI réveille la #58 SANS entrée neuve, puis la boîte de JobAI avec `boite`', async () => {
   const { api, ecritures } = faux();
   const lignes = [];
-  await traiter({ api, evt: { type: 'tache_fermee', depot: 'MoKarade/JobAI', issue: '9', raison: 'completed' }, jetonReveil: 'jeton', journal: (l) => lignes.push(l) });
+  await traiter({ api, evt: { type: 'tache_fermee', depot: 'MoKarade/JobAI', issue: '9', raison: 'completed' }, jetonReveil: 'jeton', directes: new Set(), journal: (l) => lignes.push(l) });
   const boite = ecritures.filter((e) => e.chemin === `/repos/${DEPOT_BOITE}/actions/workflows/${WORKFLOW_BOITE}/dispatches`);
   assert.equal(boite.length, 2);
   assert.deepEqual(Object.keys(boite[0].corps.inputs), ['texte']);
@@ -945,7 +946,7 @@ test('traiter : la boîte du dépôt qui échoue (workflow d’app-template pas 
     if (methode !== 'GET' && corps?.inputs?.boite) throw new Error('HTTP 422 sur POST ' + chemin);
     return null;
   };
-  const r = await traiter({ api, evt: { type: 'tache_fermee', depot: 'MoKarade/JobAI', issue: '9', raison: 'completed' }, jetonReveil: 'jeton', journal: (l) => lignes.push(l) });
+  const r = await traiter({ api, evt: { type: 'tache_fermee', depot: 'MoKarade/JobAI', issue: '9', raison: 'completed' }, jetonReveil: 'jeton', directes: new Set(), journal: (l) => lignes.push(l) });
   assert.equal(r.reveille, true);
   assert.ok(lignes.some((l) => l.startsWith('::warning::') && l.includes('non réveillée')));
 });
