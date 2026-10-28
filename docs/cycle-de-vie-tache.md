@@ -76,6 +76,12 @@ Constat du 28/10/2026 22:38Z : presque chaque tâche attendait une preuve lue da
 
 **Écrire la classe** : `**Fini quand** (classe B) : …`. Classe B : une ou plusieurs lignes `**Lecture de page** : GET /chemin → 200, contient « texte »` (chemin de l'app, jamais une adresse libre : le texte d'une tâche est une donnée). `scripts/fini-quand.mjs` juge la forme ; un « Fini quand » sans classe, de classe inconnue, ou une classe B sans lecture lisible est SIGNALÉ (avertissement), jamais bloqué à la création.
 
+**Classe B, pas à pas** : l'app appelle `preuve-page.yml` quand une de ses PR est fusionnée (même appel que `captures.yml`, voir l'en-tête du workflow). Le Réacteur ne réveille pas le fil pour « preuve à poser » sur une tâche de classe B bien écrite dont le dépôt a ce workflow. La PR doit citer UNE tâche ouverte, qui n'attend rien ; les contrôles de la PR sont verts ; si elle change du code servi, un déploiement READY existe sur le commit fusionné (mêmes garde-fous que §10 ter). Quand tout est vrai, la tâche est acceptée et fermée, et le dépôt est réveillé (« libre ; suivante : #n ») comme après une acceptation automatique. Sinon (app qui ne démarre pas, page différente, déploiement absent), la tâche reste ouverte et le Réacteur réveille le fil de l'app avec « preuve à poser » (type `preuve_page`) : rien ne se perd, aucun minuteur.
+
+**Réveil sans jeton** : `preuve-page.yml` n'utilise aucun secret (y ajouter une référence à un secret rend la PR à Marc, Garde-fou). Le fil est donc réveillé par la boîte LOCALE du dépôt (`reveilLocal`, une PR brouillon permanente `claude/boite-reacteur`, comme FinanceAI#38 et MemoryAI#442) : un dépôt qui appelle `preuve-page.yml` en a une, sinon le filet de 6 h reprend la main.
+
+**Un secret n'est proposé à Marc que si le mode fictif ne suffit pas** (une page qui n'a pas de données de test) : une carte avec une recommandation, jamais un secret posé d'office.
+
 ## 3. Étiquettes
 
 | Étiquette | Sens | Posée par |
