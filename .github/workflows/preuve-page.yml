@@ -43,6 +43,14 @@ on:
         description: 'URL locale de l’app une fois lancée.'
         type: string
         default: http://localhost:3000
+      etapes:
+        description: 'Étapes jouées avant de lire, une par ligne, format fermé de captures.yml (aller, cliquer-bouton, attendre-texte, pointeur). Aucun JavaScript libre.'
+        type: string
+        default: ''
+      stockage-local:
+        description: 'Valeurs posées dans le localStorage de l’app avant le premier chargement, « cle=valeur » par ligne.'
+        type: string
+        default: ''
       racine:
         description: 'Dossier de l’app dans le dépôt (« web » chez batchchef-).'
         type: string
@@ -92,6 +100,8 @@ jobs:
       PREUVE_DEMARRAGE: ${{ inputs.demarrage }}
       PREUVE_URL: ${{ inputs.url }}
       PREUVE_RACINE: ${{ inputs.racine }}
+      PREUVE_ETAPES: ${{ inputs.etapes }}
+      PREUVE_STOCKAGE: ${{ inputs.stockage-local }}
       PREUVE_ATTENTE: ${{ inputs.attente-s }}
       PREUVE_DEPLOIEMENT: ${{ inputs.deploiement }}
       PREUVE_WORKFLOWS: ${{ inputs.workflows-deploiement }}

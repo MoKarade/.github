@@ -102,3 +102,30 @@ test('lirePages : une page hors de l’app n’est jamais ouverte', async () => 
   assert.deepEqual(lus, [{ erreur: 'page hors de l’app' }]);
   assert.deepEqual(nav.appels, ['fermé']);
 });
+
+test('lirePages : le stockage local est posé avant le chargement, les étapes jouées ; une étape qui échoue refuse toutes les lectures', async () => {
+  const journal = [];
+  const fabrique = (echecEtape) => async () => ({
+    newContext: async () => ({
+      addInitScript: async (_f, [origine, entrees]) => journal.push(['stockage', origine, entrees]),
+      newPage: async () => ({
+        goto: async (url) => (journal.push(['goto', url]), { status: () => 200 }),
+        innerText: async () => 'Dettes',
+        mouse: { move: async (x, y) => journal.push(['pointeur', x, y]) },
+        getByRole: () => ({ click: async () => { if (echecEtape) throw new Error('introuvable (détail interne)'); journal.push(['clic']); } }),
+        getByText: () => ({ first: () => ({ waitFor: async () => journal.push(['attente']) }) }),
+        waitForTimeout: async () => {},
+      }),
+    }),
+    close: async () => {},
+  });
+  const lectures = [{ chemin: '/#DEBT', statut: 200, texte: 'Dettes' }];
+  const etapes = [{ verbe: 'cliquer-bouton', texte: 'Activer le mode test' }, { verbe: 'attendre-texte', texte: 'MODE TEST' }];
+  const stockage = [{ cle: 'app_onboarding_done', valeur: 'true' }];
+  const bon = await lirePages({ urlBase: 'http://localhost:3000', lectures, lancerNavigateur: fabrique(false), etapes, stockage });
+  assert.deepEqual(bon, [{ statut: 200, texteTrouve: true }]);
+  assert.deepEqual(journal.slice(0, 3), [['stockage', 'http://localhost:3000', [['app_onboarding_done', 'true']]], ['clic'], ['attente']]);
+  const mauvais = await lirePages({ urlBase: 'http://localhost:3000', lectures, lancerNavigateur: fabrique(true), etapes, stockage });
+  assert.deepEqual(mauvais, [{ erreur: 'étape impossible' }]);
+  assert.doesNotMatch(JSON.stringify(mauvais), /détail interne/);
+});

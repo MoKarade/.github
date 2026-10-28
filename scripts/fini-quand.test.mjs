@@ -45,6 +45,12 @@ test('rejeté : classe B sans lecture, ou lecture illisible, hôte, double barre
   }
 });
 
+test('valide : un chemin avec requête ou fragment (FinanceAI route par le hash)', () => {
+  const v = lireLecturesPage('**Lecture de page** : GET /#DEBT → 200, contient « Dettes »\n**Lecture de page** : GET /liste?tri=nom → 200');
+  assert.deepEqual(v.lectures, [{ chemin: '/#DEBT', statut: 200, texte: 'Dettes' }, { chemin: '/liste?tri=nom', statut: 200, texte: null }]);
+  assert.deepEqual(v.erreurs, []);
+});
+
 test('rejeté : plus de cinq lectures', () => {
   const lignes = Array.from({ length: 6 }, (_, i) => `**Lecture de page** : GET /p${i} → 200`).join('\n');
   const v = lireLecturesPage(lignes);

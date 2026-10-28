@@ -29,7 +29,7 @@ const ENTETE = /^[\s>*_-]*\*\*\s*Fini quand\s*\*\*[ \t]*(?:\(([^)\n]*)\))?/im;
 const LIGNE_LECTURE = /^[\s>*_-]*\*{0,2}\s*Lecture de page\s*\*{0,2}\s*:\s*(.+?)\s*$/gim;
 const LIGNE_RAISON_C = /^[\s>*_-]*\*{0,2}\s*Raison de la classe C\s*\*{0,2}\s*:\s*(.+?)\s*$/im;
 // « GET /chemin → 200, contient « texte » » : chemin local de l'app (jamais une adresse libre : le texte d'une tâche est une donnée).
-const FORME_LECTURE = /^GET\s+(\/[^\s?#]*(?:\?[^\s#]*)?)\s*(?:→|->)\s*(\d{3})(?:\s*,\s*contient\s*[«"“]\s*(.+?)\s*[»"”])?$/;
+const FORME_LECTURE = /^GET\s+(\/\S*)\s*(?:→|->)\s*(\d{3})(?:\s*,\s*contient\s*[«"“]\s*(.+?)\s*[»"”])?$/;
 
 /**
  * La classe écrite sur la ligne « Fini quand ». Rend { classe, erreur } : `classe` vaut 'A' | 'B' | 'C' ou null, `erreur` dit pourquoi null.
@@ -57,7 +57,8 @@ export function lireLecturesPage(corps) {
       continue;
     }
     const [, chemin, statut, texte = null] = f;
-    if (chemin.startsWith('//') || chemin.split('/').includes('..') || chemin.length > 200) {
+    // Mêmes caractères que les pages de `captures.yml` (un fragment `/#DEBT` est permis : FinanceAI route par le hash).
+    if (!/^\/[\w\-./%~:@!$&'()*+,;=?#]*$/.test(chemin) || chemin.startsWith('//') || chemin.includes('..') || chemin.length > 200) {
       erreurs.push(`chemin refusé : « ${chemin.slice(0, 60)} »`);
       continue;
     }

@@ -17,6 +17,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { LABELS_ATTENTE, accepterApresFusion } from './acceptation-auto.mjs';
+import { jouerEtapes, lireEtapes, lireStockage } from './captures.mjs';
 import { controleFiniQuand } from './fini-quand.mjs';
 import { LABEL_TACHE } from './preuve.mjs';
 import { extraireTachesCompletes } from './tache-liee.mjs';
@@ -62,22 +63,47 @@ export function resumer(lectures, lus) {
  * Ouvre chaque page avec un navigateur injecté (Playwright en vrai, une fausse en test). Rend un tableau parallèle à `lectures` :
  * { statut, texteTrouve } ou { erreur }. Une page hors de l'origine de l'app est refusée : le texte d'une tâche est une donnée, pas une adresse libre.
  */
-export async function lirePages({ urlBase, lectures, lancerNavigateur, delaiMs = 30_000 }) {
+export async function lirePages({ urlBase, lectures, lancerNavigateur, delaiMs = 30_000, etapes = [], stockage = [] }) {
   const origine = new URL(urlBase).origin;
   const navigateur = await lancerNavigateur();
   const lus = [];
   try {
     const contexte = await navigateur.newContext({ viewport: { width: 1280, height: 800 } });
+    // Posé avant tout chargement, et seulement sur l'origine de l'app (écran d'accueil déjà passé), comme `captures.yml`.
+    if (stockage.length) {
+      await contexte.addInitScript(([o, entrees]) => {
+        if (location.origin !== o) return;
+        for (const [cle, valeur] of entrees) localStorage.setItem(cle, valeur);
+      }, [origine, stockage.map((e) => [e.cle, e.valeur])]);
+    }
     const page = await contexte.newPage();
+    let precedente = null;
+    let etapesEnEchec = false;
+    if (etapes.length) {
+      try {
+        precedente = await jouerEtapes({ page, etapes, urlBase });
+      } catch {
+        // Cause fixe : le message brut d'une erreur de navigateur peut contenir un détail interne.
+        etapesEnEchec = true;
+      }
+    }
     for (const lecture of lectures) {
       const url = new URL(lecture.chemin, urlBase);
       if (url.origin !== origine) {
         lus.push({ erreur: 'page hors de l’app' });
         continue;
       }
+      if (etapesEnEchec) {
+        lus.push({ erreur: 'étape impossible' });
+        continue;
+      }
       try {
         const reponse = await page.goto(url.toString(), { waitUntil: 'networkidle', timeout: delaiMs });
-        const statut = reponse?.status() ?? 0;
+        // Une page qui ne change que le fragment (#DEBT) est une navigation dans le même document : pas de réponse HTTP, et l'app dessine après coup.
+        const memeDocument = !reponse && precedente !== null && precedente.origin === url.origin && precedente.pathname === url.pathname && precedente.search === url.search;
+        if (memeDocument) await page.waitForTimeout?.(800);
+        const statut = reponse?.status() ?? (memeDocument ? 200 : 0);
+        precedente = url;
         const corps = lecture.texte && statut === lecture.statut ? await page.innerText('body') : '';
         lus.push({ statut, texteTrouve: lecture.texte ? corps.includes(lecture.texte) : true });
       } catch {
@@ -138,7 +164,7 @@ async function main() {
     const exiger = createRequire(join(env.PREUVE_OUTILS || '.', 'x.js'));
     const { chromium } = exiger('playwright');
     const lectures = JSON.parse(readFileSync(fichierLectures, 'utf8'));
-    const lus = await lirePages({ urlBase, lectures, lancerNavigateur: () => chromium.launch() });
+    const lus = await lirePages({ urlBase, lectures, lancerNavigateur: () => chromium.launch(), etapes: lireEtapes(env.PREUVE_ETAPES), stockage: lireStockage(env.PREUVE_STOCKAGE) });
     writeFileSync(fichierLus, JSON.stringify(lus));
     console.log(resumer(lectures, lus).detail);
   } else if (mode === 'accepter') {
