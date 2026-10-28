@@ -135,6 +135,11 @@ test('une recherche de code ou une lecture d’issues en échec n’est pas aval
   await assert.rejects(lireTachesApp({ depot: 'MoKarade/JobAI', fetchFn: async () => reponse(500, {}) }), /HTTP 500/);
 });
 
+test('une erreur HTTP porte le message de GitHub (accès refusé ou limite de débit)', async () => {
+  const fetchFn = async () => reponse(403, { message: 'Resource not accessible by personal access token' });
+  await assert.rejects(rechercherModelesApp({ depot: 'MoKarade/FinanceAI', fetchFn }), /HTTP 403 : Resource not accessible/);
+});
+
 test('rechercherModelesApp ne compte que les fichiers de code', async () => {
   const items = [
     { path: 'lib/llm/modele.ts', text_matches: [{ fragment: 'const M = "claude-haiku-4-5-20251001";' }] },

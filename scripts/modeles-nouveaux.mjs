@@ -133,7 +133,12 @@ export function idsDansTexte(texte) {
 }
 
 async function lireJson(response, contexte) {
-  if (!response.ok) throw new Error(`${contexte} (statut HTTP ${response.status})`);
+  if (!response.ok) {
+    // Le message de GitHub distingue un jeton sans accès au dépôt d'une limite de débit : les deux rendent 403.
+    const corps = await response.json().catch(() => null);
+    const detail = typeof corps?.message === 'string' ? ` : ${corps.message}` : '';
+    throw new Error(`${contexte} (statut HTTP ${response.status}${detail})`);
+  }
   return response.json();
 }
 
@@ -193,10 +198,11 @@ export async function ouvrirTacheMigration({ task, ghToken = process.env.GH_PAT 
   );
 }
 
-export async function executer({ aBlanc = false, apps = APPS_PAR_DEFAUT, apiKey = process.env.ANTHROPIC_API_KEY, ghToken = process.env.GH_PAT || process.env.GH_TOKEN } = {}) {
+export async function executer({ aBlanc = false, apps = APPS_PAR_DEFAUT, apiKey = process.env.ANTHROPIC_API_KEY, ghToken = process.env.GH_PAT || process.env.GH_TOKEN, pause = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
   const listeModeles = await lireListeModelesAnthropic({ apiKey });
   const idsParApp = [];
   for (const app of apps) {
+    if (idsParApp.length > 0) await pause(PAUSE_RECHERCHE_MS); // une recherche de code par app : même plafond par minute
     idsParApp.push({
       nom: app.nom,
       depot: app.depot,
@@ -206,6 +212,10 @@ export async function executer({ aBlanc = false, apps = APPS_PAR_DEFAUT, apiKey 
   }
 
   const aOuvrir = modelesAMigrer(listeModeles, idsParApp);
+
+  // Ce qui a été lu, pour qu'un « 0 tâche » soit vérifiable : modèles les plus récents de l'API, puis modèles trouvés par app.
+  console.log(`Modèles Anthropic lus : ${listeModeles.length}, dont ${listeModeles.map(idDe).filter(familleDuModele).join(', ')}`);
+  for (const a of idsParApp) console.log(`${a.nom} (${a.depot}) : ${a.utilises.length ? a.utilises.join(', ') : 'aucun identifiant trouvé'} ; ${a.ouvertes.length} issue(s) lue(s)`);
 
   if (aBlanc) {
     console.log(`[Essai à blanc] ${aOuvrir.length} tâche(s) de migration à ouvrir :`);
