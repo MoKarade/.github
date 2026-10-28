@@ -14,6 +14,7 @@ VERSION = 1
 PLAFOND_APPELS = 60
 PAGES_DEPLOIEMENTS = 5        # 100 déploiements par page : Hubperso en fait ~20 par jour
 PAGES_EVENEMENTS = 3
+JOURS = 35                # fenêtre des moyennes de la page (30 jours + marge) : le passé plus ancien ne sert pas et coûterait des lectures
 PARALLELES = 5            # lectures simultanées (comme fetch.py)
 D = os.path.dirname(os.path.abspath(__file__)) + os.sep
 TERMINES = {'success', 'failure', 'error', 'inactive'}      # un déploiement dans un autre état (pending, in_progress, queued) se relit au tour suivant
@@ -103,6 +104,12 @@ def releve(prlog, depots, cache, lire, maintenant, compter=lambda: 0, plafond=PL
             'couvert_depuis': dict(sorted(couvert.items()))}
 
 
+def recentes(prlog, maintenant, jours=JOURS):
+    """Les fusions des `jours` derniers jours (dates UTC 'Z' : l'ordre des chaînes est l'ordre du temps)."""
+    coupure = (datetime.datetime.fromisoformat(maintenant.replace('Z', '+00:00')) - datetime.timedelta(days=jours)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    return [x for x in prlog if x.get('m') and x['m'] >= coupure]
+
+
 def plafond_de(opt):
     """--plafond=n -> n (entier > 0), sinon PLAFOND_APPELS ; une valeur illisible est refusée plutôt qu'ignorée."""
     if 'plafond' not in opt: return PLAFOND_APPELS
@@ -126,7 +133,7 @@ def main(argv):
     try: cache = json.load(open(fichier_cache, encoding='utf-8'))
     except (OSError, ValueError): cache = {}      # perdu : le passé se relit par paquets, rien n'est inventé
     maintenant = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    res = releve(prlog, depots, cache, ghcache.lire, maintenant, lambda: ghcache.compteurs()['comptees'], plafond_de(opt))
+    res = releve(recentes(prlog, maintenant), depots, cache, ghcache.lire, maintenant, lambda: ghcache.compteurs()['comptees'], plafond_de(opt))
     for chemin, contenu in ((fichier_cache, cache), (sortie, res)):
         with open(chemin + '.tmp', 'w', encoding='utf-8') as fh: json.dump(contenu, fh, ensure_ascii=False)
         os.replace(chemin + '.tmp', chemin)
