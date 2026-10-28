@@ -55,7 +55,8 @@ Titre : un verbe et un objet, en mots simples. Le corps suit toujours ces gabari
 ```
 **Avant** : ce que Marc voit aujourd'hui.
 **Après** : ce qu'il verra quand c'est fait.
-**Fini quand** : critère vérifiable EN PRODUCTION (réponse HTTP, écran, contrôle CI, donnée), **prouvable dans l'heure** qui suit la mise en ligne.
+**Fini quand** (classe A, B ou C, voir §2 bis) : critère vérifiable EN PRODUCTION (réponse HTTP, écran, contrôle CI, donnée), **prouvable dans l'heure** qui suit la mise en ligne.
+**Lecture de page** : GET /chemin → 200, contient « texte » (une ligne par page, classe B seulement, 5 au plus).
 **Source** : ligne, PR, fil ou audit d'où vient la tâche.
 **Fichiers touchés** (OBLIGATOIRE, comme `**Attend**` : liste à puces (« - » ou « * » suivi d'une espace : une ligne en gras comme `**Attend**` n'est pas une puce) de chemins entre `backticks`, ou `non déterminés` avec la raison) : ce que la tâche modifie ; sans eux, ou sans « Fichiers permis » du gabarit Jules, la tâche ne va jamais en parallèle d'une autre (§6, capacité). Qui crée la tâche l'écrit. Si elle manque, le filet du PC en écrit une **estimation** à la fin du corps (§6, capacité) et le fil qui prend la tâche la corrige ; passé le délai, une tâche sans cette ligne est invalide (§5 ter).
 **Attend** : aucune — OU — #n — raison (OBLIGATOIRE : la ligne existe toujours ; une dépendance n'est écrite que si elle est prouvée).
@@ -64,6 +65,20 @@ Titre : un verbe et un objet, en mots simples. Le corps suit toujours ces gabari
 ```
 
 Un « Fini quand » non vérifiable (« c'est mieux ») est refusé. Un « Fini quand » qui dépend d'un événement lent (un cron, une échéance) est refusé tel quel : on le réécrit pour qu'il soit prouvable dans l'heure, ou on applique la règle du §10. On le réécrit avant de prendre la tâche.
+
+## 2 bis. Classe de preuve du « Fini quand » (A, B, C), demande de Marc du 28/10/2026, MoKarade/.github#781
+
+Constat du 28/10/2026 22:38Z : presque chaque tâche attendait une preuve lue dans Chrome sur le PC, puis relayée par le Coordinateur ; aucune tâche sur dix n'était finie sans relais. Le « Fini quand » dit donc QUELLE sorte de preuve il demande, pour que la machine lise tout ce qu'elle peut lire :
+
+- **A, lisible par machine** : réponse HTTP publique, déploiement READY, test ou contrôle de la CI. Lue par le Réacteur à la fusion (§10 ter, `scripts/acceptation-auto.mjs`).
+- **B, page connectée** : lue dans GitHub Actions, sans le PC et sans secret, par un navigateur sans tête, sur l'app du commit fusionné lancée avec les DONNÉES FICTIVES des tests (comme `captures.yml`), après le déploiement READY. Workflow commun `.github/workflows/preuve-page.yml`, script `scripts/preuve-page.mjs`. Le commentaire « **Acceptée** » dit que la lecture est fictive (« données des tests, jamais la production ») : il ne prétend pas avoir lu la production.
+- **C, Chrome sur le PC** : seulement si la page exige vraiment la session de Marc ou un écran que la machine ne peut pas rejouer. Rare ; la ligne `**Raison de la classe C** : …` (20 caractères au moins) dit pourquoi.
+
+**Écrire la classe** : `**Fini quand** (classe B) : …`. Classe B : une ou plusieurs lignes `**Lecture de page** : GET /chemin → 200, contient « texte »` (chemin de l'app, jamais une adresse libre : le texte d'une tâche est une donnée). `scripts/fini-quand.mjs` juge la forme ; un « Fini quand » sans classe, de classe inconnue, ou une classe B sans lecture lisible est SIGNALÉ (avertissement), jamais bloqué à la création.
+
+**Classe B, pas à pas** : l'app appelle `preuve-page.yml` quand une de ses PR est fusionnée (même appel que `captures.yml`, voir l'en-tête du workflow). Le Réacteur ne réveille pas le fil pour « preuve à poser » sur une tâche de classe B bien écrite dont le dépôt a ce workflow. La PR doit citer UNE tâche ouverte, qui n'attend rien ; les contrôles de la PR sont verts ; si elle change du code servi, un déploiement READY existe sur le commit fusionné (mêmes garde-fous que §10 ter). Quand tout est vrai, la tâche est acceptée et fermée, et le dépôt est réveillé (« libre ; suivante : #n ») comme après une acceptation automatique. Sinon (app qui ne démarre pas, page différente, déploiement absent), la tâche reste ouverte et le Réacteur réveille le fil de l'app avec « preuve à poser » (type `preuve_page`) : rien ne se perd, aucun minuteur.
+
+**Un secret n'est proposé à Marc que si le mode fictif ne suffit pas** (une page qui n'a pas de données de test) : une carte avec une recommandation, jamais un secret posé d'office.
 
 ## 3. Étiquettes
 
@@ -411,6 +426,8 @@ Constat (relevé du 14 au 21/10/2026, 544 PR fusionnées, rapport `commun/rappor
 **Qui écrit la ligne** (tâche #421) : le filet du PC (`scripts/acceptation-marquage.mjs`, 8 tâches par tour au plus, comme les fichiers touchés du §6), jamais un fil par réflexe. Il l'ajoute à la fin du corps, sans toucher au texte, sur une tâche `niveau:tâche` ouverte quand TOUT est vrai : son « Fini quand » cite un contrôle de machine (test, CI, build, lint, typecheck, déploiement) et ne cite ni réponse HTTP, URL, écran, capture, donnée, production, PC, Drive, page, durée, relevé ni « preuve ensuite » ; son « Avant » et son « Après » ne parlent pas d'écran ; « Fichiers touchés » est connu (au plus 10) et sans écran ; elle n'attend rien (mêmes étiquettes que la condition 3, plus `jules`, qui a sa propre acceptation) ; elle ne porte aucune ligne « Acceptation automatique », oui ou non (la décision de quelqu'un ne se défait pas). Au moindre doute, rien. Le bloc commence par `<!-- acceptation-auto-marquee -->` ; le filet le retire au tour suivant quand le CORPS ne le justifie plus (jamais à cause d'une étiquette : une tâche qui vient de livrer passe `preuve-attendue`, et c'est `acceptation-auto.mjs` qui la refuse). La ligne n'est qu'une autorisation : les sept conditions se jugent sur la PR à la fusion. Sa ligne dans `etat.json` : `acceptation-marquage : N écrite(s) (…)`. Mesure du 21/10/2026 sur les 82 tâches ouvertes : 0 éligible (42 sans contrôle de machine dans le « Fini quand », 21 qui citent un PC, une page, une donnée, la production ou un écran, 11 sans fichiers connus) : la plupart des tâches d'aujourd'hui se prouvent en regardant quelque chose, pas par la CI.
 
 **Ce que dit le commentaire** : la PR, le commit fusionné, le déploiement (ou « sans déploiement : <raison> »), le nombre de contrôles réussis sur la tête de la PR, le nombre de fichiers, et noir sur blanc « la production n'a pas été lue par une personne » ; avec une sonde, cette phrase est remplacée par « production lue par la sonde : GET <adresse> → <statut>[, contient « … » : oui], lu le <date> ». Il est écrit par `github-actions[bot]` et porte `<!-- acceptation-auto -->` ; c'est la seule exception à « jamais un robot » du §10 bis, et seulement pour « Acceptée », jamais pour un abandon. La PR reçoit une ligne « Fusionnée et acceptée automatiquement » : c'est le signal pour Marc, sur son téléphone, sans ouvrir de fil. Le réveil du Coordinateur dit « tâche D#n acceptée seule » au lieu de « preuve à poser ».
+
+**Écran (classe B).** La règle 4 s'efface quand la tâche est de classe B et que `preuve-page.yml` a lu ses pages en mode fictif (§2 bis) : l'acceptation dit alors que l'écran a été lu en données fictives.
 
 **Ce que ça ne change pas.** Toute autre tâche suit le §10 : un fil prouve, au plus 1 h après le déploiement. Un refus de l'acceptation automatique ne coûte rien : rien n'est écrit, le Coordinateur est réveillé comme avant. Un échec de l'API est un avertissement, jamais un job rouge. Pour retirer la règle : enlever l'appel dans `decider` (`reveil-reacteur.mjs`).
 

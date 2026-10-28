@@ -128,19 +128,20 @@ export async function lireProduction({ sonde, fetchImpl = fetch, essais = ESSAIS
  * La tâche peut-elle s'accepter seule ? Rend { ok, motifs }.
  * `autresPr` : les PR ouvertes du dépôt (autres que celle qui vient de fusionner) ; `controles` : check-runs de la tête de la PR.
  */
-export function evaluerEligibilite({ issue, numeroTache, pr, fichiers, controles, autresPr = [], depot, implicite = false }) {
+export function evaluerEligibilite({ issue, numeroTache, pr, fichiers, controles, autresPr = [], depot, implicite = false, pageLue = null }) {
   const motifs = [];
   const defaut = defautDeLaTache(issue);
   if (defaut) motifs.push(`la tâche ${defaut}`);
   else {
     const { sonde, erreur } = lireSonde(issue);
     if (erreur) motifs.push(erreur);
-    else if (!veutAuto(issue) && !sonde && !implicite) motifs.push('la tâche ne porte pas la ligne « **Acceptation automatique** : oui — … » ni « **Fini quand exécutable** : GET … »');
+    else if (!veutAuto(issue) && !sonde && !implicite && !pageLue) motifs.push('la tâche ne porte pas la ligne « **Acceptation automatique** : oui — … » ni « **Fini quand exécutable** : GET … »');
     const attente = noms(issue).filter((n) => LABELS_ATTENTE.includes(n));
     if (attente.length) motifs.push(`la tâche attend quelque chose (${attente.join(', ')})`);
   }
   if (!pr?.merged) motifs.push('la PR n’est pas fusionnée');
-  if (ecran(fichiers)) motifs.push('la PR touche un écran : un fil le prouve en le regardant');
+  // Classe B (scripts/fini-quand.mjs, preuve-page.yml) : l'écran a été LU par un navigateur sans tête, sur l'app lancée avec les données fictives des tests.
+  if (ecran(fichiers) && !pageLue?.ok) motifs.push('la PR touche un écran : un fil le prouve en le regardant');
   if (fichiers.length === 0) motifs.push('aucun fichier lu sur la PR');
   const rouges = controles.filter((c) => ROUGES.has(c.conclusion));
   if (rouges.length) motifs.push(`un contrôle est rouge sur la tête de la PR (${rouges.map((c) => c.name).slice(0, 3).join(', ')})`);
@@ -168,17 +169,19 @@ export function derniersParNom(controles) {
 const court = (sha) => String(sha ?? '').slice(0, 7);
 
 /** Le commentaire de preuve : commence par « **Acceptée** », dit ce qui a été vérifié, porte le marqueur. */
-export function corpsAcceptee({ pr, controles, fichiers, deploiement, servie, sansDeploiement, sonde = null, implicite = false }) {
+export function corpsAcceptee({ pr, controles, fichiers, deploiement, servie, sansDeploiement, sonde = null, implicite = false, pageLue = null }) {
   const verifies = controles.filter((c) => c.conclusion === 'success').length;
   const depl = servie && deploiement?.ok ? `déploiement READY (${deploiement.detail})` : `sans déploiement : ${sansDeploiement}`;
   return [
     `**Acceptée** — PR #${pr.number} fusionnée (${court(pr.merge_commit_sha)}), ${depl}, preuve : contrôles réussis sur la tête ${court(pr.head?.sha)} de la PR (${verifies}), aucun rouge ; ` +
-      `${fichiers.length} fichiers touchés, aucun écran ; ` +
-      (sonde
-        ? `acceptation automatique demandée par la ligne « Fini quand exécutable » de la tâche, production lue par la sonde : ${sonde.detail}.`
-        : implicite
-          ? 'acceptation automatique par la règle prudente appliquée à la fusion (le « Fini quand » de la tâche se lit par un test ou la CI, aucune ligne « Acceptation automatique » n’y figurait), la production n’a pas été lue par une personne.'
-          : 'acceptation automatique demandée par la ligne « Acceptation automatique » de la tâche, la production n’a pas été lue par une personne.'),
+      (pageLue?.ok ? `${fichiers.length} fichiers touchés, écran lu par un navigateur sans tête sur le commit fusionné, en mode fictif (données des tests, jamais la production) : ${pageLue.detail} ; ` : `${fichiers.length} fichiers touchés, aucun écran ; `) +
+      (pageLue?.ok
+        ? 'acceptation automatique de classe B, demandée par la ligne « Fini quand » (classe B) et ses lignes « Lecture de page » dans la tâche, la production n’a pas été lue par une personne.'
+        : sonde
+          ? `acceptation automatique demandée par la ligne « Fini quand exécutable » de la tâche, production lue par la sonde : ${sonde.detail}.`
+          : implicite
+            ? 'acceptation automatique par la règle prudente appliquée à la fusion (le « Fini quand » de la tâche se lit par un test ou la CI, aucune ligne « Acceptation automatique » n’y figurait), la production n’a pas été lue par une personne.'
+            : 'acceptation automatique demandée par la ligne « Acceptation automatique » de la tâche, la production n’a pas été lue par une personne.'),
     '',
     MARQUEUR_AUTO,
   ].join('\n');
@@ -211,7 +214,7 @@ const pages = async (api, chemin) => {
  * `acceptee` | `ignoree` (les motifs disent pourquoi ; rien n'a changé).
  * `config` : { deploiement: 'vercel' | 'aucun', workflows: [] }, comme le garde-fou de preuve.
  */
-export async function accepterApresFusion({ api, depot, numeroPr, config = {}, maintenant = () => new Date(), dormir = (ms) => new Promise((r) => setTimeout(r, ms)), essais = ESSAIS_DEPLOIEMENT, pause = PAUSE_DEPLOIEMENT_MS, sonde: reglagesSonde = {} }) {
+export async function accepterApresFusion({ api, depot, numeroPr, config = {}, maintenant = () => new Date(), dormir = (ms) => new Promise((r) => setTimeout(r, ms)), essais = ESSAIS_DEPLOIEMENT, pause = PAUSE_DEPLOIEMENT_MS, sonde: reglagesSonde = {}, pageLue = null }) {
   const ignoree = (...motifs) => ({ statut: 'ignoree', motifs });
   const pr = await api('GET', `/repos/${depot}/pulls/${numeroPr}`);
   if (!pr?.merged) return ignoree('la PR n’est pas fusionnée');
@@ -221,14 +224,14 @@ export async function accepterApresFusion({ api, depot, numeroPr, config = {}, m
   const issue = await api('GET', `/repos/${depot}/issues/${numero}`);
   // Question la moins chère d'abord : la plupart des tâches ne demandent pas l'acceptation automatique, rien d'autre n'est lu.
   if (!issue) return ignoree('la tâche ne demande pas l’acceptation automatique');
-  const decidee = veutAuto(issue) || LIGNE_SONDE.test(String(issue.body ?? ''));
+  const decidee = veutAuto(issue) || LIGNE_SONDE.test(String(issue.body ?? '')) || Boolean(pageLue?.ok);
   const implicite = !decidee && (await regleImplicite(issue));
   if (!decidee && !implicite) return ignoree('la tâche ne demande pas l’acceptation automatique');
 
   const fichiers = (await pages(api, `/repos/${depot}/pulls/${numeroPr}/files`)).map((f) => f.filename);
   const controles = derniersParNom(((await api('GET', `/repos/${depot}/commits/${pr.head?.sha}/check-runs?per_page=100`))?.check_runs ?? []).filter((c) => c.status === 'completed'));
   const ouvertes = ((await api('GET', `/repos/${depot}/pulls?state=open&per_page=30`)) ?? []).filter((p) => p.number !== numeroPr);
-  const verdict = evaluerEligibilite({ issue, numeroTache: numero, pr, fichiers, controles, autresPr: ouvertes, depot, implicite });
+  const verdict = evaluerEligibilite({ issue, numeroTache: numero, pr, fichiers, controles, autresPr: ouvertes, depot, implicite, pageLue });
   if (!verdict.ok) return ignoree(...verdict.motifs);
 
   // L'adaptateur donne au garde-fou de preuve (api(chemin, { method, body })) la même API que le Réacteur (api(méthode, chemin, corps)).
@@ -255,6 +258,7 @@ export async function accepterApresFusion({ api, depot, numeroPr, config = {}, m
   const corps = corpsAcceptee({
     sonde: lue,
     implicite,
+    pageLue,
     pr,
     controles,
     fichiers,
