@@ -342,3 +342,40 @@ test('le corps de la règle prudente remplace la phrase d’origine', () => {
   assert.doesNotMatch(corps, /demandée par la ligne/);
   assert.match(corps, /règle prudente appliquée à la fusion/);
 });
+
+// Classe B (scripts/fini-quand.mjs, scripts/preuve-page.mjs) : l'écran a été lu en mode fictif par un navigateur sans tête.
+const PAGE_LUE = { ok: true, detail: 'GET /totaux → 200, contient « Total » : lu' };
+const CORPS_B = '**Avant** : x\n**Fini quand** (classe B) : la page des totaux s’affiche.\n**Lecture de page** : GET /totaux → 200, contient « Total »\n**Attend** : aucune';
+
+test('classe B : un écran lu en mode fictif s’accepte, le commentaire dit que la lecture est fictive et passe le garde-fou de preuve', async () => {
+  const f = faux({ issueBody: CORPS_B, fichiers: ['app/totaux/page.tsx'], deploiements: [{ dep: { id: 42, sha: SHA, created_at: '2026-10-21T14:00:40Z' } }] });
+  const r = await accepterApresFusion({ api: f.api, depot: DEPOT, numeroPr: 7, config: { deploiement: 'vercel' }, maintenant: MAINTENANT, dormir, essais: 2, pause: 0, pageLue: PAGE_LUE });
+  assert.equal(r.statut, 'acceptee');
+  assert.equal(f.etat.issue.state, 'closed');
+  const preuve = f.etat.commentaires[0].body;
+  assert.match(preuve, /déploiement READY \(déploiement 42 sur ea239e9\)/);
+  assert.match(preuve, /écran lu par un navigateur sans tête sur le commit fusionné, en mode fictif \(données des tests, jamais la production\) : GET \/totaux → 200, contient « Total » : lu/);
+  assert.match(preuve, /acceptation automatique de classe B/);
+  assert.doesNotMatch(preuve, /aucun écran/);
+  assert.ok(trouverPreuve(f.etat.commentaires));
+  const pr = { merged: true, merged_at: FUSION, merge_commit_sha: SHA, head_sha: TETE };
+  const v = evaluer({ raison: 'completed', commentaires: f.etat.commentaires, pr, fichiers: ['app/totaux/page.tsx'], deploiement: { requis: true, ok: true, detail: 'déploiement 42 sur ea239e9' } });
+  assert.deepEqual(v.motifs, []);
+});
+
+test('classe B : sans lecture réussie l’écran reste prouvé par un fil ; un contrôle rouge ou une attente refusent quand même', async () => {
+  for (const pageLue of [null, { ok: false, detail: 'GET /totaux → 500' }]) {
+    const f = faux({ issueBody: CORPS_B, fichiers: ['app/totaux/page.tsx'] });
+    const r = await accepterApresFusion({ api: f.api, depot: DEPOT, numeroPr: 7, config: { deploiement: 'aucun' }, maintenant: MAINTENANT, dormir, essais: 2, pause: 0, pageLue });
+    assert.equal(r.statut, 'ignoree');
+    assert.deepEqual(f.etat.ecritures, []);
+  }
+  const rouge = faux({ issueBody: CORPS_B, fichiers: ['app/totaux/page.tsx'], controles: [{ name: 'Gate', status: 'completed', conclusion: 'failure' }] });
+  const r1 = await accepterApresFusion({ api: rouge.api, depot: DEPOT, numeroPr: 7, config: { deploiement: 'aucun' }, maintenant: MAINTENANT, dormir, essais: 2, pause: 0, pageLue: PAGE_LUE });
+  assert.equal(r1.statut, 'ignoree');
+  assert.match(r1.motifs.join(' '), /contrôle est rouge/);
+  const attend = faux({ issueBody: CORPS_B, labels: ['niveau:tâche', 'en-cours', 'qui:marc'], fichiers: ['app/totaux/page.tsx'] });
+  const r2 = await accepterApresFusion({ api: attend.api, depot: DEPOT, numeroPr: 7, config: { deploiement: 'aucun' }, maintenant: MAINTENANT, dormir, essais: 2, pause: 0, pageLue: PAGE_LUE });
+  assert.equal(r2.statut, 'ignoree');
+  assert.match(r2.motifs.join(' '), /attend quelque chose/);
+});
