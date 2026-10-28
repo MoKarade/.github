@@ -19,7 +19,7 @@
 # Lancer : python -X utf8 tour.py --drive "G:\Mon disque\_Gantt"   (un tour, puis sortie ; code 0 = OK ou tour sauté, 1 = échec)
 import argparse, datetime, gzip, json, os, shutil, socket, subprocess, sys, time
 import pousser_hub
-import gestes, gmail_recus, missions, reponses      # gestes de Marc à jour (.github#478) ; reponses.appliquer écrit le commentaire « Fait » et retire qui:marc
+import gestes, gmail_recus, lia_notes, missions, reponses      # gestes de Marc à jour (.github#478) ; reponses.appliquer écrit le commentaire « Fait » et retire qui:marc
 
 D = os.path.dirname(os.path.abspath(__file__)) + os.sep
 ENV = dict(os.environ, PYTHONUTF8='1')
@@ -126,6 +126,10 @@ def releve(econome=False, quota_complet=True, drive=None):
     # dans CE tour. Vide tant que Marc n'a pas autorisé l'accès ; un échec se DIT et ne bloque rien.
     gm = gmail_recus.passer(maintenant())
     if gm: quota += ' · ' + gm
+    # 1 bis bis. notes de LIA non lues (lia_notes.py, .github#681) : une lecture du hub par tour (secret du PC), réveil du Coordinateur quand le nombre monte ;
+    # inconnu (null) ne déclenche rien ; un échec se DIT et ne bloque rien.
+    ln = lia_notes.passer(time.time(), reveiller_boite)
+    if ln: quota += ' · ' + ln
     # 1 ter. PR ouvertes (prs_ouvertes.py, .github#679) : chaque PR de chaque dépôt avec sa CI, son état Mergify et le dernier déploiement, pour l'onglet « En cours ».
     # Lectures à ETag, au plus 80 comptées (30 au tour économe, PR les plus récentes d'abord) ; un échec se DIT et ne bloque rien.
     if lancer([PY, 'prs_ouvertes.py'] + (['--plafond=30'] if econome else []), '.refresh-prs.log', 300) == 0: quota += ' · ' + (queue('.refresh-prs.log', 160) or 'PR ouvertes : sans sortie')

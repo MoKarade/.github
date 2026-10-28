@@ -68,6 +68,10 @@ annule, vert ou aucun ; nombres de contrôles ; `noms_en_file` = jobs qui attend
 recopiés de Mergify, rien deviné). Les PR de test de la file Mergify sont comptées dans `brouillons_mergify`. `deploiements` : le dernier de chaque dépôt (ou `erreur`, ou `null`).
 Une lecture en échec s'écrit `erreur`, jamais « vert » ; `incomplet` = plafond de lectures atteint (80, ou 30 au tour économe), les PR restantes sont `non_lu`. Tests : `python -X utf8 -m unittest test_prs_ouvertes.py`.
 
+Notes de LIA (28/10/2026, tâche .github#681, choix « A » de Marc) : `lia_notes.py` lit à chaque tour `GET https://www.hubperso.com/api/chantier/notes-lia` (`Authorization: Bearer <GANTT_SECRET>`,
+le secret que le PC a déjà) et réveille le Coordinateur par `boite-reacteur.yml` quand le nombre de notes non lues monte, puis en rappel toutes les 4 h tant qu'il en reste. `notesLia: null`
+= inconnu (MemoryAI injoignable) : rien n'est déclenché, jamais pris pour 0. Réveil raté : pas enregistré, nouvel essai au tour suivant. État : `lia-notes-etat.json`. Tests : `python -X utf8 -m unittest test_lia_notes.py`.
+
 ## Suivre et arrêter
 
 - Journal : `C:\dev\_pc-local\gantt-releve\tour.log` ; dernier résultat : `_Gantt\etat.json` dans le Drive.
