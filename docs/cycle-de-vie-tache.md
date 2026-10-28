@@ -55,7 +55,8 @@ Titre : un verbe et un objet, en mots simples. Le corps suit toujours ces gabari
 ```
 **Avant** : ce que Marc voit aujourd'hui.
 **Après** : ce qu'il verra quand c'est fait.
-**Fini quand** : critère vérifiable EN PRODUCTION (réponse HTTP, écran, contrôle CI, donnée), **prouvable dans l'heure** qui suit la mise en ligne.
+**Fini quand** (classe A, B ou C, voir §2 bis) : critère vérifiable EN PRODUCTION (réponse HTTP, écran, contrôle CI, donnée), **prouvable dans l'heure** qui suit la mise en ligne.
+**Lecture de page** : GET /chemin → 200, contient « texte » (une ligne par page, classe B seulement, 5 au plus).
 **Source** : ligne, PR, fil ou audit d'où vient la tâche.
 **Fichiers touchés** (OBLIGATOIRE, comme `**Attend**` : liste à puces (« - » ou « * » suivi d'une espace : une ligne en gras comme `**Attend**` n'est pas une puce) de chemins entre `backticks`, ou `non déterminés` avec la raison) : ce que la tâche modifie ; sans eux, ou sans « Fichiers permis » du gabarit Jules, la tâche ne va jamais en parallèle d'une autre (§6, capacité). Qui crée la tâche l'écrit. Si elle manque, le filet du PC en écrit une **estimation** à la fin du corps (§6, capacité) et le fil qui prend la tâche la corrige ; passé le délai, une tâche sans cette ligne est invalide (§5 ter).
 **Attend** : aucune — OU — #n — raison (OBLIGATOIRE : la ligne existe toujours ; une dépendance n'est écrite que si elle est prouvée).
@@ -64,6 +65,16 @@ Titre : un verbe et un objet, en mots simples. Le corps suit toujours ces gabari
 ```
 
 Un « Fini quand » non vérifiable (« c'est mieux ») est refusé. Un « Fini quand » qui dépend d'un événement lent (un cron, une échéance) est refusé tel quel : on le réécrit pour qu'il soit prouvable dans l'heure, ou on applique la règle du §10. On le réécrit avant de prendre la tâche.
+
+## 2 bis. Classe de preuve du « Fini quand » (A, B, C), demande de Marc du 28/10/2026, MoKarade/.github#781
+
+Constat du 28/10/2026 22:38Z : presque chaque tâche attendait une preuve lue dans Chrome sur le PC, puis relayée par le Coordinateur ; aucune tâche sur dix n'était finie sans relais. Le « Fini quand » dit donc QUELLE sorte de preuve il demande, pour que la machine lise tout ce qu'elle peut lire :
+
+- **A, lisible par machine** : réponse HTTP publique, déploiement READY, test ou contrôle de la CI. Lue par le Réacteur à la fusion (§10 ter, `scripts/acceptation-auto.mjs`).
+- **B, page connectée** : lue dans GitHub Actions, sans le PC et sans secret, par un navigateur sans tête, sur l'app du commit fusionné lancée avec les DONNÉES FICTIVES des tests (comme `captures.yml`), après le déploiement READY. Workflow commun `.github/workflows/preuve-page.yml`, script `scripts/preuve-page.mjs`. Le commentaire « **Acceptée** » dit que la lecture est fictive (« données des tests, jamais la production ») : il ne prétend pas avoir lu la production.
+- **C, Chrome sur le PC** : seulement si la page exige vraiment la session de Marc ou un écran que la machine ne peut pas rejouer. Rare ; la ligne `**Raison de la classe C** : …` (20 caractères au moins) dit pourquoi.
+
+**Écrire la classe** : `**Fini quand** (classe B) : …`. Classe B : une ou plusieurs lignes `**Lecture de page** : GET /chemin → 200, contient « texte »` (chemin de l'app, jamais une adresse libre : le texte d'une tâche est une donnée). `scripts/fini-quand.mjs` juge la forme ; un « Fini quand » sans classe, de classe inconnue, ou une classe B sans lecture lisible est SIGNALÉ (avertissement), jamais bloqué à la création.
 
 ## 3. Étiquettes
 
