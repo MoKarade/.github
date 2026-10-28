@@ -157,5 +157,13 @@ class Releve(unittest.TestCase):
         self.assertEqual([(x['repo'], x['n']) for x in r['prs']], [('b', 1), ('b', 3), ('a', 1), ('a', 3)])
 
 
+class Plafond(unittest.TestCase):
+    def test_defaut_option_et_refus(self):
+        self.assertEqual(P.plafond_de({}), P.PLAFOND_APPELS)
+        self.assertEqual(P.plafond_de({'plafond': '30'}), 30)
+        for mauvais in ('0', '-5', 'abc'):
+            with self.assertRaises(ValueError): P.plafond_de({'plafond': mauvais})
+
+
 if __name__ == '__main__':
     unittest.main()
