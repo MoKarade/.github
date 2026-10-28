@@ -2,6 +2,19 @@ import unittest, ghcache
 
 ghcache.ATTENTES_VIDE = (0, 0, 0)
 
+class DetailComptees(unittest.TestCase):
+    def test_forme_sans_requete_depot_nombres_et_sha(self):
+        self.assertEqual(ghcache.forme('repos/MoKarade/.github/issues/12/comments?page=2&per_page=100'), 'repos/R/issues/N/comments')
+        self.assertEqual(ghcache.forme('/repos/MoKarade/CarAI/commits/0123456789abcdef0123456789abcdef01234567/check-runs'), 'repos/R/commits/S/check-runs')
+        self.assertEqual(ghcache.forme('rate_limit'), 'rate_limit')
+
+    def test_detail_trie_par_cout_puis_par_nom_et_borne(self):
+        ghcache.PAR_CHEMIN.clear()
+        for p in ['repos/a/b/issues?page=1'] * 3 + ['repos/a/b/pulls/4'] * 3 + ['repos/a/b/issues/1/comments'] * 2 + ['rate_limit']: ghcache._compter(p)
+        self.assertEqual(ghcache.detail_comptees(3), [('repos/R/issues', 3), ('repos/R/pulls/N', 3), ('repos/R/issues/N/comments', 2)])
+        ghcache.PAR_CHEMIN.clear()
+        self.assertEqual(ghcache.detail_comptees(), [])
+
 class LireVide(unittest.TestCase):
     def avec(self, reponses):
         """Remplace une lecture par une suite de (JSON, vide confirmée par le cache en 304) ; rend le nombre de lectures."""

@@ -35,6 +35,10 @@ class LigneAppels(unittest.TestCase):
         j = "plein : 280 appels comptés (0 en 304 gratuits sur 280), 90 s\nléger : 9 appels comptés (1 en 304 gratuits sur 10), 2 s\n"
         self.assertTrue(economie.ligne_appels(j).startswith('léger : 9'))
 
+    def test_les_chemins_les_plus_couteux_suivent_la_ligne_comptee(self):
+        j = "léger : 9 appels comptés (1 en 304 gratuits sur 10), 2 s, 3 reprises\nappels comptés par chemin : repos/R/issues 6, repos/R/pulls/N 3\n"
+        self.assertEqual(economie.ligne_appels(j), "léger : 9 appels comptés (1 en 304 gratuits sur 10), 2 s, 3 reprises ; appels comptés par chemin : repos/R/issues 6, repos/R/pulls/N 3")
+
     def test_absente_ou_vide_rend_vide_jamais_un_zero(self):
         for j in ('', None, 'rien à voir\nautre ligne'):
             self.assertEqual(economie.ligne_appels(j), '')
