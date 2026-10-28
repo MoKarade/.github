@@ -194,6 +194,11 @@ export async function fileDuDepot({ api, depot, frein = null, maintenant = new D
       places: d.places,
       eligibleDepuis: tache ? eligibleDepuis({ tache, deps, places: d.places, libereA }) : null,
       illisibles,
+      // Ce que le Réacteur lit pour confier la première tâche réservée à Jules (scripts/jules-auto.mjs, `confierJulesDuDepot`, tâche #704).
+      reservees: d.reservees_jules,
+      julesEnCours: d.jules_en_cours,
+      occupePar: d.occupe_par,
+      incidents: d.incidents,
     };
   } catch (e) {
     return { statut: 'illisible', suivante: null, suivantes: [], places: null, eligibleDepuis: null, illisibles: [], erreur: e.message };
