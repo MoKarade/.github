@@ -512,7 +512,7 @@ test('garde_fou_rouge : reacteur.yml écoute le Garde-fou et le commun reveil-re
   const reacteur = lire('reacteur.yml');
   assert.match(reacteur, /workflow_run:\s*\n(?:\s*#[^\n]*\n)*\s*workflows: \[CI, Garde-fou\]/);
   assert.match(reacteur, /github\.event\.workflow_run\.name == 'Garde-fou' && 'garde_fou_rouge' \|\| 'ci_rouge'/);
-  assert.match(lire('reveil-reacteur.yml'), /pr_fusionnee \| pr_ouverte \| tache_fermee \| tache_ouverte \| tache_reservee \| deploiement \| commentaire \| fin_de_cron \| note_lia \| ci_rouge \| garde_fou_rouge \| filet/);
+  assert.match(lire('reveil-reacteur.yml'), /pr_fusionnee \| pr_ouverte \| tache_fermee \| tache_ouverte \| tache_reservee \| deploiement \| preuve_page \| commentaire \| fin_de_cron \| note_lia \| ci_rouge \| garde_fou_rouge \| filet/);
 });
 
 test('pr_ouverte : sans jeton un avertissement, aucune écriture ; balayage qui échoue = avertissement, jamais d’exception', async () => {
@@ -1066,4 +1066,49 @@ test('traiter : sans jeton ni boîte locale, avertissement comme avant ; avec je
   const api = async (methode, chemin) => { lectures.push(`${methode} ${chemin}`); return null; };
   await traiter({ boites: {}, api, evt: { type: 'tache_fermee', depot: 'MoKarade/CarAI', issue: '1' }, jetonReveil: 'jeton', journal: () => {} });
   assert.ok(!lectures.some((l) => l.includes('/pulls?state=open&head=')), 'avec le jeton, rien ne change');
+});
+
+// Classe B (scripts/fini-quand.mjs, scripts/preuve-page.mjs, tâche MoKarade/.github#781).
+const FINI_B = '**Fini quand** (classe B) : la page des totaux s’affiche.\n**Lecture de page** : GET /totaux → 200, contient « Total »';
+
+test('PR fusionnée : tâche de classe B dans un dépôt qui a preuve-page.yml : la machine la lit, aucune « preuve à poser »', async () => {
+  const { api } = faux({
+    '/repos/MoKarade/JobAI/pulls/7': { body: 'Tâche : #115', user: humain },
+    '/repos/MoKarade/JobAI/issues/115': tache({ body: FINI_B }),
+    '/repos/MoKarade/JobAI/issues/115/comments': [],
+    '/repos/MoKarade/JobAI/contents/.github/workflows/preuve-page.yml': { name: 'preuve-page.yml' },
+  });
+  const d = await decider({ api, evt: { type: 'pr_fusionnee', depot: 'MoKarade/JobAI', pr: '7' } });
+  assert.equal(d.motif, 'RÉACTEUR : MoKarade/JobAI libre ; PR #7 fusionnée ; MoKarade/JobAI#115 lue par la classe B');
+  assert.doesNotMatch(d.motif, /preuve à poser/);
+});
+
+test('PR fusionnée : classe B sans preuve-page.yml, ou mal écrite, ou classe A : preuve à poser comme avant', async () => {
+  const sans = faux({
+    '/repos/MoKarade/JobAI/pulls/7': { body: 'Tâche : #115', user: humain },
+    '/repos/MoKarade/JobAI/issues/115': tache({ body: FINI_B }),
+    '/repos/MoKarade/JobAI/issues/115/comments': [],
+  });
+  assert.match((await decider({ api: sans.api, evt: { type: 'pr_fusionnee', depot: 'MoKarade/JobAI', pr: '7' } })).motif, /preuve à poser sur MoKarade\/JobAI#115/);
+  for (const body of ['**Fini quand** (classe B) : x', '**Fini quand** (classe A) : `npm test`', '**Fini quand** : x']) {
+    const f = faux({
+      '/repos/MoKarade/JobAI/pulls/7': { body: 'Tâche : #115', user: humain },
+      '/repos/MoKarade/JobAI/issues/115': tache({ body }),
+      '/repos/MoKarade/JobAI/issues/115/comments': [],
+      '/repos/MoKarade/JobAI/contents/.github/workflows/preuve-page.yml': { name: 'preuve-page.yml' },
+    });
+    assert.match((await decider({ api: f.api, evt: { type: 'pr_fusionnee', depot: 'MoKarade/JobAI', pr: '7' } })).motif, /preuve à poser sur MoKarade\/JobAI#115/, body);
+  }
+});
+
+test('preuve_page : lecture refusée = preuve à poser par le fil ; sans numéro = rien ; acceptée = dépôt libre', async () => {
+  const { api } = faux();
+  const echec = await decider({ api, evt: { type: 'preuve_page', depot: 'MoKarade/JobAI', issue: '115', pr: '7', raison: 'echec' } });
+  assert.equal(echec.action, 'reveiller');
+  assert.equal(echec.motif, 'RÉACTEUR : preuve à poser sur MoKarade/JobAI#115 ; classe B : la lecture de la page en mode fictif n’a pas abouti ; PR #7');
+  assert.deepEqual(echec.sujets, [115]);
+  assert.equal((await decider({ api, evt: { type: 'preuve_page', depot: 'MoKarade/JobAI', issue: '', raison: 'echec' } })).action, 'rien');
+  const ok = await decider({ api, evt: { type: 'preuve_page', depot: 'MoKarade/JobAI', issue: '115', pr: '7', raison: 'acceptee' } });
+  assert.equal(ok.action, 'reveiller');
+  assert.match(ok.motif, /tâche MoKarade\/JobAI#115 acceptée seule/);
 });
