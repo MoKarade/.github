@@ -66,7 +66,7 @@ export function corpsDeLEchec({ depot, workflow, runId, runUrl, sha, ligne, conc
     `**${nettoyer(workflow, 80)}** a fini en échec (${nettoyer(conclusion, 20)}) dans ${nettoyer(depot, 80)}.`,
     '',
     `- Run : ${lien}`,
-    sha ? `- Commit : \`${nettoyer(sha, 40).slice(0, 7)}\`` : '',
+    /^[0-9a-f]{7,64}$/i.test(String(sha ?? '')) ? `- Commit : \`${String(sha).slice(0, 7)}\`` : '',
     ligne ? `- Où : ${ligne}` : '',
     '',
     `Cette issue se referme toute seule au prochain succès de ce workflow (docs/boucle-erreur.md). Étiquette \`${LABEL}\`.`,
