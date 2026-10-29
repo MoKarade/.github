@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { LABEL_ATTEND_MARC, TITRE_ATTEND_MARC, prAttendantMarc } from './attend-marc.mjs';
-import { DEPOT_BOITE, DEPOT_GITHUB, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, TYPES_BALAYAGE, WORKFLOWS_BALAYAGE, WORKFLOWS_GARDE_FOU_ROUGE, WORKFLOWS_PR_OUVERTE, BOITE_PC, construireMotif, decider, lireCommentairePc, estPanneRunner, heureQuebec, occupations, travaux, signeLibre, preuveAPoser, rougeDepuis, traiter } from './reveil-reacteur.mjs';
+import { ETIQUETTE_SANS_JETON, leverSansJeton, signalerSansJeton, titreSansJeton, DEPOT_BOITE, DEPOT_GITHUB, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, TYPES_BALAYAGE, WORKFLOWS_BALAYAGE, WORKFLOWS_GARDE_FOU_ROUGE, WORKFLOWS_PR_OUVERTE, BOITE_PC, construireMotif, decider, lireCommentairePc, estPanneRunner, heureQuebec, occupations, travaux, signeLibre, preuveAPoser, rougeDepuis, traiter } from './reveil-reacteur.mjs';
 
 // Fausse API GitHub en mémoire : les lectures viennent de `donnees`, les écritures sont gardées.
 function faux(donnees = {}) {
@@ -278,7 +278,8 @@ test('traiter : PR fusionnée et CI rouge lancent aussi les balayages ; le filet
 
   const sansJeton = faux();
   await traiter({ boites: {}, api: sansJeton.api, evt: { type: 'tache_fermee', depot: 'MoKarade/CarAI', issue: '1' }, jetonReveil: '', journal: () => {} });
-  assert.equal(sansJeton.ecritures.length, 0);
+  // Aucun réveil sans jeton : la seule écriture est l'alerte « réveil impossible » (#826).
+  assert.deepEqual(sansJeton.ecritures.map((e) => `${e.methode} ${e.chemin}`), ['POST /repos/MoKarade/CarAI/issues']);
 });
 
 test('traiter : jeton sans droit sur .github : avertissement, le réveil reste fait et rien ne lève', async () => {
@@ -321,7 +322,8 @@ test('traiter : sans jeton, aucun appel d’écriture et un avertissement qui le
   const lignes = [];
   const r = await traiter({ boites: {}, api, evt: { type: 'tache_fermee', depot: 'MoKarade/CarAI', issue: '1', raison: 'completed' }, jetonReveil: '', journal: (l) => lignes.push(l) });
   assert.equal(r.reveille, false);
-  assert.equal(ecritures.length, 0);
+  // Aucun réveil ni dispatch : la seule écriture est l'alerte « réveil impossible » (#826).
+  assert.deepEqual(ecritures.map((e) => `${e.methode} ${e.chemin}`), ['POST /repos/MoKarade/CarAI/issues']);
   assert.match(lignes[0], /^::warning::.*REVEIL_TOKEN/);
 });
 
@@ -1169,4 +1171,71 @@ test('relevé PC : traiter réveille la boîte demandée par la décision, pas c
 test('relevé PC : la boîte PC est la PR brouillon permanente d’app-template, distincte de toutes les autres', () => {
   assert.equal(BOITE_PC, 211);
   assert.ok(![...Object.values(BOITES), NUMERO_BOITE].includes(BOITE_PC));
+});
+
+// Réveil impossible rendu visible (tâche MoKarade/.github#826).
+const CARAI = 'MoKarade/CarAI';
+const SANS_JETON = `/repos/${CARAI}/issues`;
+const alerteOuverte = (extra = {}) => ({ number: 251, labels: [{ name: ETIQUETTE_SANS_JETON }], ...extra });
+
+test('sans jeton ni boîte locale : une issue unique « Réacteur sans jeton » est ouverte avec l’étiquette dédiée, jamais `incident`', async () => {
+  const f = faux();
+  const lignes = [];
+  const r = await traiter({ boites: {}, api: f.api, evt: { type: 'tache_fermee', depot: CARAI, issue: '248', raison: 'completed' }, jetonReveil: '', journal: (l) => lignes.push(l) });
+  assert.equal(r.reveille, false);
+  assert.equal(f.ecritures.length, 1);
+  const [e] = f.ecritures;
+  assert.equal(`${e.methode} ${e.chemin}`, `POST ${SANS_JETON}`);
+  assert.equal(e.jeton, undefined, 'le jeton du job, aucun nouveau secret');
+  assert.equal(e.corps.title, titreSansJeton(CARAI));
+  assert.deepEqual(e.corps.labels, [ETIQUETTE_SANS_JETON]);
+  assert.ok(!e.corps.labels.includes('incident'), 'un incident coupe la file du dépôt');
+  assert.match(e.corps.body, /REVEIL_TOKEN/);
+  assert.match(e.corps.body, /sur #248/);
+  assert.doesNotMatch(e.corps.body, /ghp_|github_pat_/);
+  assert.ok(lignes.some((l) => l.includes('ouverte')));
+});
+
+test('sans jeton : une alerte déjà ouverte n’est pas dupliquée (les PR ne comptent pas) ; l’API qui refuse (PR de fork) donne un avertissement, jamais une exception', async () => {
+  const deja = faux({ [SANS_JETON]: [alerteOuverte()] });
+  assert.equal(await signalerSansJeton({ api: deja.api, evt: { type: 'filet', depot: CARAI }, journal: () => {} }), null);
+  assert.equal(deja.ecritures.length, 0);
+  // une PR portant l'étiquette n'est pas une alerte
+  const pr = faux({ [SANS_JETON]: [alerteOuverte({ pull_request: {} })] });
+  await signalerSansJeton({ api: pr.api, evt: { type: 'filet', depot: CARAI }, journal: () => {} });
+  assert.equal(pr.ecritures.length, 1);
+  const lignes = [];
+  const lecture = async (methode) => { if (methode === 'GET') return []; throw new Error('HTTP 403 sur POST'); };
+  assert.equal(await signalerSansJeton({ api: lecture, evt: { type: 'tache_fermee', depot: CARAI }, journal: (l) => lignes.push(l) }), null);
+  assert.ok(lignes.some((l) => l.startsWith('::warning::') && l.includes('403')));
+});
+
+test('sans jeton mais boîte locale : le réveil passe, aucune alerte', async () => {
+  const f = faux({ [`/repos/${MEM}/pulls`]: [boiteLocale()] });
+  await traiter({ api: f.api, evt: { type: 'tache_fermee', depot: MEM, issue: '9', raison: 'completed' }, jetonReveil: '', journal: () => {} });
+  assert.ok(!f.ecritures.some((e) => e.chemin === `/repos/${MEM}/issues`), 'pas d’issue créée');
+});
+
+test('réveil réussi avec jeton : l’alerte ouverte est commentée puis fermée ; sans alerte ouverte, rien d’écrit en plus', async () => {
+  const f = faux({ [SANS_JETON]: [alerteOuverte()] });
+  const lignes = [];
+  const r = await traiter({ boites: { [CARAI]: 199 }, api: f.api, evt: { type: 'tache_fermee', depot: CARAI, issue: '1', raison: 'completed' }, jetonReveil: 'jeton', journal: (l) => lignes.push(l) });
+  assert.equal(r.reveille, true);
+  const ecrits = f.ecritures.map((e) => `${e.methode} ${e.chemin}`);
+  assert.ok(ecrits.includes(`POST ${SANS_JETON}/251/comments`));
+  const ferme = f.ecritures.find((e) => e.methode === 'PATCH');
+  assert.equal(ferme.chemin, `${SANS_JETON}/251`);
+  assert.deepEqual(ferme.corps, { state: 'closed', state_reason: 'completed' });
+  assert.ok(lignes.some((l) => l.includes('fermée')));
+
+  const propre = faux();
+  await traiter({ boites: { [CARAI]: 199 }, api: propre.api, evt: { type: 'tache_fermee', depot: CARAI, issue: '1', raison: 'completed' }, jetonReveil: 'jeton', journal: () => {} });
+  assert.ok(!propre.ecritures.some((e) => e.methode === 'PATCH' || e.chemin === SANS_JETON));
+});
+
+test('leverSansJeton : une erreur de l’API est un avertissement, jamais une exception', async () => {
+  const lignes = [];
+  const casse = async () => { throw new Error('HTTP 500'); };
+  assert.deepEqual(await leverSansJeton({ api: casse, evt: { depot: CARAI }, journal: (l) => lignes.push(l) }), []);
+  assert.ok(lignes.some((l) => l.startsWith('::warning::') && l.includes('500')));
 });
