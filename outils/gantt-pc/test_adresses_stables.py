@@ -25,6 +25,17 @@ class AdressesStables(unittest.TestCase):
         self.assertRegex(corps, r"since_url = iso\(debut\.replace\(hour=0, minute=0, second=0, microsecond=0\)\)")
         self.assertIn("i['updated_at'] >= iso(debut)", corps)
 
+    def test_actions_rapide_ne_liste_que_les_depots_prives_dans_la_fenetre(self):
+        # 29/10/2026 : `actions/runs` = 27 à 28 appels par passage, dépôts devenus publics la veille compris. La fenêtre rapide (36 h) ne scrute que
+        # les dépôts qui ont été privés dans cette fenêtre ; le relevé complet horaire relit le mois pour tous.
+        src = texte('quota.py')
+        m = re.search(r"def actions\(\):.*?todo, en_cours = ", src, re.S)
+        self.assertIsNotNone(m)
+        corps = m.group(0)
+        self.assertRegex(corps, r"depuis = iso\(max\(mois0, NOW - 36 \* H\)\) if RAPIDE else since")
+        self.assertRegex(corps, r"scrutes = \[r for r in REPOS if visibilite\.a_ete_prive_depuis\(vis, r, depuis\)\]")
+        self.assertLess(corps.index('depuis = iso'), corps.index('scrutes = '))
+
     def test_arrondi_au_jour_ne_change_pas_dans_la_journee(self):
         import datetime
         utc = datetime.timezone.utc
