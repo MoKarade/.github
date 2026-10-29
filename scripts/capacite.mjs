@@ -4,7 +4,7 @@
 // après la mesure de la semaine : jusqu'à 13 `en-cours` à la fois dans .github). Historique : DEUX travaux le 21/10/2026 à 13:21Z, UN seul de 20:00Z (« 124 », économiser le quota Claude) au 26/10/2026 ; la mécanique à fichiers disjoints a toujours été en place
 // et se règle en changeant `PLACES_PAR_DEPOT` (les tests de parallélisme tournent à deux places, `places-deux.mjs`, ceux de production sans limite, `places-production.test.mjs`).
 // Un travail est une tâche `en-cours`, ou la PR ouverte d'une tâche (une tâche `jules` n'en est pas un depuis le 23/10/2026).
-// Ce module ne fait que des fonctions pures, partagées par `prochaine-tache.mjs` (la file), `jules-auto.mjs` (fichiers déjà pris)
+// Ce module ne fait que des fonctions pures, partagées par `prochaine-tache.mjs` (la file)
 // et testées sans réseau : lire les fichiers qu'une tâche déclare, et dire si deux travaux peuvent avancer ensemble.
 //
 // Règle du doute : un travail dont les fichiers ne sont pas déclarés (ou illisibles) n'est compatible avec RIEN. Dans le doute, un seul.
@@ -20,9 +20,9 @@ export const PLACES_PAR_DEPOT = Number(process.env.PLACES_ENV) || SANS_LIMITE;
 // (une ligne ajoutée par ADR). Tout autre fichier commun (package.json, lockfile, CLAUDE.md, AGENTS.md…) compte.
 const JOURNAUX = /(^|\/)(HANDOVER|CHANGELOG)\.md$|^docs\/(INDEX|adr\/README)\.md$/i;
 
-// « **Fichiers permis** (aucun autre) : » (gabarit Jules, docs/jules-gabarit-issue.md) ou « **Fichiers touchés** : » (tâche écrite pour Claude),
+// « **Fichiers permis** (aucun autre) : » (PR de Jules, `jules-suivi.mjs`) ou « **Fichiers touchés** : » (tâche écrite pour Claude),
 // suivi d'une liste à puces. Même grammaire que `fichiers_declares` de outils/gantt-pc/fetch.py. Un corps peut porter les deux (une estimation
-// automatique de `fichiers-touches.mjs`, puis le « Fichiers permis » exact du gabarit Jules) : « permis » d'abord, « touchés » à défaut.
+// automatique de `fichiers-touches.mjs`, puis un « Fichiers permis » exact) : « permis » d'abord, « touchés » à défaut.
 const SECTION = /^\s*\*\*\s*Fichiers (permis|touchés)\s*\*\*[^\n]*\n((?:[ \t]*[-*][ \t][^\n]*(?:\n|$))+)/gim;
 
 const nettoyer = (c) => String(c).trim().replace(/^\.\//, '').replace(/[`,;:.]+$/g, '').replace(/\\/g, '/');

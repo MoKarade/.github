@@ -16,7 +16,7 @@ name: Réacteur
 # commun relit le dépôt avec le jeton du job (PR rouge depuis plus de 30 min, incident ouvert, branche par défaut rouge) et ne
 # réveille que s'il y a un signal qui n'a pas déjà été posté sur la boîte dans les 6 dernières heures.
 # Phase 4, « rien ne dépend d'un minuteur » (tâche MoKarade/.github#712, demande de Marc du 28/10/2026) : plus de `schedule` ici. Chaque chose qui devait attendre
-# une passe a son événement : une tâche qui s'ouvre, change ou perd une étiquette (`tache_ouverte`, ou `tache_reservee` pour `faisable-jules`, qui part chez Jules), un
+# une passe a son événement : une tâche qui s'ouvre, change ou perd une étiquette (`tache_ouverte`), un
 # déploiement de production réussi (`deploiement` : la tâche de la PR fusionnée s'accepte seule), un commentaire (`commentaire` : une preuve différée due se lit),
 # la fin d'un cron d'app (`repository_dispatch` `fin-de-cron`), une note de LIA (`note-lia`). Le filet (`filet`) ne part plus que sur `workflow_dispatch` ou sur un
 # `repository_dispatch` `filet` : le battement externe de la tâche #720 sera le seul minuteur, et il vit hors de GitHub.
@@ -93,7 +93,7 @@ jobs:
       runner: ${{ github.event.repository.visibility == 'public' && '"ubuntu-latest"' || '["self-hosted","pc-marc"]' }}
       type: >-
         ${{ github.event_name == 'pull_request' && (github.event.action == 'closed' && 'pr_fusionnee' || 'pr_ouverte')
-        || github.event_name == 'issues' && (github.event.action == 'closed' && 'tache_fermee' || github.event.action == 'labeled' && github.event.label.name == 'faisable-jules' && 'tache_reservee' || 'tache_ouverte')
+        || github.event_name == 'issues' && (github.event.action == 'closed' && 'tache_fermee' || 'tache_ouverte')
         || github.event_name == 'workflow_run' && (github.event.workflow_run.name == 'Garde-fou' && 'garde_fou_rouge' || 'ci_rouge')
         || github.event_name == 'deployment_status' && 'deploiement'
         || github.event_name == 'issue_comment' && 'commentaire'

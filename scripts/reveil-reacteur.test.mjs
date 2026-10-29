@@ -514,7 +514,7 @@ test('garde_fou_rouge : reacteur.yml écoute le Garde-fou et le commun reveil-re
   const reacteur = lire('reacteur.yml');
   assert.match(reacteur, /workflow_run:\s*\n(?:\s*#[^\n]*\n)*\s*workflows: \[CI, Garde-fou\]/);
   assert.match(reacteur, /github\.event\.workflow_run\.name == 'Garde-fou' && 'garde_fou_rouge' \|\| 'ci_rouge'/);
-  assert.match(lire('reveil-reacteur.yml'), /pr_fusionnee \| pr_ouverte \| tache_fermee \| tache_ouverte \| tache_reservee \| deploiement \| preuve_page \| commentaire \| fin_de_cron \| note_lia \| ci_rouge \| garde_fou_rouge \| filet/);
+  assert.match(lire('reveil-reacteur.yml'), /pr_fusionnee \| pr_ouverte \| tache_fermee \| tache_ouverte \| deploiement \| preuve_page \| commentaire \| fin_de_cron \| note_lia \| ci_rouge \| garde_fou_rouge \| filet/);
 });
 
 test('pr_ouverte : sans jeton un avertissement, aucune écriture ; balayage qui échoue = avertissement, jamais d’exception', async () => {
@@ -550,7 +550,7 @@ test('reacteur.yml écoute chaque événement qui remplace un minuteur, et envoi
   for (const a of ['closed', 'opened', 'edited', 'labeled', 'unlabeled']) assert.ok(types[1].split(',').map((x) => x.trim()).includes(a), `issues « ${a} » non écouté`);
   for (const evt of ['deployment_status:', 'issue_comment:', 'repository_dispatch:']) assert.ok(reacteur.includes(`\n  ${evt}`), `${evt} non écouté`);
   assert.match(reacteur, /repository_dispatch:\s*\n\s*types: \[fin-de-cron, note-lia, filet\]/);
-  for (const t of ['tache_ouverte', 'tache_reservee', 'deploiement', 'commentaire', 'fin_de_cron', 'note_lia']) assert.ok(reacteur.includes(`'${t}'`), `type ${t} non envoyé`);
+  for (const t of ['tache_ouverte', 'deploiement', 'commentaire', 'fin_de_cron', 'note_lia']) assert.ok(reacteur.includes(`'${t}'`), `type ${t} non envoyé`);
   // La preuve ne se lit qu'à la fermeture ; une rafale d'étiquettes ne lance qu'un passage, sans jamais annuler une fermeture.
   assert.match(reacteur, /github\.event\.action == 'closed' && contains\(github\.event\.issue\.labels\.\*\.name, 'niveau:tâche'\)\n    permissions/);
   assert.match(reacteur, /cancel-in-progress: \$\{\{ github\.event_name == 'issues' && github\.event\.action != 'closed' \}\}/);
@@ -732,110 +732,6 @@ test('le Réacteur nomme la suivante sans que le PC tourne : aucune lecture de p
   assert.doesNotMatch(source, /readFileSync|existsSync/);
 });
 
-// ---- Jules à l'événement (tâche MoKarade/.github#704) : la première tâche réservée est confiée par le Réacteur, sans le tour du PC.
-const corpsJules = (n) => [
-  ['Avant', '`lib/format.ts` n\'a aucun test.'], ['Après', 'Un test couvre `formatKm`.'], ['Fini quand', '`npm run test -- format` affiche 3 tests verts.'],
-  ['Fichiers permis', '(aucun autre) :\n- `lib/format.test.ts`'], ['À faire', '1. Écrire trois cas.'], ['À ne pas faire', 'Ne pas modifier `lib/format.ts`.'],
-  ['Vérifier', '`npm run test -- format`'], ['À citer dans la PR', `\`Tâche : #${n}\` ; sujet de commit : \`test: ajouter les cas\``],
-].map(([k, v]) => (k === 'Fichiers permis' ? `**${k}** ${v}` : `**${k}** : ${v}`)).join('\n\n') + '\n\n**Attend** : aucune\n';
-const reservee = (n = 31, extra = {}) => ({
-  number: n, title: `Titre secret ${n}`, state: 'open', created_at: '2026-10-28T10:00:00Z', html_url: `https://github.com/${DEPOT}/issues/${n}`,
-  labels: [{ name: 'niveau:tâche' }, { name: 'faisable-jules' }], body: corpsJules(n), ...extra,
-});
-const donneesJules = (extra = {}, depot = DEPOT) => ({
-  [`/repos/${depot}/issues?state=open&per_page=100&page=1`]: [reservee()],
-  [`/repos/${depot}/issues/31`]: reservee(),
-  [`/repos/${depot}/issues/31/comments`]: [],
-  '/search/issues': { total_count: 0 },
-  ...extra,
-});
-const ecritureJules = (ecritures) => ecritures.filter((e) => /\/issues\/31\/(labels|comments)$/.test(e.chemin));
-
-test('tâche fermée : la tâche réservée est confiée à Jules par le Réacteur, et le réveil le dit par son numéro', async () => {
-  const f = faux(donneesJules());
-  const d = await decider({ api: f.api, evt: { type: 'tache_fermee', depot: DEPOT, issue: '90', raison: 'completed' } });
-  assert.equal(d.jules.n, 31);
-  assert.match(d.motif, /jules : #31 confiée/);
-  assert.doesNotMatch(d.motif, /Titre secret/);
-  const e = ecritureJules(f.ecritures);
-  assert.equal(e[0].chemin, `/repos/${DEPOT}/issues/31/labels`);
-  assert.deepEqual(e[0].corps, { labels: ['jules'] });
-  assert.match(e[1].corps.body, /^Confiée à Jules automatiquement/);
-});
-
-test('Jules part même dans un dépôt dont les deux places sont prises ; le Coordinateur n’est pas réveillé pour autant', async () => {
-  const enCours = (n, f) => tachePrete(n, { labels: [{ name: 'niveau:tâche' }, { name: 'en-cours' }], body: `**Fini quand** : ok\n\n**Fichiers touchés** :\n- \`${f}\`\n\n**Attend** : aucune\n` });
-  const deux = [enCours(50, 'app/a.ts'), enCours(51, 'app/b.ts')];
-  const f = faux(donneesJules({ [`/repos/${DEPOT}/issues?labels=en-cours&state=open&per_page=30`]: deux, [`/repos/${DEPOT}/issues?state=open&per_page=100&page=1`]: [...deux, reservee()] }));
-  const d = await decider({ api: f.api, evt: { type: 'tache_fermee', depot: DEPOT, issue: '90', raison: 'completed' } });
-  assert.equal(d.action, 'rien');
-  assert.equal(d.raison, 'dépôt encore occupé');
-  assert.equal(d.jules.n, 31);
-  assert.equal(ecritureJules(f.ecritures).length, 2);
-});
-
-test('PR fusionnée : la tâche réservée part chez Jules, sans fichier d’état ni tour du PC', async () => {
-  const f = faux(donneesJules({ [`/repos/${DEPOT}/pulls/7`]: { number: 7, body: 'Tâche : #40', user: humain, merged_at: '2026-10-28T20:00:00Z' }, [`/repos/${DEPOT}/issues/40`]: tache({ number: 40 }) }));
-  const d = await decider({ api: f.api, evt: { type: 'pr_fusionnee', depot: DEPOT, pr: '7' }, accepter: async () => ({ statut: 'ignoree' }) });
-  assert.match(d.motif, /jules : #31 confiée ; PR #7 fusionnée/);
-  assert.equal(ecritureJules(f.ecritures).length, 2);
-});
-
-test('tâche réservée (étiquette posée) : Jules la prend tout de suite, personne n’est réveillé', async () => {
-  const f = faux(donneesJules());
-  const d = await decider({ api: f.api, evt: { type: 'tache_reservee', depot: DEPOT, issue: '31' } });
-  assert.equal(d.action, 'rien');
-  assert.equal(d.raison, 'tâche #31 confiée à Jules');
-  const journal = [];
-  await traiter({ boites: {}, api: faux(donneesJules()).api, evt: { type: 'tache_reservee', depot: DEPOT, issue: '31' }, jetonReveil: 'x', journal: (l) => journal.push(l) });
-  assert.ok(journal.some((l) => l.includes('#31') && l.includes('confiée à Jules')));
-});
-
-test('filet : une tâche réservée dont l’événement a été manqué part ici ; rien à signaler = aucun réveil', async () => {
-  const f = faux(donneesJules());
-  const d = await decider({ api: f.api, evt: { type: 'filet', depot: DEPOT, brancheDefaut: 'main' } });
-  assert.equal(d.action, 'rien');
-  assert.equal(d.raison, 'rien à signaler');
-  assert.equal(d.jules.n, 31);
-});
-
-test('Jules : plafond de trois, dépôt gelé, tâche déjà confiée deux fois ou corps incomplet = rien n’est écrit', async () => {
-  const evt = { type: 'tache_reservee', depot: DEPOT, issue: '31' };
-  const rien = async (api, e = evt) => { const f = faux(api); const d = await decider({ api: f.api, evt: e }); assert.equal(d.jules, undefined); assert.equal(f.ecritures.length, 0); return d; };
-  await rien(donneesJules({ '/search/issues': { total_count: 3 } }));
-  await rien(donneesJules({ '/search/issues': new Error('HTTP 403') }));
-  await rien(donneesJules({}, 'MoKarade/MemoryAI'), { ...evt, depot: 'MoKarade/MemoryAI' });
-  const marque = { body: 'Confiée à Jules automatiquement par le filet du PC (ancien texte).' };
-  await rien(donneesJules({ [`/repos/${DEPOT}/issues/31/comments`]: [marque, marque] }));
-  await rien(donneesJules({ [`/repos/${DEPOT}/issues/31`]: reservee(31, { body: 'Faire le truc.' }) }));
-});
-
-test('Jules : le plafond compte les Jules des autres dépôts, hors le dépôt lui-même', async () => {
-  const f = faux(donneesJules({ '/search/issues': { total_count: 2 } }));
-  const d = await decider({ api: f.api, evt: { type: 'tache_reservee', depot: DEPOT, issue: '31' } });
-  assert.equal(d.jules.n, 31, 'deux ailleurs, un de plus = trois');
-  const plein = faux(donneesJules({ '/search/issues': { total_count: 3 } }));
-  assert.equal((await decider({ api: plein.api, evt: { type: 'tache_reservee', depot: DEPOT, issue: '31' } })).jules, undefined);
-});
-
-test('le Réacteur confie à Jules sans le PC : ni prochaines.json ni fichier d’état dans le tour', () => {
-  for (const f of ['jules-auto.mjs', 'reveil-reacteur.mjs']) {
-    const source = readFileSync(new URL(`./${f}`, import.meta.url), 'utf8');
-    assert.doesNotMatch(source, /readFileSync|writeFileSync|existsSync|execFileSync/, f);
-  }
-});
-
-test('Jules : une réservée non prête est dite au journal avec sa première raison, sans réveiller personne', async () => {
-  const journal = [];
-  const api = faux(donneesJules({ [`/repos/${DEPOT}/issues/31`]: reservee(31, { body: 'Faire le truc.' }) })).api;
-  const d = await traiter({ boites: {}, api, evt: { type: 'tache_reservee', depot: DEPOT, issue: '31' }, jetonReveil: 'x', journal: (l) => journal.push(l) });
-  assert.equal(d.action, 'rien');
-  assert.ok(journal.some((l) => l.includes('Jules n\'a rien pris') && l.includes('sections absentes')), journal.join('\n'));
-  const sans = [];
-  await traiter({ boites: {}, api: faux({ [`/repos/${DEPOT}/issues?state=open&per_page=100&page=1`]: [] }).api, evt: { type: 'tache_reservee', depot: DEPOT, issue: '31' }, jetonReveil: 'x', journal: (l) => sans.push(l) });
-  assert.ok(!sans.some((l) => l.includes('Jules n\'a rien pris')), 'aucune réservée : rien à dire');
-});
-
 // ---- Les événements ajoutés pour que rien n'attende un minuteur (tâche MoKarade/.github#712).
 const evtOuverte = (issue = '12') => ({ type: 'tache_ouverte', depot: DEPOT, issue });
 
@@ -866,13 +762,6 @@ test('tâche ouverte : une modification de plus du même corps ne repose pas le 
   const d = await decider({ api: faux(donnees).api, evt: evtOuverte(), maintenant });
   assert.equal(d.action, 'rien');
   assert.match(d.raison, /déjà signalé/);
-});
-
-test('tâche ouverte : une tâche réservée à Jules part chez lui et ne réveille personne', async () => {
-  const f = faux(donneesJules());
-  const d = await decider({ api: f.api, evt: evtOuverte('31'), maintenant: new Date('2026-10-28T21:00:00Z') });
-  assert.equal(d.jules.n, 31);
-  assert.equal(d.action, 'rien');
 });
 
 test('verifierAliasVercel : même commit -> valide ; commit différent -> fige ; sans commit -> non_couvert ; injoignable -> erreur', async () => {
@@ -1425,13 +1314,6 @@ test('routine : sans secrets, le réveil est identique et aucun appel ne part', 
   await traiter({ boites: {}, api, appeler, routine: null, evt: { type: 'tache_fermee', depot: 'MoKarade/app-template', issue: '9' }, decisionImposee: decisionPrete(), jetonReveil: 'jeton', journal: () => {} });
   assert.equal(appels.length, 0);
   assert.equal(reveilDe(ecritures), decisionPrete().motif);
-});
-
-test('routine : tâche confiée à Jules → aucun appel', async () => {
-  const { api } = faux(donneesRoutine);
-  const { appeler, appels } = fauxLancement();
-  await traiter({ boites: {}, api, appeler, routine: routineTest, evt: { type: 'tache_fermee', depot: 'MoKarade/app-template', issue: '9' }, decisionImposee: decisionPrete({ jules: { n: 212 } }), jetonReveil: 'jeton', journal: () => {} });
-  assert.equal(appels.length, 0);
 });
 
 test('routine : dépôt dont un fil écoute la boîte (CarAI) → la session neuve part quand même, une seule fois (tâche #871)', async () => {

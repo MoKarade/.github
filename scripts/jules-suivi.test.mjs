@@ -8,7 +8,7 @@ import { tourJulesSuivi } from './filet-pc.mjs';
 import { lireCitation, evaluer } from './preuve.mjs';
 
 const CORPS_TACHE = `**Avant** : x\n\n**Fichiers permis** (aucun autre) :\n- \`tests/navigation.test.ts\`\n\n**À faire** :\n1. y\n`;
-const T = { number: 196, labels: [{ name: 'niveau:tâche' }, { name: 'jules' }, { name: 'faisable-jules' }], body: CORPS_TACHE };
+const T = { number: 196, labels: [{ name: 'niveau:tâche' }, { name: 'jules' }], body: CORPS_TACHE };
 const MAINTENANT = new Date('2026-10-19T19:00:00Z');
 
 test('tachesCitees : Fixes, Closes, Resolves et Tâche : #n, dédoublonnées, titre compris', () => {
@@ -121,7 +121,7 @@ test('suivreDepot : PR de tests fusionnée = Acceptée posée, étiquettes retir
   assert.deepEqual(r.acceptees, ['JobAI#196']);
   const post = appels.find((a) => a.methode === 'POST');
   assert.match(post.corps.body, /^\*\*Acceptée\*\* — PR #197 fusionnée \(a1b2c3d\)/);
-  assert.deepEqual(appels.filter((a) => a.methode === 'DELETE').map((a) => a.chemin.split('/').pop()).sort(), ['faisable-jules', 'jules']);
+  assert.deepEqual(appels.filter((a) => a.methode === 'DELETE').map((a) => a.chemin.split('/').pop()).sort(), ['jules']);
   const patch = appels.find((a) => a.methode === 'PATCH');
   assert.deepEqual(patch.corps, { state: 'closed', state_reason: 'completed' });
   assert.ok(appels.findIndex((a) => a.methode === 'POST') < appels.findIndex((a) => a.methode === 'PATCH'), 'la preuve est posée avant la fermeture');
@@ -205,7 +205,7 @@ test('tourJulesSuivi : sans --executer, rien n’est appliqué et la ligne le di
   assert.ok(!g.appels.some((a) => ['POST', 'PATCH', 'DELETE'].includes(a.methode)));
 });
 
-test('menageFermees : retire en-cours, jules, faisable-jules, preuve-attendue des fermées ; jamais qui:marc, ni les PR, ni les ouvertes ; à blanc n’écrit rien', () => {
+test('menageFermees : retire en-cours, jules, preuve-attendue des fermées ; jamais qui:marc, ni les PR, ni les ouvertes ; à blanc n’écrit rien', () => {
   const fermees = [
     { number: 10, labels: [{ name: 'niveau:tâche' }, { name: 'en-cours' }, { name: 'qui:marc' }, { name: 'jules' }] },
     { number: 11, labels: [{ name: 'niveau:tâche' }] },

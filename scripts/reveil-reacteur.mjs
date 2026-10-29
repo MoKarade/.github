@@ -30,9 +30,6 @@
 // Sur l'ouverture d'une PR (pr_ouverte) il ne réveille PERSONNE et ne commente rien sur app-template#58 : il lance seulement
 // `commentaire-tache-liee.yml`, qui marque la tâche citée `en-cours` en quelques minutes (tâche MoKarade/.github#157).
 //
-// Sur une PR fusionnée, une tâche fermée, une tâche réservée (`tache_reservee` : étiquette `faisable-jules` posée) et le filet, il confie aussi à Jules la première tâche
-// réservée du dépôt (`confierJulesDuDepot`, scripts/jules-auto.mjs, tâche MoKarade/.github#704) : le tour du PC ne confie plus rien. La ligne « jules : #n confiée » entre dans le réveil.
-//
 // « D libre » n'est écrit que si D est VRAIMENT libre (`travaux`) : sans cela, chaque fusion dans un dépôt encore occupé
 // réveillait le Coordinateur pour rien, une quarantaine de fois par heure (tâche MoKarade/.github#164). Deux places par dépôt (décision de
 // Marc, 21/10/2026, tâche #341) : à un seul travail restant, le message dit « D : une place libre » ; à deux, rien. Ce qui demande un
@@ -53,7 +50,6 @@ import { accepterApresFusion } from './acceptation-auto.mjs';
 import { controleFiniQuand } from './fini-quand.mjs';
 import { accepterPreuvesAttendues, LUES_EVENEMENT, LUES_FILET } from './preuve-attendue-auto.mjs';
 import { fileDuDepot } from './file-depot.mjs';
-import { confierJulesDuDepot } from './jules-auto.mjs';
 import { ghSynchrone, lignesDesSignaux, piloteDuJob } from './pilotage-evenement.mjs';
 import { estDeConfiance } from './auteur-de-confiance.mjs';
 import { lancerRoutine } from './routine-prendre.mjs';
@@ -334,16 +330,13 @@ async function dejaSignale({ api, motif, maintenant, depot = '' }) {
 
 async function filet({ api, evt, maintenant }) {
   const lignes = await lignesDuFiletPour({ api, evt, maintenant });
-  // Le filet est aussi le rattrapage de Jules : une tâche réservée dont l'événement a été manqué part ici (tâche #704).
-  const dit = await julesDe({ api, depot: evt.depot, maintenant });
-  if (lignes.length === 0) return { action: 'rien', raison: 'rien à signaler', ...dit };
-  // La ligne « jules » n'entre pas dans le motif du filet : le réveil du filet dit des signaux, et sa déduplication compare le motif tel quel.
+  if (lignes.length === 0) return { action: 'rien', raison: 'rien à signaler' };
   const motif = construireMotif(lignes);
   // « forcer » (lancement manuel) repose le réveil même si le même signal vient d'être posté : c'est une demande d'essai.
   if (evt.forcer !== 'true' && (await dejaSignale({ api, motif, maintenant, depot: evt.depot }))) {
-    return { action: 'rien', raison: `déjà signalé sur la boîte dans les ${FENETRE_FILET_H} dernières heures`, ...dit };
+    return { action: 'rien', raison: `déjà signalé sur la boîte dans les ${FENETRE_FILET_H} dernières heures` };
   }
-  return { action: 'reveiller', motif, ...dit };
+  return { action: 'reveiller', motif };
 }
 
 async function commentairesDe(api, depot, numero, depuis = '') {
@@ -411,26 +404,6 @@ async function suivanteDe({ api, depot, maintenant, exclure = [] }) {
   const file = await fileDuDepot({ api, depot, maintenant, exclure, libereA: maintenant.toISOString() }).catch(() => null);
   return file?.suivante ? { ligne: `suivante : #${file.suivante}`, file, brut: file } : { ligne: '', file: null, brut: file };
 }
-
-/**
- * Jules prend la première tâche réservée (`faisable-jules`) du dépôt à cet événement (tâche MoKarade/.github#704, §5 quater) : plus de tour du PC.
- * Part même dans un dépôt occupé (23/10/2026) ; les règles sont celles de `confierJulesDuDepot`. `file` : la file déjà lue pour la suivante, sinon relue ici.
- * Rend { jules } seulement quand une tâche vient d'être confiée (le reste ne change rien à la décision), jamais d'exception.
- */
-async function julesDe({ api, depot, maintenant, file = null, exclure = [] }) {
-  try {
-    const brut = file ?? (await fileDuDepot({ api, depot, maintenant, exclure, libereA: maintenant.toISOString() }).catch(() => null));
-    const jules = await confierJulesDuDepot({ api, depot, file: brut });
-    if (jules.statut === 'confiee') return { jules };
-    // Une réservée qui reste là a sa raison dans le journal (ne réveille personne) ; « aucune tâche réservée » est le cas ordinaire, il ne se dit pas.
-    return jules.statut === 'rien' && jules.raison !== 'aucune tâche réservée' ? { julesRaison: jules.raison } : {};
-  } catch {
-    return {};
-  }
-}
-
-/** La ligne du réveil pour une tâche confiée à Jules : le numéro seulement (règle MoKarade/.github#136). */
-const ligneJules = (dit) => (dit.jules ? `jules : #${dit.jules.n} confiée` : '');
 
 /** « D libre » sans travail, « D : une place libre » avec un seul ; rien quand les deux places sont prises. */
 export function signeLibre(depot, travauxEnCours) {
@@ -578,15 +551,14 @@ async function parLaClasseB({ api, depot, issue }) {
 
 /**
  * Le réveil d'une tâche que le Réacteur vient d'accepter seul hors d'une PR fusionnée (déploiement READY, preuve différée due) : « D libre ; suivante : #n ;
- * tâche D#n acceptée seule », et Jules reçoit sa tâche. Dépôt dont les deux places sont prises : rien (même règle qu'à la fusion). Rend null si rien à dire.
+ * tâche D#n acceptée seule ». Dépôt dont les deux places sont prises : rien (même règle qu'à la fusion). Rend null si rien à dire.
  */
 async function reveilApresAcceptation({ api, depot, maintenant, taches }) {
   const en = await travaux({ api, depot });
   const suite = await suivanteDe({ api, depot, maintenant });
-  const dit = await julesDe({ api, depot, maintenant, file: suite.brut });
-  if (en >= PLACES_PAR_DEPOT) return Object.keys(dit).length ? { raison: 'dépôt encore occupé', ...dit } : null;
+  if (en >= PLACES_PAR_DEPOT) return null;
   const lignes = taches.map((n) => `tâche ${depot}#${n} acceptée seule`);
-  return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), suite.ligne, ligneJules(dit), ...lignes]), ...(suite.file ? { file: suite.file } : {}), ...dit };
+  return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), suite.ligne, ...lignes]), ...(suite.file ? { file: suite.file } : {}) };
 }
 
 /**
@@ -606,13 +578,12 @@ async function deciderEvenement({ api, evt, maintenant, accepter, boitePc = BOIT
     if (!issue || issue.state !== 'open' || !noms.includes(LABEL_TACHE)) return { action: 'rien', raison: 'pas une tâche ouverte' };
     const en = await travaux({ api, depot });
     const suite = await suivanteDe({ api, depot, maintenant });
-    const dit = await julesDe({ api, depot, maintenant, file: suite.brut });
-    if (en >= PLACES_PAR_DEPOT) return { action: 'rien', raison: 'dépôt encore occupé', ...dit };
-    if (suite.brut?.suivante !== n) return { action: 'rien', raison: 'cette tâche n’est pas la suivante', ...dit };
-    const motif = construireMotif([signeLibre(depot, en), suite.ligne, ligneJules(dit), `tâche ${depot}#${n} prête`]);
+    if (en >= PLACES_PAR_DEPOT) return { action: 'rien', raison: 'dépôt encore occupé' };
+    if (suite.brut?.suivante !== n) return { action: 'rien', raison: 'cette tâche n’est pas la suivante' };
+    const motif = construireMotif([signeLibre(depot, en), suite.ligne, `tâche ${depot}#${n} prête`]);
     // Une modification de plus du même corps ne repose pas le même réveil.
-    if (evt.forcer !== 'true' && (await dejaSignale({ api, motif, maintenant, depot }))) return { action: 'rien', raison: `déjà signalé sur la boîte dans les ${FENETRE_FILET_H} dernières heures`, ...dit };
-    return { action: 'reveiller', motif, file: suite.file, sujets: [n], ...dit };
+    if (evt.forcer !== 'true' && (await dejaSignale({ api, motif, maintenant, depot }))) return { action: 'rien', raison: `déjà signalé sur la boîte dans les ${FENETRE_FILET_H} dernières heures` };
+    return { action: 'reveiller', motif, file: suite.file, sujets: [n] };
   }
   // Un déploiement de production réussi : la tâche de la PR fusionnée sur ce commit s'accepte seule si sa règle le permet (la PR a pu fusionner avant la fin du déploiement).
   if (type === 'deploiement') {
@@ -665,7 +636,6 @@ async function deciderEvenement({ api, evt, maintenant, accepter, boitePc = BOIT
     const note = signalSur(evt.signal);
     return { action: 'reveiller', motif: construireMotif([`note LIA reçue sur ${depot}`, note ? `note ${note}` : '']) };
   }
-  // Une tâche vient d'être réservée à Jules (étiquette `faisable-jules` posée) : il la prend tout de suite si le dépôt le permet, sans réveiller personne.
   // Classe B (scripts/preuve-page.mjs, workflow preuve-page.yml) : la page a été lue en mode fictif. Acceptée : la place se libère, le fil suivant est réveillé.
   // Refusée ou lecture impossible : la tâche reste ouverte et le fil de l'app prouve (rien ne se perd, aucun minuteur).
   if (type === 'preuve_page') {
@@ -677,19 +647,13 @@ async function deciderEvenement({ api, evt, maintenant, accepter, boitePc = BOIT
     }
     return { action: 'reveiller', motif: construireMotif([`preuve à poser sur ${depot}#${n}`, 'classe B : la lecture de la page en mode fictif n’a pas abouti', evt.pr ? `PR #${evt.pr}` : '']), sujets: [n] };
   }
-  if (type === 'tache_reservee') {
-    const dit = await julesDe({ api, depot, maintenant });
-    return { action: 'rien', raison: dit.jules ? `tâche #${dit.jules.n} confiée à Jules` : 'rien à confier à Jules', ...dit };
-  }
   if (type === 'tache_fermee') {
     const abandon = evt.raison === 'not_planned' ? ' (abandonnée : vérifier la raison)' : '';
     const en = await travaux({ api, depot });
-    // Jules part même dans un dépôt occupé : la file est lue avant l'éventuel « rien ».
     const suite = await suivanteDe({ api, depot, maintenant });
-    const dit = await julesDe({ api, depot, maintenant, file: suite.brut });
     // Un dépôt dont les deux places sont prises n'a rien de neuf à dire, sauf une tâche abandonnée dont il faut vérifier la raison.
-    if (en >= PLACES_PAR_DEPOT && !abandon) return { action: 'rien', raison: 'dépôt encore occupé', ...dit };
-    return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), suite.ligne, ligneJules(dit), `tâche ${depot}#${evt.issue} fermée${abandon}`]), sujets: [Number(evt.issue), suite.brut?.suivante].filter(Boolean), ...(suite.file ? { file: suite.file } : {}), ...dit };
+    if (en >= PLACES_PAR_DEPOT && !abandon) return { action: 'rien', raison: 'dépôt encore occupé' };
+    return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), suite.ligne, `tâche ${depot}#${evt.issue} fermée${abandon}`]), sujets: [Number(evt.issue), suite.brut?.suivante].filter(Boolean), ...(suite.file ? { file: suite.file } : {}) };
   }
 
   if (type === 'pr_fusionnee') {
@@ -717,11 +681,10 @@ async function deciderEvenement({ api, evt, maintenant, accepter, boitePc = BOIT
     const tachesExclues = taches.filter((t) => t.depot === depot).map((t) => t.numero);
     const en = await travaux({ api, depot, tachesExclues });
     const suite = await suivanteDe({ api, depot, maintenant, exclure: tachesExclues });
-    const jules = await julesDe({ api, depot, maintenant, file: suite.brut });
     // Dépôt dont les deux places sont prises et rien à prouver : la fusion n'apprend rien au Coordinateur.
-    if (en >= PLACES_PAR_DEPOT && preuves.length === 0) return { action: 'rien', raison: 'dépôt encore occupé', ...dit, ...jules };
+    if (en >= PLACES_PAR_DEPOT && preuves.length === 0) return { action: 'rien', raison: 'dépôt encore occupé', ...dit };
     const acceptee = acceptation.statut === 'acceptee' ? `tâche ${depot}#${acceptation.tache} acceptée seule` : '';
-    return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), suite.ligne, ligneJules(jules), `PR #${evt.pr} fusionnée`, acceptee, ...classeB, ...preuves]), sujets: [...tachesExclues, suite.brut?.suivante].filter(Boolean), ...dit, ...jules, ...(suite.file ? { file: suite.file } : {}) };
+    return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), suite.ligne, `PR #${evt.pr} fusionnée`, acceptee, ...classeB, ...preuves]), sujets: [...tachesExclues, suite.brut?.suivante].filter(Boolean), ...dit, ...(suite.file ? { file: suite.file } : {}) };
   }
 
   if (type === 'ci_rouge') {
@@ -816,8 +779,6 @@ async function traiterDecision({ api, evt, jetonReveil, journal = console.log, m
   if (d.differees?.erreur) journal(`::warning::Réacteur : preuves différées non lues (${d.differees.erreur}). Un fil prouvera.`);
   if (d.acceptation?.statut === 'acceptee') journal(`Réacteur : tâche #${d.acceptation.tache} acceptée automatiquement (docs/cycle-de-vie-tache.md §10 ter).`);
   else if (d.acceptation?.statut === 'erreur') journal(`::warning::Réacteur : acceptation automatique non faite (${d.acceptation.motifs.join(' ; ')}). Un fil prouvera.`);
-  if (d.julesRaison) journal(`Réacteur : Jules n'a rien pris dans ${evt.depot} (${d.julesRaison}).`);
-  if (d.jules) journal(`Réacteur : tâche #${d.jules.n} de ${evt.depot} confiée à Jules (docs/cycle-de-vie-tache.md §5 quater).`);
   if (d.action === 'rien') {
     journal(`Réacteur : rien à faire (${d.raison}).`);
     return d;
@@ -838,7 +799,7 @@ async function traiterDecision({ api, evt, jetonReveil, journal = console.log, m
   // Chaque tâche prête, de n'importe quel dépôt, part dans une session neuve (tâche MoKarade/.github#860 pour app-template et hub-contract, étendue à tous les dépôts par la tâche #871, demande de Marc du 29/10/2026 : « à chaque tâche une session neuve » ; docs/cycle-de-vie-tache.md §6).
   // Sans les secrets de la routine, rien ne change ; un lancement raté est un avertissement, jamais une exception. La ligne ajoutée au réveil dit au Coordinateur de ne pas lancer un second fil.
   const suivante = d.file?.suivante;
-  if (routine && suivante && d.jules?.n !== suivante) {
+  if (routine && suivante) {
     const lancee = await lancerRoutine({ api, depot: evt.depot, n: suivante, routine, file: d.file, maintenant, journal, appeler });
     // « déjà lancée » : une session part pour cette tâche et n'a pas encore posé `en-cours` ; le réveil le dit aussi, pour que le Coordinateur ne lance pas un second fil.
     if (lancee.statut === 'lancee' || lancee.statut === 'deja') d = { ...d, routine: { n: suivante }, motif: `${d.motif} ; routine : #${suivante} ${lancee.statut === 'deja' ? 'déjà ' : ''}lancée`.slice(0, LONGUEUR_MAX) };

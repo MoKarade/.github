@@ -11,11 +11,32 @@
 //      au format du garde-fou (`scripts/preuve.mjs`), on retire les étiquettes de travail et on ferme (suite de #289 : tâche #300, décisions de
 //      Marc du 19/10/2026 19:56Z, « 3 ok 4 oui »). Déploiement ou captures pas encore là : on attend ; au-delà d'une heure, réveil.
 // Fonctions pures d'un côté, I/O de l'autre (`gh` injecté).
-import { fichiersPermis, estDocDeSuite, FICHIER_ECRAN } from './jules-auto.mjs';
 import { servi } from './preuve.mjs';
 import { MARQUEUR as MARQUEUR_CAPTURES } from './captures.mjs';
 
-export const ETIQUETTES_A_RETIRER = ['jules', 'faisable-jules', 'en-cours', 'preuve-manquante', 'preuve-attendue'];
+/**
+ * Les deux fichiers de suivi que « La doc suit le code » fait mettre à jour dans la MÊME PR (tâche MoKarade/.github#850, Hubperso#753). Racine du dépôt seulement.
+ * Permis à Jules, hors du plafond de FICHIERS_MAX, et jamais cause de `hold` ; `capacite.mjs` les ignore déjà pour les places.
+ */
+export const DOCS_DE_SUITE = ['HANDOVER.md', 'CHANGELOG.md'];
+export const estDocDeSuite = (chemin) => DOCS_DE_SUITE.includes(String(chemin));
+
+export const FICHIER_ECRAN = /\.(css|tsx|jsx)$|(^|\/)components\//i;
+
+/** Le texte d'une section `**Titre**` (parenthèse et deux-points tolérés) jusqu'à la section suivante, ou null si elle manque. */
+export function section(corps, titre) {
+  const motif = new RegExp(`\\*\\*${titre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\*\\*[ \\t]*(?:\\([^)]*\\))?[ \\t]*:?[ \\t]*([\\s\\S]*?)(?=\\n\\s*\\*\\*[^*\\n]+\\*\\*|$)`, 'i');
+  const m = motif.exec(String(corps ?? ''));
+  return m ? m[1].trim() : null;
+}
+
+/** Les chemins listés dans « Fichiers permis » : une puce `- \`chemin\`` par ligne. */
+export function fichiersPermis(corps) {
+  const texte = section(corps, 'Fichiers permis') ?? '';
+  return [...texte.matchAll(/^\s*[-*]\s*`([^`\n]+)`/gm)].map((m) => m[1].trim());
+}
+
+export const ETIQUETTES_A_RETIRER = ['jules', 'en-cours', 'preuve-manquante', 'preuve-attendue'];
 export const TESTS = /(?:^|\/)(?:tests?|__tests__)\/|\.(?:test|spec)\.[cm]?[jt]sx?$/;
 const FERMANT = /^[ \t]*(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)[ \t]*:?[ \t]*#\d+[^\n]*\n?/gim;
 const CITATION = /(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?|t[âa]che)[ \t]*:?[ \t]*#(\d+)/gi;
@@ -152,7 +173,7 @@ export function retirerEtiquette(gh, depot, numero, etiquette) {
 }
 
 /** Étiquettes d'avancement qui n'ont plus de sens sur une tâche FERMÉE (le garde-fou de preuve retire les siennes à la fermeture validée ; une fermeture à la main ou par une PR les laisse). */
-export const ETIQUETTES_FERMEES = ['en-cours', 'jules', 'faisable-jules', 'preuve-attendue'];
+export const ETIQUETTES_FERMEES = ['en-cours', 'jules', 'preuve-attendue'];
 
 /**
  * Retire ETIQUETTES_FERMEES des tâches fermées récemment (30 dernières mises à jour du dépôt : un seul appel par dépôt).
