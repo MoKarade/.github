@@ -537,6 +537,15 @@ export async function verifierAliasVercel({
     return { statut: 'valide', commitServi, commitDeploye };
   }
 
+  // Deux déploiements qui se suivent : l'événement du premier arrive quand le second sert déjà. Un commit servi PLUS RÉCENT (descendant du sha déployé) n'est pas
+  // un alias figé (tâche MoKarade/.github#864) ; le doute (introuvable, `behind`, `diverged`, API en échec) reste « figé », comme avant.
+  if (typeof api === 'function') {
+    const relation = await api('GET', `/repos/${depot}/compare/${sha}...${commitServi}`).then((r) => r?.status ?? null).catch(() => null);
+    if (relation === 'ahead') {
+      journal(`Réacteur : contrôle d'alias pour ${depot} : le domaine sert ${commitServi}, plus récent que le déploiement ${commitDeploye} ; pas un alias figé.`);
+      return { statut: 'valide', commitServi, commitDeploye, plusRecent: true };
+    }
+  }
   journal(`::warning::Réacteur : alias figé pour ${depot} (servi: ${commitServi}, déployé: ${commitDeploye}).`);
   return { statut: 'fige', commitServi, commitDeploye };
 }

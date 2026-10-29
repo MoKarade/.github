@@ -929,6 +929,43 @@ test('verifierAliasVercel : même commit -> valide ; commit différent -> fige ;
   assert.equal(v5.statut, 'erreur');
 });
 
+test('verifierAliasVercel : un commit servi plus récent que le déploiement n\'est pas un alias figé ; le doute reste « figé » (#864)', async () => {
+  const apps = [{ nom: 'emploi', depot: 'MoKarade/JobAI', sante: 'https://emploi.hubperso.com/api/sante' }];
+  const rep = (body) => ({ ok: true, text: async () => JSON.stringify(body) });
+  const servi = (commit) => async () => rep({ ok: true, commit });
+  const compare = 'abc12345678...new1234';
+  const lancer = (api, fetchImpl) => verifierAliasVercel({ api, depot: 'MoKarade/JobAI', sha: 'abc12345678', apps, fetchImpl, pause: async () => {}, journal: () => {} });
+  // `ahead` : le domaine sert un commit descendant du déploiement -> valide, pas d'incident
+  const ahead = await lancer(faux({ [`/repos/MoKarade/JobAI/compare/${compare}`]: { status: 'ahead' } }).api, servi('new1234'));
+  assert.deepEqual(ahead, { statut: 'valide', commitServi: 'new1234', commitDeploye: 'abc1234', plusRecent: true });
+  // `behind`, `diverged`, introuvable (null), erreur de l'API : figé
+  for (const reponse of [{ status: 'behind' }, { status: 'diverged' }, null, new Error('HTTP 404')]) {
+    const r = await lancer(faux({ [`/repos/MoKarade/JobAI/compare/${compare}`]: reponse }).api, servi('new1234'));
+    assert.equal(r.statut, 'fige', JSON.stringify(reponse));
+  }
+  // même commit : aucun appel compare
+  const appels = [];
+  const identique = await lancer(async (...a) => { appels.push(a); return null; }, servi('abc1234'));
+  assert.equal(identique.statut, 'valide');
+  assert.deepEqual(appels, []);
+});
+
+test('déploiement : un déploiement plus récent déjà en ligne n\'ouvre aucun incident', async () => {
+  const apps = [{ nom: 'emploi', depot: 'MoKarade/JobAI', sante: 'https://emploi.hubperso.com/api/sante' }];
+  const f = faux({ '/repos/MoKarade/JobAI/compare/old12345678...new1234': { status: 'ahead' } });
+  const d = await decider({
+    api: f.api,
+    evt: { type: 'deploiement', depot: 'MoKarade/JobAI', sha: 'old12345678' },
+    apps,
+    fetchImpl: async () => ({ ok: true, text: async () => JSON.stringify({ ok: true, commit: 'new1234' }) }),
+    pause: async () => {},
+    journal: () => {},
+  });
+  assert.equal(d.alias.statut, 'valide');
+  assert.equal(f.ecritures.find((e) => e.chemin === '/repos/MoKarade/JobAI/issues'), undefined);
+  assert.notEqual(d.action, 'reveiller');
+});
+
 test('déploiement : alias figé ouvre un incident et réveille le fil propriétaire avec le remède', async () => {
   const apps = [{ nom: 'emploi', depot: 'MoKarade/JobAI', sante: 'https://emploi.hubperso.com/api/sante' }];
   const rep = (body) => ({ ok: true, text: async () => JSON.stringify(body) });
