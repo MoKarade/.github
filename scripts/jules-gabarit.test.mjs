@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cheminsCites, deriverTest, composerBloc, completerDepot, MARQUEUR, PAR_JOUR_MAX } from './jules-gabarit.mjs';
+import { cheminsCites, jetonsChemins, fichiersEcrits, remplirNumero, deriverTest, composerBloc, completerDepot, MARQUEUR, PAR_JOUR_MAX } from './jules-gabarit.mjs';
 import { evaluerJules } from './jules-auto.mjs';
 import { tourJulesSuivi } from './filet-pc.mjs';
 
@@ -368,4 +368,61 @@ test('sans test dans « Fini quand » : refus gardés quand le test ne se dériv
   const g3 = github({ issues: [tache(30, { body: permis })] });
   assert.match(lancer(g3).refusees[0].raison, /« Fichiers permis » est déjà écrit/);
   for (const g of [g1, g2, g3]) assert.equal(ecritures(g.appels).length, 0);
+});
+
+// ─── Tâche MoKarade/.github#854 : app-template#212 (trois fichiers à créer, un chemin d'un autre dépôt, numéro en crochets) refusée pour rien ───
+
+const CORPS_NEUF = (extra = '') => `**Avant** : aucune app ne connaît l'adresse des autres ; la liste n'existe que dans \`Hubperso/lib/sources.ts\`.
+**Après** : \`lib/liste.ts\` expose la liste figée des destinations.
+**Fini quand** : sur \`main\`, \`npm run test\` est vert avec \`tests/liste.test.ts\`, qui prouve la liste exacte.
+**Source** : demande de Marc ; vérité de la liste : \`Hubperso/lib/sources.ts\`.
+**Fichiers touchés** :
+- \`lib/liste.ts\`
+- \`tests/liste.test.ts\`
+**Attend** : aucune.
+
+**À faire** :
+1. Écrire D'ABORD \`tests/liste.test.ts\`, puis \`lib/liste.ts\`.
+
+**À ne pas faire** : toucher \`app/\` ; pas de \`Fixes\`/\`Closes\`.
+**À citer dans la PR** : \`Tâche : #<ce numéro>\`, \`--base main\`.
+${extra}`;
+const depotNeuf = { fichiers: ['lib/autre.ts', 'HANDOVER.md'], dossiers: ['lib', 'tests'] };
+
+test('jetonsChemins : un chemin qui commence par un autre dépôt est une référence ignorée ; .github/workflows/… reste un chemin', () => {
+  assert.deepEqual(jetonsChemins('voir `Hubperso/lib/sources.ts`, `MoKarade/app-template/x.ts` et `.github/workflows/ci.yml`, `lib/a.ts`').chemins, ['.github/workflows/ci.yml', 'lib/a.ts']);
+});
+
+test('fichiersEcrits : la ligne du fil fait foi, l\'estimation automatique non ; remplirNumero ne change que le crochet de « À citer dans la PR »', () => {
+  assert.deepEqual(fichiersEcrits(CORPS_NEUF()), ['lib/liste.ts', 'tests/liste.test.ts']);
+  assert.equal(fichiersEcrits(`**Avant** : x.\n\n<!-- fichiers-auto -->\n**Fichiers touchés** (estimation) :\n- \`lib/a.ts\`\n`), null);
+  const rempli = remplirNumero(CORPS_NEUF(), 212);
+  assert.match(rempli, /\*\*À citer dans la PR\*\* : `Tâche : #212`, `--base main`/);
+  assert.equal(remplirNumero(CORPS_NEUF(), 212).replace('#212', '#<ce numéro>'), CORPS_NEUF(), 'rien d\'autre ne bouge');
+  assert.equal(remplirNumero('**Avant** : `#<ce numéro>` ailleurs.', 5), '**Avant** : `#<ce numéro>` ailleurs.', 'hors « À citer dans la PR » : intact');
+});
+
+test('« Fichiers touchés » avec des fichiers à créer : complétée, « (nouveau) », Jules l\'accepte ; les crochets du numéro sont remplis', () => {
+  const g = github({ issues: [tache(212, { body: CORPS_NEUF(), title: 'Poser la liste des apps.' })], ...depotNeuf });
+  assert.deepEqual(lancer(g).completees, ['FinanceAI#212']);
+  const corps = ecritures(g.appels)[0].corps.body;
+  assert.match(corps, /\*\*Fichiers permis\*\* \(aucun autre\) :\n- `lib\/liste\.ts` \(nouveau\)\n- `tests\/liste\.test\.ts` \(nouveau\)\n- `HANDOVER\.md`/);
+  assert.match(corps, /`Tâche : #212`/);
+  assert.doesNotMatch(corps, /<ce numéro>/);
+  assert.deepEqual(evaluerJules({ repo: 'FinanceAI', n: 212, labels: ['niveau:tâche', 'faisable-jules'], body: corps }), { ok: true, raisons: [] });
+});
+
+test('« Fichiers touchés » : refus dits quand le dossier du fichier à créer manque, quand un chemin est protégé ou un motif à étoile', () => {
+  const cas = [
+    ['dossier absent', CORPS_NEUF().replace('`lib/liste.ts`\n', '`lib/nouveau/liste.ts`\n').replace('`lib/liste.ts` expose', '`lib/nouveau/liste.ts` expose'), /son dossier lib\/nouveau n'existe pas/],
+    ['protégé', CORPS_NEUF().replace('- `lib/liste.ts`', '- `scripts/liste.mjs`'), /chemin protégé scripts\//],
+    ['étoile', CORPS_NEUF().replace('- `lib/liste.ts`', '- `lib/*.ts`'), /motif de fichiers/],
+  ];
+  for (const [nom, body, motif] of cas) {
+    const g = github({ issues: [tache(212, { body })], ...depotNeuf, dossiers: ['lib', 'tests', 'scripts'] });
+    const r = lancer(g);
+    assert.deepEqual(r.completees, [], nom);
+    assert.match(r.refusees[0]?.raison ?? '', motif, nom);
+    assert.equal(ecritures(g.appels).length, 0, nom);
+  }
 });
