@@ -131,3 +131,17 @@ Tour économe et relevé plein (28/10/2026, tâche .github#741) : sous 1 500 app
 Sonde du quota REST (28/10/2026, tâche .github#741) : `sonde_rest.py` mesure DE QUI vient la consommation du jeton `gh` du PC hors tour (437 appels en 5,5 min sans tour, relevé du 28/10/2026). Une passe bornée, pas un minuteur : `python sonde_rest.py --duree 1200` (20 min = deux cadences de 10 min, qui s'arrête seule) ; `gh api rate_limit` ne compte pas dans le quota ; toutes les 4 s elle note le restant `core` et les processus `gh`/`git`/`python`/`node`/PowerShell (nom + 160 premiers caractères de la ligne de commande, jamais l'environnement). Chaque baisse du restant est rapportée avec l'heure et les processus vus avant ET après (les suspects), dans `sonde-rest.json` ; une remise à zéro du compteur (`reset` qui change) n'est jamais comptée comme consommation. À lancer pendant que les tâches planifiées tournent, puis rapprocher les heures des baisses des cadences de « Carnet questions », « Gemini-demandes », « NotebookLM », « Quota-Claude ». Tests : `python -X utf8 -m unittest test_sonde_rest.py`.
 
 Filet du PC et cache ETag (28/10/2026, tâche .github#741) : la sonde a mesuré `filet-pc.mjs` (lancé par `tour.py`) à 267 appels REST par tour, jamais comptés dans « N appels comptés ». Ses lectures (`ghCli` de `scripts/lier-taches.mjs`) passent désormais par le même cache ETag que `ghcache.py` (même dossier `GANTT_CACHE_HTTP` posé par `tour.py`, même fichier `{etag, corps}`) : une réponse 304 ne coûte rien. Seuls les GET sans corps l'utilisent, jamais une écriture ; sans `GANTT_CACHE_HTTP` (Actions, tests) rien ne change. La ligne du filet se termine par « appels filet : N comptés (M en 304 gratuits sur R) [rôle n, …] », rôles les plus lourds d'abord, et `tour.py` la recopie dans sa ligne OK.
+
+## Guetteur de silence (tâche #720, 29/10/2026)
+
+`guetteur.ps1` lance `scripts/guetteur-silence.mjs` sur le clone dédié (`C:\dev\_pc-local\gantt-releve\depot`, tenu à jour par `lancer.ps1`) : s'il n'y a aucun run terminé du Réacteur de `.github` depuis plus de 2 h, il ouvre une issue `boucle:erreur`, et la referme à la reprise (docs/boucle-erreur.md). Il prend le jeton de `gh auth token` : rien n'est écrit sur disque ni dans le dépôt. Journal : `guetteur.log` du dossier d'état (500 lignes).
+
+Tâche Windows (une fois, utilisateur de Marc, jamais de fenêtre au premier plan) :
+
+```powershell
+$a = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument '--headless powershell -NoProfile -ExecutionPolicy Bypass -File C:\dev\_pc-local\gantt-releve\depot\outils\gantt-pc\guetteur.ps1'
+$t = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 15)
+Register-ScheduledTask -TaskName 'Guetteur-silence' -Action $a -Trigger $t -Force
+```
+
+PC éteint : aucune alerte (limite acceptée par Marc, 29/10/2026).
