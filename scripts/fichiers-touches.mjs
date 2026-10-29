@@ -62,7 +62,7 @@ export function composerBloc({ fichiers = [], raison = '' } = {}) {
   if (!fichiers.length) {
     return `${MARQUEUR}\n**Fichiers touchés** : non déterminés (${raison || 'aucun chemin de fichier existant cité dans la tâche'}). Tant que le fil qui la prend ne les écrit pas, un seul travail à la fois dans ce dépôt.\n`;
   }
-  return `${MARQUEUR}\n**Fichiers touchés** (estimation automatique du filet du PC : les chemins cités dans la tâche et leur test ; le fil qui la prend la corrige) :\n${fichiers.map((f) => `- \`${f}\``).join('\n')}\n`;
+  return `${MARQUEUR}\n**Fichiers touchés** (estimation automatique du Réacteur : les chemins cités dans la tâche et leur test ; le fil qui la prend la corrige) :\n${fichiers.map((f) => `- \`${f}\``).join('\n')}\n`;
 }
 
 /** Le corps sans le bloc automatique (l'estimation ne se lit pas elle-même). */

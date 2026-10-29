@@ -54,6 +54,7 @@ import { controleFiniQuand } from './fini-quand.mjs';
 import { accepterPreuvesAttendues, LUES_EVENEMENT, LUES_FILET } from './preuve-attendue-auto.mjs';
 import { fileDuDepot } from './file-depot.mjs';
 import { confierJulesDuDepot } from './jules-auto.mjs';
+import { lignesDesSignaux, piloteDuJob } from './pilotage-evenement.mjs';
 
 export const DEPOT_BOITE = 'MoKarade/app-template';
 export const WORKFLOW_BOITE = 'boite-reacteur.yml';
@@ -627,8 +628,29 @@ async function deciderEvenement({ api, evt, maintenant, accepter, boitePc = BOIT
 }
 
 /** Exécute la décision. `journal` reçoit les lignes à afficher ; rend un résumé court. */
-export async function traiter({ api, evt, jetonReveil, journal = console.log, maintenant = new Date(), jetonLecture = '', accepterDifferees, boites = BOITES, directes = BOITES_DIRECTES, boitePc = BOITE_PC }) {
-  const d = await decider({ api, evt, maintenant, jetonLecture, boitePc, ...(accepterDifferees ? { accepterDifferees } : {}) });
+export async function traiter({ pilote = null, ...options }) {
+  const { api, evt, journal = console.log, maintenant = new Date() } = options;
+  // Pilotage des tâches et de Jules (tâche MoKarade/.github#715) AVANT la décision : une tâche acceptée ou réservée ici change ce que la décision voit (place libérée, tâche confiée à Jules).
+  const pilotage = pilote ? await pilote({ evt, maintenant }) : null;
+  if (pilotage?.lignes.length) journal(`Réacteur : pilotage (${evt.type}) : ${pilotage.lignes.join(' ; ')}.`);
+  for (const e of pilotage?.erreurs ?? []) journal(`::warning::Réacteur : pilotage, étape en échec : ${e}.`);
+  const commun = { ...options, maintenant };
+  const resultat = await traiterDecision(commun);
+  // Ce que le suivi de Jules vient de voir (PR hors « Fichiers permis », PR fusionnée non acceptée seule) est dit au Coordinateur dans SON message, pour que la déduplication
+  // (même texte déjà sur la boîte depuis moins de `FENETRE_FILET_H` h : rien) joue même si le pilotage n'a aucune mémoire d'un passage à l'autre.
+  let signale = false;
+  if (pilotage?.signaux.length) {
+    const motif = construireMotif(lignesDesSignaux(pilotage.signaux));
+    if (evt.forcer === 'true' || !(await dejaSignale({ api, motif, maintenant, depot: evt.depot }))) {
+      await traiterDecision({ ...commun, decisionImposee: { action: 'reveiller', motif } });
+      signale = true;
+    }
+  }
+  return pilotage ? { ...resultat, pilotage, ...(signale ? { signauxDits: pilotage.signaux.length } : {}) } : resultat;
+}
+
+async function traiterDecision({ api, evt, jetonReveil, journal = console.log, maintenant = new Date(), jetonLecture = '', accepterDifferees, boites = BOITES, directes = BOITES_DIRECTES, boitePc = BOITE_PC, decisionImposee = null }) {
+  const d = decisionImposee ?? await decider({ api, evt, maintenant, jetonLecture, boitePc, ...(accepterDifferees ? { accepterDifferees } : {}) });
   if (d.differees?.acceptees.length) journal(`Réacteur : preuve différée lue et acceptée automatiquement sur ${d.differees.acceptees.map((n) => `#${n}`).join(', ')} (docs/cycle-de-vie-tache.md §10 quater).`);
   if (d.differees?.erreur) journal(`::warning::Réacteur : preuves différées non lues (${d.differees.erreur}). Un fil prouvera.`);
   if (d.acceptation?.statut === 'acceptee') journal(`Réacteur : tâche #${d.acceptation.tache} acceptée automatiquement (docs/cycle-de-vie-tache.md §10 ter).`);
@@ -747,7 +769,11 @@ export async function main(env = process.env) {
     signal: env.REVEIL_SIGNAL || '',
   };
   try {
-    await traiter({ api: apiGitHub(env.GITHUB_TOKEN), evt, jetonReveil: env.REVEIL_TOKEN, jetonLecture: env.GITHUB_TOKEN });
+    // `gh` (CLI du job) lit `GH_TOKEN` : le pilotage des tâches et de Jules écrit avec le jeton du job, jamais avec celui du réveil.
+    process.env.GH_TOKEN ||= env.GITHUB_TOKEN;
+    const r = await traiter({ api: apiGitHub(env.GITHUB_TOKEN), evt, jetonReveil: env.REVEIL_TOKEN, jetonLecture: env.GITHUB_TOKEN, pilote: piloteDuJob() });
+    // Une étape du pilotage en échec rend le run rouge APRÈS le réveil : `signaler-echec.yml` ouvre alors l'issue `boucle:erreur` (rien ne se perd en silence).
+    if (r?.pilotage?.erreurs.length) process.exitCode = 1;
   } catch (e) {
     // Jamais de rouge : un échec ici ne doit pas se rejouer. Le filet de 6 h du Coordinateur reprend la main.
     console.log(`::warning::Réacteur : réveil non fait (${e.message}). Le filet de 6 h reprend la main.`);
