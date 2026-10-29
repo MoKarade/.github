@@ -52,7 +52,7 @@ Google Drive pour ordinateur ne doit pas être en pause : sinon les fichiers res
 Python pour Windows n'a pas de base de fuseaux horaires (sans le paquet `tzdata`) : `quota.py` replie alors sur la règle d'heure
 d'Amérique du Nord, comme `build.py`. Sans ce repli, il mourait à chaque tour et le Drive n'avait pas de `quota.json` (17/10, .github#188).
 Un échec de `quota.py` s'écrit désormais dans `etat.json` (« quota : ÉCHEC … »). Sous 3 500 appels GitHub restants, seules les jauges
-Claude, coût API et Actions (en mode rapide : 36 h, lectures conditionnelles, quelques appels) sont relevées : à froid, toutes les jauges coûtent ≈ 2 900 appels.
+Claude, coût API et Actions (en mode rapide : 36 h, lectures conditionnelles, quelques appels) sont relevées : à froid, toutes les jauges coûtent ≈ 2 900 appels. Mesure du 29/10/2026 00:41Z : un passage de quota.py comptait 91 appels, dont 65 pour les jobs d'Actions (`actions/runs/S/attempts/N/jobs`) ; les jobs d'une exécution lancée pendant que le dépôt était public ne sont plus relus (jamais facturés ni comptés, `visibilite.etait_prive`).
 Avant le 28/10/2026 l'Actions n'en faisait pas partie : un compte entamé la laissait vieillir.
 
 Page Chantier à jour, données réelles (28/10/2026, demande de Marc) : `quota.json` porte UN taux USD→CAD (`taux_usd_cad` : `taux`, `date`, `source`, `releve`),
