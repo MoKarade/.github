@@ -136,9 +136,12 @@ def actions():
     since = iso(mois0)
     # GitHub ne facture que les exécutions lancées pendant que le dépôt était privé : un dépôt devenu public ou privé en cours de mois
     # ne compte que pour sa période privée (FinanceAI, privé depuis le 21/10 : 5 478 min comptées à tort le 22/10).
-    scrutes = [r for r in REPOS if visibilite.a_ete_prive_depuis(vis, r, since)]
     # relevé rapide : seulement les exécutions des 36 dernières heures (les plus anciennes sont déjà en cache) ; le relevé complet relit le mois
     depuis = iso(max(mois0, NOW - 36 * H)) if RAPIDE else since
+    # et seulement les dépôts qui ont été privés dans CETTE fenêtre : un dépôt public depuis plus de 36 h n'a aucune exécution facturable à y trouver
+    # (29/10/2026 : `actions/runs` = 27 à 28 appels par passage, dont les dépôts devenus publics la veille). Le relevé complet horaire les relit
+    # tous depuis le début du mois, donc un dépôt repassé en privé est rattrapé à l'heure suivante.
+    scrutes = [r for r in REPOS if visibilite.a_ete_prive_depuis(vis, r, depuis)]
     todo, en_cours = [], []
     for r in scrutes:
         for run in pages(f'repos/MoKarade/{r}/actions/runs?created=%3E%3D{depuis}', 'workflow_runs'):
