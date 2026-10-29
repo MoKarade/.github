@@ -1,3 +1,4 @@
+import './places-trois.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { champ, construireReleve, eligibleDepuis, fileDuDepot, lireAttend } from './file-depot.mjs';

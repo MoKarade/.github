@@ -461,10 +461,13 @@ export function choisirSuivantes(file, occupePar, libres) {
   return { suivantes, sautees };
 }
 
-/** Les deux places d'un dépôt : travail en cours, tâche prévue ou place libre (le Gantt en fait ses deux couloirs). */
+/** Les places d'un dépôt : travail en cours, tâche prévue ou place libre (le Gantt en fait ses deux couloirs). */
+const COULOIRS_MIN = 3;
 export function couloirsDe(occupePar, suivantes) {
   const couloirs = [];
-  for (let i = 0; i < PLACES_PAR_DEPOT; i++) {
+  // Sans limite de places (29/10/2026) : jamais plus de couloirs que de travaux et de tâches prévues, avec au moins `COULOIRS_MIN` pour que la page garde sa forme.
+  const n = Math.min(PLACES_PAR_DEPOT, Math.max(occupePar.length + suivantes.length, COULOIRS_MIN));
+  for (let i = 0; i < n; i++) {
     const o = occupePar[i];
     const s = suivantes[i - occupePar.length];
     if (o) couloirs.push({ place: i + 1, etat: 'occupee', ref: o.ref, motif: o.motif, fichiers: o.fichiers ?? null });
