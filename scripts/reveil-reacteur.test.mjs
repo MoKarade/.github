@@ -1239,3 +1239,25 @@ test('leverSansJeton : une erreur de l’API est un avertissement, jamais une ex
   assert.deepEqual(await leverSansJeton({ api: casse, evt: { depot: CARAI }, journal: (l) => lignes.push(l) }), []);
   assert.ok(lignes.some((l) => l.startsWith('::warning::') && l.includes('500')));
 });
+
+// Seuls les comptes de la maison écrivent un relevé ou une « Acceptée » (tâche MoKarade/.github#836) : un dépôt public reçoit des commentaires de n'importe qui.
+test('relevé PC et « Acceptée » : un compte tiers (NONE, CONTRIBUTOR, FIRST_TIMER) est ignoré, le propriétaire compte comme avant', async () => {
+  for (const association of ['NONE', 'CONTRIBUTOR', 'FIRST_TIMER', 'FIRST_TIME_CONTRIBUTOR']) {
+    const tiers = { user: { login: 'passant', type: 'User' }, author_association: association };
+    const demande = lireCommentairePc({ ...tiers, body: '**Relevé PC demandé** — lire /totaux' });
+    assert.equal(demande.sorte, null, association);
+    assert.match(demande.erreur, /tiers/);
+    assert.equal(lireCommentairePc({ ...tiers, body: RELEVE }).sorte, null, association);
+    assert.equal(preuveAPoser({ issue: tache(), commentaires: [{ ...tiers, body: '**Acceptée** — PR #1' }] }), true, 'une fausse « Acceptée » ne retire pas la preuve à poser');
+  }
+  for (const association of ['OWNER', 'MEMBER', 'COLLABORATOR']) {
+    const maison = { user: humain, author_association: association };
+    assert.equal(lireCommentairePc({ ...maison, body: '**Relevé PC demandé** — lire /totaux' }).sorte, 'demande', association);
+    assert.equal(lireCommentairePc({ ...maison, body: RELEVE }).sorte, 'releve', association);
+    assert.equal(preuveAPoser({ issue: tache(), commentaires: [{ ...maison, body: '**Acceptée** — PR #1' }] }), false, association);
+  }
+  // Bout en bout : une fausse demande d'un tiers ne réveille pas le PC.
+  const { api } = faux(COMMENTAIRES({ user: { login: 'passant', type: 'User' }, author_association: 'NONE', body: '**Relevé PC demandé** — lire /totaux' }));
+  const r = await decider({ api, evt: { type: 'commentaire', depot: DEPOT, issue: '31' }, boitePc: BOITE_PC });
+  assert.equal(r.action, 'rien');
+});
