@@ -174,6 +174,51 @@ export async function reveilLocal({ api, evt, texte, journal }) {
     return null;
   }
 }
+// Réveil impossible (tâche MoKarade/.github#826) : sans `REVEIL_TOKEN` ni boîte locale, le journal ne portait qu'un avertissement et les réveils se perdaient
+// en silence (CarAI, 29/10/2026 : une tâche restée libre 36 min). Le Réacteur laisse donc une issue unique par dépôt, avec le jeton du job (aucun nouveau
+// secret). Étiquette à part, jamais `incident` : un `incident` ouvert coupe la file du dépôt (scripts/file-depot.mjs). Fermée au premier réveil réussi.
+export const ETIQUETTE_SANS_JETON = 'reacteur-sans-jeton';
+export const titreSansJeton = (depot) => `Réacteur sans jeton : ${depot}`;
+
+async function ouvertesSansJeton({ api, depot }) {
+  const issues = await api('GET', `/repos/${depot}/issues?state=open&labels=${ETIQUETTE_SANS_JETON}&per_page=5`);
+  return (issues ?? []).filter((i) => !i.pull_request && (i.labels ?? []).some((l) => (l.name ?? l) === ETIQUETTE_SANS_JETON));
+}
+
+/** Ouvre l'issue « Réacteur sans jeton » si aucune n'est ouverte. Rend son numéro, ou null (déjà là, ou écriture refusée : PR d'un fork, jeton en lecture seule). Jamais d'exception. */
+export async function signalerSansJeton({ api, evt, journal }) {
+  try {
+    if ((await ouvertesSansJeton({ api, depot: evt.depot })).length > 0) return null;
+    const perdu = `\`${evt.type}\`${evt.issue ? ` sur #${evt.issue}` : ''}${evt.pr ? ` (PR #${evt.pr})` : ''}`;
+    const cree = await api('POST', `/repos/${evt.depot}/issues`, {
+      title: titreSansJeton(evt.depot),
+      labels: [ETIQUETTE_SANS_JETON],
+      body: `Le Réacteur n'a pas pu réveiller le fil de ${evt.depot} : le secret \`REVEIL_TOKEN\` est absent et le dépôt n'a pas de boîte locale. Dernier événement perdu : ${perdu}.\n\n**Geste** : poser \`REVEIL_TOKEN\` sur ${evt.depot} (jeton fine-grained avec Actions en écriture sur MoKarade/app-template). Aucune valeur de jeton ici.\n\nCette issue se ferme seule au premier réveil réussi (tâche MoKarade/.github#826).`,
+    });
+    journal(`Réacteur : issue « ${titreSansJeton(evt.depot)} » ouverte${cree?.number ? ` (#${cree.number})` : ''}.`);
+    return cree?.number ?? null;
+  } catch (e) {
+    journal(`::warning::Réacteur : alerte « réveil impossible » non posée sur ${evt.depot} (${e.message}).`);
+    return null;
+  }
+}
+
+/** Ferme les issues « Réacteur sans jeton » ouvertes, une fois un réveil réussi. Rend les numéros fermés ; jamais d'exception. */
+export async function leverSansJeton({ api, evt, journal }) {
+  try {
+    const fermees = [];
+    for (const issue of await ouvertesSansJeton({ api, depot: evt.depot })) {
+      await api('POST', `/repos/${evt.depot}/issues/${issue.number}/comments`, { body: 'Réveil réussi : le secret `REVEIL_TOKEN` est en place. Issue fermée par le Réacteur.' });
+      await api('PATCH', `/repos/${evt.depot}/issues/${issue.number}`, { state: 'closed', state_reason: 'completed' });
+      fermees.push(issue.number);
+    }
+    if (fermees.length > 0) journal(`Réacteur : réveil réussi, issue « ${titreSansJeton(evt.depot)} » fermée (${fermees.map((n) => `#${n}`).join(', ')}).`);
+    return fermees;
+  } catch (e) {
+    journal(`::warning::Réacteur : issue « réveil impossible » non fermée sur ${evt.depot} (${e.message}).`);
+    return [];
+  }
+}
 export const DEPOT_GITHUB = 'MoKarade/.github';
 // Les deux balayages de `.github` qu'une planification GitHub ne lance presque jamais (MoKarade/.github#148) : sans entrée,
 // chacun relit toutes les PR ouvertes. Lancés après le réveil, sur les seuls événements d'une PR ou d'une tâche.
@@ -614,7 +659,8 @@ export async function traiter({ api, evt, jetonReveil, journal = console.log, ma
       return { ...d, reveille: true, locale };
     }
     journal('::warning::Réacteur : réveil impossible, le secret REVEIL_TOKEN est absent (PR d’un fork, ou secret pas encore posé) et le dépôt n’a pas de boîte locale.');
-    return { ...d, reveille: false };
+    const alerte = await signalerSansJeton({ api, evt, journal });
+    return { ...d, reveille: false, ...(alerte ? { alerte } : {}) };
   }
   // Le réveil passe en premier : un balayage qui échoue ne doit jamais le retarder.
   // Une boîte par cible : la #58 (Coordinateur) sans entrée neuve, pour qu'une ancienne version de `boite-reacteur.yml` l'accepte ; la boîte du dépôt avec `boite`.
@@ -644,6 +690,7 @@ export async function traiter({ api, evt, jetonReveil, journal = console.log, ma
   if (reveilles.includes(NUMERO_BOITE)) journal(`Réacteur : Coordinateur réveillé (${d.motif})`);
   for (const n of reveilles.filter((x) => x !== NUMERO_BOITE)) journal(`Réacteur : fil de ${evt.depot} réveillé sur sa boîte #${n} (${d.motif})`);
   const balayages = TYPES_BALAYAGE.has(evt.type) ? await lancerBalayages({ api, jetonReveil, journal }) : [];
+  if (reveilles.length > 0) await leverSansJeton({ api, evt, journal });
   if (echecReveil) throw echecReveil;
   return { ...d, reveille: true, balayages };
 }
