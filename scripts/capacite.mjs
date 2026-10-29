@@ -1,15 +1,18 @@
 #!/usr/bin/env node
-// Capacité d'un dépôt : TROIS travaux à la fois (décision de Marc, 26/10/2026 17:39Z : « plusieurs tâches par dépôt en même temps à partir de maintenant »,
+// Capacité d'un dépôt : SANS LIMITE de places depuis le 29/10/2026 16:13Z (Marc : « On va arrêter le 3 max maintenant plus de limite », tâche MoKarade/.github#874) ; ne reste que la règle des fichiers disjoints.
+// Historique : TROIS travaux à la fois (décision de Marc, 26/10/2026 17:39Z : « plusieurs tâches par dépôt en même temps à partir de maintenant »,
 // après la mesure de la semaine : jusqu'à 13 `en-cours` à la fois dans .github). Historique : DEUX travaux le 21/10/2026 à 13:21Z, UN seul de 20:00Z (« 124 », économiser le quota Claude) au 26/10/2026 ; la mécanique à fichiers disjoints a toujours été en place
-// et se règle en changeant `PLACES_PAR_DEPOT` (les tests de parallélisme tournent à deux places, `places-deux.mjs`, ceux de production à trois, `places-production.test.mjs`).
+// et se règle en changeant `PLACES_PAR_DEPOT` (les tests de parallélisme tournent à deux places, `places-deux.mjs`, ceux de production sans limite, `places-production.test.mjs`).
 // Un travail est une tâche `en-cours`, ou la PR ouverte d'une tâche (une tâche `jules` n'en est pas un depuis le 23/10/2026).
 // Ce module ne fait que des fonctions pures, partagées par `prochaine-tache.mjs` (la file), `jules-auto.mjs` (fichiers déjà pris)
 // et testées sans réseau : lire les fichiers qu'une tâche déclare, et dire si deux travaux peuvent avancer ensemble.
 //
 // Règle du doute : un travail dont les fichiers ne sont pas déclarés (ou illisibles) n'est compatible avec RIEN. Dans le doute, un seul.
 
-// `PLACES_ENV` ne sert qu'aux tests (`places-deux.mjs`) ; en production la valeur est celle de la décision de Marc (trois).
-export const PLACES_PAR_DEPOT = Number(process.env.PLACES_ENV) || 3;
+// `PLACES_ENV` ne sert qu'aux tests (`places-deux.mjs`). En production, « sans limite » est un nombre trop grand pour être atteint (99) : aucun code ne boucle jusqu'à lui
+// (les couloirs du Gantt et les suivantes sont bornés par les tâches réelles), et un dépôt n'est jamais « plein » que par les fichiers qui se recoupent ou le doute.
+export const SANS_LIMITE = 99;
+export const PLACES_PAR_DEPOT = Number(process.env.PLACES_ENV) || SANS_LIMITE;
 
 // Journaux que presque chaque PR touche (la doc touchée se met à jour dans la MÊME PR) : ils ne rendent pas deux travaux incompatibles,
 // un conflit de texte s'y règle en fusionnant la base. Même sort pour les deux index que chaque tâche complète (21/10/2026, demande de JobAI : cinq tâches
