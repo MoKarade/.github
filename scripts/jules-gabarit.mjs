@@ -10,6 +10,10 @@
 //   plus le fichier de test dérivé du premier fichier de code ;
 // - les autres sections viennent du gabarit (`docs/jules-gabarit-issue.md`), avec les preuves que `evaluerJules` exige pour un écran ou un .md.
 // Sans test dans « Fini quand » (décision de Marc du 21/10/2026, « oui » : le test est écrit par Jules lui-même) : l'étape « écris D'ABORD le test » est ajoutée à « À faire » et le test dérivé du premier fichier de code cité entre dans « Fichiers permis » (un seul test nouveau).
+// - une ligne « **Fichiers touchés** » écrite par le fil de la tâche (cycle de vie §2) fait foi quand elle existe : ses fichiers sont « Fichiers permis », y compris
+//   ceux à CRÉER (marqués « nouveau ») si leur dossier existe (tâche MoKarade/.github#854, app-template#212 : trois fichiers neufs, refusée pour cela) ;
+// - un chemin qui commence par le nom d'un autre dépôt de l'organisation (`Hubperso/lib/sources.ts`) est une référence, pas un fichier de ce dépôt : ignoré ;
+// - seule retouche du texte existant : le numéro de tâche laissé en crochets dans « À citer dans la PR » (`#<ce numéro>`) devient le vrai numéro.
 // Refus : chemin cité introuvable, motif de fichiers (`*`), chemin réservé à Claude cité dans Avant/Après/Fini quand, plus de cinq fichiers,
 // outils MCP, dépendance ouverte ou illisible, section de fond (Avant, Après, Fini quand) absente, ou `evaluerJules` qui dit encore non.
 //
@@ -17,6 +21,7 @@
 
 import { evaluerJules, section, fichiersPermis, SECTIONS_REQUISES, FICHIERS_MAX, FICHIER_ECRAN, CHEMINS_INTERDITS, DOCS_DE_SUITE, estDocDeSuite, exclueParDecision } from './jules-auto.mjs';
 import { tachesCitees } from './jules-suivi.mjs';
+import { fichiersDeclares } from './capacite.mjs';
 import { ETIQUETTE, MENTION_MCP, dependanceOuverte, aLigneAttend } from './jules-marquage.mjs';
 
 const ORG = 'MoKarade';
@@ -39,6 +44,9 @@ const CONTROLE_MECANIQUE = /test|npm audit/i;
 const MONTEE_DEPENDANCE = /mise\s+à\s+jour|mettre\s+à\s+jour|\bmonter\b|montée/i;
 const FICHIERS_DEPENDANCES = ['package.json', 'package-lock.json'];
 const noms = (labels) => (labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
+// Les autres dépôts de l'organisation (`.github` est exclu : `.github/workflows/…` est un vrai dossier de chaque dépôt).
+const AUTRES_DEPOTS = new Set(['app-template', 'batchchef-', 'carai', 'driveai', 'financeai', 'hub-contract', 'hubperso', 'jobai', 'lia-ui', 'memoryai', 'mokarade']);
+const enAutreDepot = (jeton) => AUTRES_DEPOTS.has(jeton.split('/')[0].toLowerCase());
 
 /** Un refus : `memoriser` dit s'il tient tant que le corps de la tâche ne change pas (faux : il dépend de l'extérieur, on relit au prochain tour). */
 const refus = (raison, memoriser = true) => ({ ok: false, raison, memoriser });
@@ -55,6 +63,7 @@ export function jetonsChemins(texte) {
     if (!jeton.includes('/') || jeton.startsWith('/') || /^https?:/.test(jeton) || /\s/.test(jeton)) continue;
     if (jeton.includes('*')) { motifs.push(jeton); continue; }
     if (!/^[\w@.\-/[\]()]+\.\w{1,6}$/.test(jeton)) continue;
+    if (enAutreDepot(jeton)) continue; // `Hubperso/lib/sources.ts` : un fichier d'un autre dépôt, cité pour référence
     if (!chemins.includes(jeton)) chemins.push(jeton);
   }
   return { chemins, motifs };
@@ -93,6 +102,24 @@ export function deriverTest(chemin, prefixe = '') {
   const base = ['page', 'route', 'index', 'layout'].includes(nom) ? (morceaux.at(-1) ?? nom) : nom;
   const propre = base.replace(/[[\]()]/g, '').replace(/^_+|_+$/g, '') || nom;
   return `${prefixe}tests/${propre}.test.${ext === 'mjs' ? 'mjs' : ext === 'js' ? 'js' : 'ts'}`;
+}
+
+/**
+ * Les fichiers que le fil de la tâche a écrits dans « **Fichiers touchés** » (puces `chemin`), ou null s'il n'y en a pas de lisible. L'estimation automatique
+ * (`<!-- fichiers-auto -->`, `fichiers-touches.mjs`) n'est qu'un repli : elle ne fait pas foi.
+ */
+export function fichiersEcrits(corps) {
+  const sansEstimation = String(corps ?? '').replace(/<!-- fichiers-auto -->[\s\S]*?(?=<!-- |$)/g, '');
+  return fichiersDeclares(sansEstimation);
+}
+
+/** Le numéro de tâche laissé en crochets dans « À citer dans la PR » (`#<ce numéro>`, `#<numéro de CETTE issue>`) devient le vrai numéro ; rien d'autre ne change. */
+export function remplirNumero(corps, n) {
+  const texte = String(corps ?? '');
+  const citer = section(texte, 'À citer dans la PR');
+  if (citer === null) return texte;
+  const rempli = citer.replace(/#<[^>\n]*(?:num[ée]ro|n°)[^>\n]*>/gi, `#${n}`);
+  return rempli === citer ? texte : texte.replace(citer, () => rempli);
 }
 
 const premiereMinuscule = (t) => t.replace(/^\p{Lu}(?=\p{Ll})/u, (c) => c.toLowerCase());
@@ -166,7 +193,7 @@ export function existe(gh, depot, chemin, { dossier = false } = {}) {
 
 /** Décide, pour une tâche, du corps complété ou du refus. Ne modifie rien ; lit le dépôt (existence des fichiers) et les dépendances. */
 export function preparer({ depot, court, tache, gh }) {
-  const corps = tache.body ?? '';
+  const corps = remplirNumero(tache.body ?? '', tache.number);
   const titre = tache.title ?? '';
   if (MENTION_MCP.test(corps) || /\bmcp\b/i.test(titre)) return refus('outils MCP : réservés à Claude (décision de Marc du 19/10/2026)');
   if (!aLigneAttend(corps)) return refus('ligne « **Attend** » absente : à écrire par le fil de la tâche (sans elle, la file l\'écarte et Jules ne la verrait jamais)');
@@ -196,9 +223,24 @@ export function preparer({ depot, court, tache, gh }) {
     }
     const candidats = [...cites.forts, ...cites.source.filter((c) => !CHEMINS_INTERDITS.some(([m]) => m.test(c)))];
     permis = [];
-    for (const c of candidats) {
-      if (existe(gh, depot, c)) permis.push(c);
-      else if (cites.forts.includes(c)) return refus(`${c} cité mais introuvable dans le dépôt`);
+    const ecrits = fichiersEcrits(corps);
+    if (ecrits) {
+      // La ligne « Fichiers touchés » du fil fait foi : un fichier qui n'existe pas encore est à créer, si son dossier existe (rien n'est inventé).
+      if (ecrits.some((c) => c.includes('*'))) return refus('motif de fichiers (*) dans « Fichiers touchés » : une liste fermée de chemins est requise');
+      for (const c of ecrits) {
+        const motif = CHEMINS_INTERDITS.find(([m]) => m.test(c));
+        if (motif) return refus(`${c} : ${motif[1]}`);
+        if (existe(gh, depot, c)) { permis.push(c); continue; }
+        const dossier = c.includes('/') ? c.slice(0, c.lastIndexOf('/')) : '';
+        if (dossier && !existe(gh, depot, dossier, { dossier: true })) return refus(`${c} à créer mais son dossier ${dossier} n'existe pas dans le dépôt`);
+        permis.push(c);
+        nouveaux.push(c);
+      }
+    } else {
+      for (const c of candidats) {
+        if (existe(gh, depot, c)) permis.push(c);
+        else if (cites.forts.includes(c)) return refus(`${c} cité mais introuvable dans le dépôt`);
+      }
     }
     if (!permis.length && montee) {
       permis = FICHIERS_DEPENDANCES.map((f) => `${prefixe}${f}`).filter((f) => existe(gh, depot, f));
