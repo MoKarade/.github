@@ -797,10 +797,10 @@ async function traiterDecision({ api, evt, jetonReveil, journal = console.log, m
     }
     return { ...d, balayages: await lancerBalayages({ api, jetonReveil, journal, workflows: d.workflows ?? WORKFLOWS_PR_OUVERTE }) };
   }
-  // Dépôt sans fil à l'écoute de sa boîte (app-template, hub-contract) : la tâche suivante part dans une session neuve (tâche MoKarade/.github#860, docs/cycle-de-vie-tache.md §6).
+  // Chaque tâche prête, de n'importe quel dépôt, part dans une session neuve (tâche MoKarade/.github#860 pour app-template et hub-contract, étendue à tous les dépôts par la tâche #871, demande de Marc du 29/10/2026 : « à chaque tâche une session neuve » ; docs/cycle-de-vie-tache.md §6).
   // Sans les secrets de la routine, rien ne change ; un lancement raté est un avertissement, jamais une exception. La ligne ajoutée au réveil dit au Coordinateur de ne pas lancer un second fil.
   const suivante = d.file?.suivante;
-  if (routine && suivante && !directes.has(evt.depot) && d.jules?.n !== suivante) {
+  if (routine && suivante && d.jules?.n !== suivante) {
     const lancee = await lancerRoutine({ api, depot: evt.depot, n: suivante, routine, file: d.file, maintenant, journal, appeler });
     // « déjà lancée » : une session part pour cette tâche et n'a pas encore posé `en-cours` ; le réveil le dit aussi, pour que le Coordinateur ne lance pas un second fil.
     if (lancee.statut === 'lancee' || lancee.statut === 'deja') d = { ...d, routine: { n: suivante }, motif: `${d.motif} ; routine : #${suivante} ${lancee.statut === 'deja' ? 'déjà ' : ''}lancée`.slice(0, LONGUEUR_MAX) };
