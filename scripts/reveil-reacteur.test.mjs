@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { LABEL_ATTEND_MARC, TITRE_ATTEND_MARC, prAttendantMarc } from './attend-marc.mjs';
-import { ETIQUETTE_SANS_JETON, leverSansJeton, signalerSansJeton, titreSansJeton, DEPOT_BOITE, DEPOT_GITHUB, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, TYPES_BALAYAGE, WORKFLOWS_BALAYAGE, WORKFLOWS_GARDE_FOU_ROUGE, WORKFLOWS_PR_OUVERTE, BOITE_PC, construireMotif, decider, lireCommentairePc, estPanneRunner, heureQuebec, occupations, travaux, signeLibre, preuveAPoser, rougeDepuis, traiter } from './reveil-reacteur.mjs';
+import { ETIQUETTE_SANS_JETON, leverSansJeton, signalerSansJeton, titreSansJeton, DEPOT_BOITE, DEPOT_GITHUB, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, TYPES_BALAYAGE, WORKFLOWS_BALAYAGE, WORKFLOWS_GARDE_FOU_ROUGE, WORKFLOWS_PR_OUVERTE, BOITE_PC, construireMotif, decider, verifierAliasVercel, lireCommentairePc, estPanneRunner, heureQuebec, occupations, travaux, signeLibre, preuveAPoser, rougeDepuis, traiter } from './reveil-reacteur.mjs';
 
 // Fausse API GitHub en mémoire : les lectures viennent de `donnees`, les écritures sont gardées.
 function faux(donnees = {}) {
@@ -875,11 +875,131 @@ test('tâche ouverte : une tâche réservée à Jules part chez lui et ne révei
   assert.equal(d.action, 'rien');
 });
 
+test('verifierAliasVercel : même commit -> valide ; commit différent -> fige ; sans commit -> non_couvert ; injoignable -> erreur', async () => {
+  const apps = [{ nom: 'emploi', depot: 'MoKarade/JobAI', sante: 'https://emploi.hubperso.com/api/sante' }];
+  const rep = (body) => ({ ok: true, text: async () => typeof body === 'string' ? body : JSON.stringify(body) });
+
+  // Même commit -> valide
+  const v1 = await verifierAliasVercel({ depot: 'MoKarade/JobAI', sha: 'abc12345678', apps, fetchImpl: async () => rep({ ok: true, commit: 'abc1234' }), pause: async () => {} });
+  assert.equal(v1.statut, 'valide');
+  assert.equal(v1.commitServi, 'abc1234');
+
+  // apps non fourni : lecture via api (contents/surveillance/apps.json en base64)
+  const fApp = faux({
+    '/repos/MoKarade/.github/contents/surveillance/apps.json': {
+      content: Buffer.from(JSON.stringify(apps)).toString('base64'),
+    },
+  });
+  const vApi = await verifierAliasVercel({
+    api: fApp.api,
+    depot: 'MoKarade/JobAI',
+    sha: 'abc12345678',
+    fetchImpl: async () => rep({ ok: true, commit: 'abc1234' }),
+    pause: async () => {},
+  });
+  assert.equal(vApi.statut, 'valide');
+
+  // Propagation : 1er essai différent, 2e essai même commit -> valide
+  let n = 0;
+  const vPropag = await verifierAliasVercel({
+    depot: 'MoKarade/JobAI',
+    sha: 'abc12345678',
+    apps,
+    fetchImpl: async () => rep({ ok: true, commit: ++n === 1 ? 'old1234' : 'abc1234' }),
+    pause: async () => {},
+  });
+  assert.equal(vPropag.statut, 'valide');
+
+  // Commit différent aux 2 essais -> fige
+  const v2 = await verifierAliasVercel({ depot: 'MoKarade/JobAI', sha: 'abc12345678', apps, fetchImpl: async () => rep({ ok: true, commit: 'old1234' }), pause: async () => {} });
+  assert.equal(v2.statut, 'fige');
+  assert.equal(v2.commitServi, 'old1234');
+  assert.equal(v2.commitDeploye, 'abc1234');
+
+  // Champ commit absent -> non_couvert
+  const v3 = await verifierAliasVercel({ depot: 'MoKarade/JobAI', sha: 'abc12345678', apps, fetchImpl: async () => rep({ ok: true }), pause: async () => {} });
+  assert.equal(v3.statut, 'non_couvert');
+
+  // Domaine injoignable (erreur fetch) -> erreur (jamais vert)
+  const v4 = await verifierAliasVercel({ depot: 'MoKarade/JobAI', sha: 'abc12345678', apps, fetchImpl: async () => { throw new Error('ENOTFOUND'); }, pause: async () => {} });
+  assert.equal(v4.statut, 'erreur');
+
+  // Corps invalide -> erreur (jamais vert)
+  const v5 = await verifierAliasVercel({ depot: 'MoKarade/JobAI', sha: 'abc12345678', apps, fetchImpl: async () => rep('Erreur serveur 500 html'), pause: async () => {} });
+  assert.equal(v5.statut, 'erreur');
+});
+
+test('verifierAliasVercel : un commit servi plus récent que le déploiement n\'est pas un alias figé ; le doute reste « figé » (#864)', async () => {
+  const apps = [{ nom: 'emploi', depot: 'MoKarade/JobAI', sante: 'https://emploi.hubperso.com/api/sante' }];
+  const rep = (body) => ({ ok: true, text: async () => JSON.stringify(body) });
+  const servi = (commit) => async () => rep({ ok: true, commit });
+  const compare = 'abc12345678...new1234';
+  const lancer = (api, fetchImpl) => verifierAliasVercel({ api, depot: 'MoKarade/JobAI', sha: 'abc12345678', apps, fetchImpl, pause: async () => {}, journal: () => {} });
+  // `ahead` : le domaine sert un commit descendant du déploiement -> valide, pas d'incident
+  const ahead = await lancer(faux({ [`/repos/MoKarade/JobAI/compare/${compare}`]: { status: 'ahead' } }).api, servi('new1234'));
+  assert.deepEqual(ahead, { statut: 'valide', commitServi: 'new1234', commitDeploye: 'abc1234', plusRecent: true });
+  // `behind`, `diverged`, introuvable (null), erreur de l'API : figé
+  for (const reponse of [{ status: 'behind' }, { status: 'diverged' }, null, new Error('HTTP 404')]) {
+    const r = await lancer(faux({ [`/repos/MoKarade/JobAI/compare/${compare}`]: reponse }).api, servi('new1234'));
+    assert.equal(r.statut, 'fige', JSON.stringify(reponse));
+  }
+  // même commit : aucun appel compare
+  const appels = [];
+  const identique = await lancer(async (...a) => { appels.push(a); return null; }, servi('abc1234'));
+  assert.equal(identique.statut, 'valide');
+  assert.deepEqual(appels, []);
+});
+
+test('déploiement : un déploiement plus récent déjà en ligne n\'ouvre aucun incident', async () => {
+  const apps = [{ nom: 'emploi', depot: 'MoKarade/JobAI', sante: 'https://emploi.hubperso.com/api/sante' }];
+  const f = faux({ '/repos/MoKarade/JobAI/compare/old12345678...new1234': { status: 'ahead' } });
+  const d = await decider({
+    api: f.api,
+    evt: { type: 'deploiement', depot: 'MoKarade/JobAI', sha: 'old12345678' },
+    apps,
+    fetchImpl: async () => ({ ok: true, text: async () => JSON.stringify({ ok: true, commit: 'new1234' }) }),
+    pause: async () => {},
+    journal: () => {},
+  });
+  assert.equal(d.alias.statut, 'valide');
+  assert.equal(f.ecritures.find((e) => e.chemin === '/repos/MoKarade/JobAI/issues'), undefined);
+  assert.notEqual(d.action, 'reveiller');
+});
+
+test('déploiement : alias figé ouvre un incident et réveille le fil propriétaire avec le remède', async () => {
+  const apps = [{ nom: 'emploi', depot: 'MoKarade/JobAI', sante: 'https://emploi.hubperso.com/api/sante' }];
+  const rep = (body) => ({ ok: true, text: async () => JSON.stringify(body) });
+  const f = faux();
+  const d = await decider({
+    api: f.api,
+    evt: { type: 'deploiement', depot: 'MoKarade/JobAI', sha: 'new1234567' },
+    apps,
+    fetchImpl: async () => rep({ ok: true, commit: 'old1234' }),
+    pause: async () => {},
+  });
+
+  assert.equal(d.action, 'reveiller');
+  assert.match(d.motif, /alias figé sur old1234, dernier READY new1234/);
+  assert.match(d.motif, /promouvoir le dernier READY avec l’outil Vercel de la session, puis relire \/api\/sante/);
+  const ecritureIssue = f.ecritures.find((e) => e.chemin === '/repos/MoKarade/JobAI/issues');
+  assert.ok(ecritureIssue);
+  assert.equal(ecritureIssue.corps.title, 'alias figé sur old1234, dernier READY new1234');
+  assert.deepEqual(ecritureIssue.corps.labels, ['incident']);
+  assert.match(ecritureIssue.corps.body, /promouvoir le dernier READY/);
+});
+
 test('déploiement réussi : la tâche de la PR fusionnée sur ce commit s’accepte seule, et le réveil le dit', async () => {
   const donnees = { [`/repos/${DEPOT}/commits/abc1234/pulls`]: [{ number: 7, merged_at: '2026-10-28T20:00:00Z' }], [LISTE]: [tachePrete(12)] };
   const appels = [];
   const accepter = async (a) => { appels.push(a); return { statut: 'acceptee', tache: 40 }; };
-  const d = await decider({ api: faux(donnees).api, evt: { type: 'deploiement', depot: DEPOT, sha: 'abc1234' }, accepter, maintenant: new Date('2026-10-28T21:00:00Z') });
+  const d = await decider({
+    api: faux(donnees).api,
+    evt: { type: 'deploiement', depot: DEPOT, sha: 'abc1234' },
+    accepter,
+    maintenant: new Date('2026-10-28T21:00:00Z'),
+    pause: async () => {},
+    fetchImpl: async () => ({ ok: true, text: async () => JSON.stringify({ ok: true, commit: 'abc1234' }) }),
+  });
   assert.equal(appels[0].numeroPr, 7);
   assert.equal(appels[0].essais, 1, 'un événement n’attend pas : le déploiement est déjà là');
   assert.equal(d.action, 'reveiller');
@@ -887,10 +1007,22 @@ test('déploiement réussi : la tâche de la PR fusionnée sur ce commit s’acc
 });
 
 test('déploiement réussi : rien à accepter = personne n’est réveillé', async () => {
-  const donnees = { [`/repos/${DEPOT}/commits/abc1234/pulls`]: [{ number: 7, merged_at: '2026-10-28T20:00:00Z' }, { number: 8, merged_at: null }] };
-  const d = await decider({ api: faux(donnees).api, evt: { type: 'deploiement', depot: DEPOT, sha: 'abc1234' }, accepter: async () => ({ statut: 'ignoree' }) });
+  const donnees = { [`/repos/${DEPOT}/commits/abc1234/pulls`]: [{ number: 7, merged_at: '2026-10-28T20:00:00Z' }], [`/repos/${DEPOT}/commits/abc1234/pulls`]: [{ number: 7, merged_at: '2026-10-28T20:00:00Z' }, { number: 8, merged_at: null }] };
+  const d = await decider({
+    api: faux(donnees).api,
+    evt: { type: 'deploiement', depot: DEPOT, sha: 'abc1234' },
+    accepter: async () => ({ statut: 'ignoree' }),
+    pause: async () => {},
+    fetchImpl: async () => ({ ok: true, text: async () => JSON.stringify({ ok: true, commit: 'abc1234' }) }),
+  });
   assert.equal(d.action, 'rien');
-  const panne = await decider({ api: faux({ [`/repos/${DEPOT}/commits/abc1234/pulls`]: new Error('HTTP 502') }).api, evt: { type: 'deploiement', depot: DEPOT, sha: 'abc1234' }, accepter: async () => ({ statut: 'ignoree' }) });
+  const panne = await decider({
+    api: faux({ [`/repos/${DEPOT}/commits/abc1234/pulls`]: new Error('HTTP 502') }).api,
+    evt: { type: 'deploiement', depot: DEPOT, sha: 'abc1234' },
+    accepter: async () => ({ statut: 'ignoree' }),
+    pause: async () => {},
+    fetchImpl: async () => ({ ok: true, text: async () => JSON.stringify({ ok: true, commit: 'abc1234' }) }),
+  });
   assert.equal(panne.action, 'rien');
 });
 

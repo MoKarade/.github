@@ -448,11 +448,115 @@ export const TYPES_EVENEMENT_NOUVEAU = new Set(['tache_ouverte', 'deploiement', 
 export const signalSur = (v) => (/^[0-9A-Za-z._-]{1,40}$/.test(String(v ?? '')) ? String(v) : '');
 
 /**
+ * Contrôle si l'alias Vercel de l'app est figé sur un ancien commit après un déploiement READY.
+ * Effectue deux lectures de /api/sante à ~30 s d'intervalle si le commit ne correspond pas au premier essai.
+ */
+export async function verifierAliasVercel({
+  api,
+  depot,
+  sha,
+  apps,
+  fetchImpl = globalThis.fetch,
+  pause = (ms) => new Promise((r) => setTimeout(r, ms)),
+  journal = console.log,
+}) {
+  const commitDeploye = String(sha ?? '').slice(0, 7);
+  if (!commitDeploye) return { statut: 'non_couvert', raison: 'sha absent' };
+
+  let listeApps = apps;
+  if (!listeApps) {
+    try {
+      const res = await api('GET', '/repos/MoKarade/.github/contents/surveillance/apps.json').catch(() => null);
+      if (res?.content) {
+        listeApps = JSON.parse(Buffer.from(res.content, 'base64').toString('utf8'));
+      }
+    } catch (e) {
+      journal(`::warning::Réacteur : impossible de lire surveillance/apps.json via API (${e.message}).`);
+      return { statut: 'non_couvert', raison: 'apps.json introuvable' };
+    }
+  }
+
+  const app = (listeApps ?? []).find((a) => a.depot === depot);
+  if (!app || !app.sante) {
+    const raison = app ? app.raison || 'URL de santé absente' : 'dépôt non couvert dans surveillance/apps.json';
+    journal(`Réacteur : contrôle d'alias non couvert pour ${depot} (${raison}).`);
+    return { statut: 'non_couvert', raison };
+  }
+
+  const lireSante = async () => {
+    const res = await fetchImpl(app.sante, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const texte = await res.text();
+    let data;
+    try {
+      data = JSON.parse(texte);
+    } catch {
+      throw new Error('JSON invalide');
+    }
+    return data;
+  };
+
+  let data1 = null;
+  try {
+    data1 = await lireSante();
+  } catch {
+    // Premier échec silencieux, retentative après pause.
+  }
+
+  if (data1 && typeof data1 === 'object' && data1.commit) {
+    const commit1 = String(data1.commit).slice(0, 7);
+    if (commit1 === commitDeploye) {
+      return { statut: 'valide', commitServi: commit1, commitDeploye };
+    }
+  }
+
+  // Si la première lecture ne correspond pas, attendre 30 s pour laisser l'alias Vercel se poser.
+  await pause(30000);
+
+  let data2 = null;
+  let err2 = null;
+  try {
+    data2 = await lireSante();
+  } catch (e) {
+    err2 = e.message;
+  }
+
+  if (err2) {
+    const msg = `domaine injoignable ou corps invalide (${err2})`;
+    journal(`::warning::Réacteur : contrôle d'alias pour ${depot} : ${msg}.`);
+    return { statut: 'erreur', raison: msg };
+  }
+
+  if (!data2 || typeof data2 !== 'object' || !data2.commit) {
+    const msg = 'champ commit absent dans /api/sante';
+    journal(`Réacteur : contrôle d'alias non couvert pour ${depot} (${msg}).`);
+    return { statut: 'non_couvert', raison: msg };
+  }
+
+  const commitServi = String(data2.commit).slice(0, 7);
+  if (commitServi === commitDeploye) {
+    return { statut: 'valide', commitServi, commitDeploye };
+  }
+
+  // Deux déploiements qui se suivent : l'événement du premier arrive quand le second sert déjà. Un commit servi PLUS RÉCENT (descendant du sha déployé) n'est pas
+  // un alias figé (tâche MoKarade/.github#864) ; le doute (introuvable, `behind`, `diverged`, API en échec) reste « figé », comme avant.
+  if (typeof api === 'function') {
+    const relation = await api('GET', `/repos/${depot}/compare/${sha}...${commitServi}`).then((r) => r?.status ?? null).catch(() => null);
+    if (relation === 'ahead') {
+      journal(`Réacteur : contrôle d'alias pour ${depot} : le domaine sert ${commitServi}, plus récent que le déploiement ${commitDeploye} ; pas un alias figé.`);
+      return { statut: 'valide', commitServi, commitDeploye, plusRecent: true };
+    }
+  }
+  journal(`::warning::Réacteur : alias figé pour ${depot} (servi: ${commitServi}, déployé: ${commitDeploye}).`);
+  return { statut: 'fige', commitServi, commitDeploye };
+}
+
+/**
  * Décide quoi faire d'un événement, puis lit les preuves différées dues du dépôt (scripts/preuve-attendue-auto.mjs). Le résultat ne change pas
  * quand rien n'est accepté ni refusé par erreur : la clé `differees` n'apparaît que s'il y a quelque chose à dire.
  */
-export async function decider({ api, evt, maintenant = new Date(), accepter = accepterApresFusion, accepterDifferees = accepterPreuvesAttendues, jetonLecture = '', boitePc = BOITE_PC }) {
-  const d = await deciderEvenement({ api, evt, maintenant, accepter, boitePc });
+export async function decider({ api, evt, maintenant = new Date(), accepter = accepterApresFusion, accepterDifferees = accepterPreuvesAttendues, jetonLecture = '', boitePc = BOITE_PC, pause, fetchImpl, journal, apps }) {
+  const d = await deciderEvenement({ api, evt, maintenant, accepter, boitePc, pause, fetchImpl, journal, apps });
   if (!TYPES_PREUVE_DIFFEREE.has(evt.type)) return d;
   const config = { deploiement: evt.deploiement === 'aucun' ? 'aucun' : 'vercel', workflows: String(evt.workflows ?? '').split(',').map((x) => x.trim()).filter(Boolean) };
   const differees = await accepterDifferees({ api, depot: evt.depot, maintenant, config, jeton: jetonLecture, lues: evt.type === 'filet' ? LUES_FILET : LUES_EVENEMENT }).catch((e) => ({ acceptees: [], ignorees: [], erreur: e.message }));
@@ -488,7 +592,7 @@ async function reveilApresAcceptation({ api, depot, maintenant, taches }) {
  * Décide quoi faire d'un événement. Rend { action: 'reveiller', motif } | { action: 'relance', run } | { action: 'balayer' } | { action: 'rien', raison }.
  * `evt` : { type, depot, pr, issue, raison, evenement, sha, run, brancheRun, brancheDefaut, forcer }.
  */
-async function deciderEvenement({ api, evt, maintenant, accepter, boitePc = BOITE_PC }) {
+async function deciderEvenement({ api, evt, maintenant, accepter, boitePc = BOITE_PC, pause, fetchImpl, journal, apps }) {
   const { type, depot } = evt;
   if (type === 'filet') return filet({ api, evt, maintenant });
   if (type === 'pr_ouverte') return { action: 'balayer' };
@@ -511,16 +615,32 @@ async function deciderEvenement({ api, evt, maintenant, accepter, boitePc = BOIT
   }
   // Un déploiement de production réussi : la tâche de la PR fusionnée sur ce commit s'accepte seule si sa règle le permet (la PR a pu fusionner avant la fin du déploiement).
   if (type === 'deploiement') {
+    const alias = await verifierAliasVercel({ api, depot, sha: evt.sha, pause, fetchImpl, journal, apps });
+    if (alias.statut === 'fige') {
+      const remede = 'promouvoir le dernier READY avec l’outil Vercel de la session, puis relire /api/sante';
+      const titre = `alias figé sur ${alias.commitServi}, dernier READY ${alias.commitDeploye}`;
+      const existantes = (await api('GET', `/repos/${depot}/issues?labels=incident&state=open&per_page=20`).catch(() => [])) ?? [];
+      let me = existantes.find((i) => i.title === titre);
+      if (!me) {
+        me = await api('POST', `/repos/${depot}/issues`, {
+          title: titre,
+          labels: ['incident'],
+          body: `L'alias Vercel de l'application \`${depot}\` est figé sur le commit \`${alias.commitServi}\` alors que le dernier déploiement READY est sur \`${alias.commitDeploye}\`.\n\n**Remède** : ${remede}.`,
+        }).catch(() => null);
+      }
+      const motif = construireMotif([titre, `remède : ${remede}`]);
+      return { action: 'reveiller', motif, alias, cibles: boitesDuReveil({ evt }) };
+    }
     const prs = (await api('GET', `/repos/${depot}/commits/${evt.sha}/pulls`).catch(() => null)) ?? [];
     const config = { deploiement: evt.deploiement === 'aucun' ? 'aucun' : 'vercel', workflows: String(evt.workflows ?? '').split(',').map((x) => x.trim()).filter(Boolean) };
     for (const pr of prs.filter((p) => p.merged_at)) {
       const a = await accepter({ api, depot, numeroPr: pr.number, config, essais: 1, pause: 0 }).catch((e) => ({ statut: 'erreur', motifs: [e.message] }));
       if (a.statut === 'acceptee') {
         const apres = await reveilApresAcceptation({ api, depot, maintenant, taches: [a.tache] });
-        return { ...(apres ?? { action: 'rien', raison: 'tâche acceptée, dépôt encore occupé' }), acceptation: a };
+        return { ...(apres ?? { action: 'rien', raison: 'tâche acceptée, dépôt encore occupé' }), acceptation: a, alias };
       }
     }
-    return { action: 'rien', raison: 'déploiement sans tâche à accepter' };
+    return { action: 'rien', raison: 'déploiement sans tâche à accepter', alias };
   }
   // Relevé PC (BOITE_PC) : la demande réveille le PC, le relevé réveille le fil propriétaire. Rien d'autre ne bouge pour un commentaire.
   if (type === 'commentaire') {
@@ -652,8 +772,8 @@ export async function traiter({ pilote = null, ...options }) {
   return pilotage ? { ...resultat, pilotage, ...(signale ? { signauxDits: pilotage.signaux.length } : {}) } : resultat;
 }
 
-async function traiterDecision({ api, evt, jetonReveil, journal = console.log, maintenant = new Date(), jetonLecture = '', accepterDifferees, boites = BOITES, directes = BOITES_DIRECTES, boitePc = BOITE_PC, decisionImposee = null, routine = null, appeler = fetch }) {
-  let d = decisionImposee ?? await decider({ api, evt, maintenant, jetonLecture, boitePc, ...(accepterDifferees ? { accepterDifferees } : {}) });
+async function traiterDecision({ api, evt, jetonReveil, journal = console.log, maintenant = new Date(), jetonLecture = '', accepterDifferees, boites = BOITES, directes = BOITES_DIRECTES, boitePc = BOITE_PC, decisionImposee = null, pause, fetchImpl, apps, routine = null, appeler = fetch }) {
+  let d = decisionImposee ?? await decider({ api, evt, maintenant, jetonLecture, boitePc, pause, fetchImpl, journal, apps, ...(accepterDifferees ? { accepterDifferees } : {}) });
   if (d.differees?.acceptees.length) journal(`Réacteur : preuve différée lue et acceptée automatiquement sur ${d.differees.acceptees.map((n) => `#${n}`).join(', ')} (docs/cycle-de-vie-tache.md §10 quater).`);
   if (d.differees?.erreur) journal(`::warning::Réacteur : preuves différées non lues (${d.differees.erreur}). Un fil prouvera.`);
   if (d.acceptation?.statut === 'acceptee') journal(`Réacteur : tâche #${d.acceptation.tache} acceptée automatiquement (docs/cycle-de-vie-tache.md §10 ter).`);
