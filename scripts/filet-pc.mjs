@@ -41,6 +41,9 @@
 // (`scripts/acceptation-marquage.mjs`, 8 par tour au plus) : sans elle, `acceptation-auto.mjs` n'accepte jamais rien (§10 ter).
 // Onzième ajout (tâche MoKarade/.github#513) : redire au Coordinateur, toutes les 4 h, chaque preuve en retard (`scripts/preuves-retard.mjs`, `defauts-preuve.json` du relevé) :
 // une tâche fusionnée sans « Acceptée » valide ou dont la preuve programmée est dépassée ne dépend plus du seul fil qui devait la poser.
+// Du sixième au dixième rôle (suivi des PR de Jules, `faisable-jules`, gabarit, « Fichiers touchés », « Acceptation automatique ») : DÉPLACÉS vers le Réacteur le 29/10/2026
+// (tâche MoKarade/.github#715, « rien ne dépend du PC »). Les fonctions `tour*` restent ici, testées, mais `main` ne les lance plus ; le Réacteur appelle les fonctions des
+// modules (`scripts/pilotage-evenement.mjs`) sur l'événement qui les rend utiles.
 // Un échec du réveil ne fait JAMAIS échouer le tour (il se dit sur la ligne imprimée) et n'enregistre pas le signalement :
 // le tour suivant réessaie.
 import { execFileSync } from 'node:child_process';
@@ -634,10 +637,10 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const quota = mesure('quota', () => tourQuota({ fichierProchaines, fichierEtat: fichierEtat.replace(/(\.json)?$/, '-quota.json'), ...options }));
     const liens = mesure('liens', () => tourLiens({ fichierProchaines, ...options }));
     const file = mesure('file', () => tourFile({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-file.json'), ...options }));
-    const suivi = mesure('jules-suivi', () => tourJulesSuivi({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-jules-suivi.json'), ...options }));
-    const fichiers = mesure('fichiers-touches', () => tourFichiersTouches(options));
-    const marquage = mesure('acceptation-marquage', () => tourAcceptationMarquee(options));
+    // .github#715 : le suivi des PR de Jules, la réservation `faisable-jules`, le gabarit, « Fichiers touchés » et « Acceptation automatique » partent à l'événement
+    // (`scripts/pilotage-evenement.mjs`, appelé par le Réacteur) ; le tour du PC n'en lance plus aucun. Il garde la file Mergify (`tourFile`) : mettre une branche à
+    // jour AVEC un jeton qui relance la CI est le seul geste que le jeton du job ne sait pas faire (GitHub ne lance aucun workflow sur un push du jeton du job).
     const preuves = mesure('preuves', () => tourPreuvesRetard({ fichierDefauts: fichierProchaines.replace(/[^/\\]*$/, '') + 'defauts-preuve.json', fichierEtat: fichierEtat.replace(/(\.json)?$/, '-preuves.json'), ...options }));
-    console.log(`${reveil} · ${quotidien} · ${oublis} · ${quota} · ${liens} · ${file} · ${suivi} · ${fichiers} · ${marquage} · ${preuves} · ${versionDuCode()} · ${ligneAppels(compteursGh(), roles)}`);
+    console.log(`${reveil} · ${quotidien} · ${oublis} · ${quota} · ${liens} · ${file} · ${preuves} · ${versionDuCode()} · ${ligneAppels(compteursGh(), roles)}`);
   }
 }

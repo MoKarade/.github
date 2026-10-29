@@ -77,7 +77,7 @@ export function evaluerMarquage({ titre = '', corps = '' }) {
 
 /** La ligne à ajouter : elle passe `LIGNE_AUTO` de acceptation-auto.mjs et dit qui l'a écrite et pourquoi. */
 export const composerLigne = () =>
-  `${MARQUEUR}\n**Acceptation automatique** : oui — posée par le filet du PC (§10 ter) : le « Fini quand » se lit par un test ou la CI, sans écran, sans donnée ni production à constater, et les fichiers touchés sont connus. La PR doit encore passer les sept conditions à la fusion ; le fil qui prend la tâche peut la retirer ou la remplacer par « non ».\n`;
+  `${MARQUEUR}\n**Acceptation automatique** : oui — posée par le Réacteur (§10 ter) : le « Fini quand » se lit par un test ou la CI, sans écran, sans donnée ni production à constater, et les fichiers touchés sont connus. La PR doit encore passer les sept conditions à la fusion ; le fil qui prend la tâche peut la retirer ou la remplacer par « non ».\n`;
 
 /**
  * Complète, dans un dépôt, les tâches ouvertes `niveau:tâche` éligibles, par priorité puis numéro, dans la limite de `budget.restant` (partagé entre
