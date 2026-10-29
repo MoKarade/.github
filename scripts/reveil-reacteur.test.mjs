@@ -1472,3 +1472,62 @@ test('routine : session déjà lancée (marqueur récent, `en-cours` pas encore 
   assert.ok(reveilDe(ecritures).endsWith('routine : #212 déjà lancée'));
   assert.equal(r.routine.n, 212);
 });
+
+// ---- Une tâche fermée réveille aussi les dépôts dont une tâche l'attendait (tâche MoKarade/.github#870).
+const DEP_FERMEE = 'MoKarade/app-template';
+const DEP_ATTENDANT = 'MoKarade/CarAI';
+const BOITES_DEP = { [DEP_FERMEE]: 197, [DEP_ATTENDANT]: 199 };
+const LIRE_TACHES = (d) => `/repos/${d}/issues?labels=${encodeURIComponent('niveau:tâche')}&state=open&per_page=100&page=1`;
+const attendante = (n, attend) => ({ ...tachePrete(n), body: `**Fini quand** : la route répond 200\n\n**Fichiers touchés** :\n- \`src/t${n}.mjs\`\n\n**Attend** : ${attend}\n` });
+const donneesDep = (attend, extra = {}) => ({
+  [LIRE_TACHES(DEP_ATTENDANT)]: [attendante(252, attend)],
+  [`/repos/${DEP_ATTENDANT}/issues?state=open&per_page=100&page=1`]: [attendante(252, attend)],
+  [`/repos/${DEP_FERMEE}/issues/213`]: { number: 213, state: 'closed', state_reason: 'completed', closed_at: '2026-10-29T14:50:00Z', labels: [{ name: 'niveau:tâche' }] },
+  ...extra,
+});
+const reveilsDe = (ecritures, boite) => ecritures.filter((e) => e.chemin.endsWith(`/${WORKFLOW_BOITE}/dispatches`) && e.corps.inputs.boite === boite);
+const tourDep = (donnees, evt = {}, options = {}) => {
+  const { api, ecritures } = faux(donnees);
+  const journal = [];
+  return traiter({ boites: BOITES_DEP, api, evt: { type: 'tache_fermee', depot: DEP_FERMEE, issue: '213', raison: 'completed', ...evt }, jetonReveil: 'jeton', journal: (l) => journal.push(l), ...options }).then((r) => ({ r, ecritures, journal }));
+};
+
+test('dépendants : tâche fermée citée par une tâche prête d’un autre dépôt = un seul réveil de ce dépôt', async () => {
+  const { r, ecritures } = await tourDep(donneesDep('app-template#213 — la nav'));
+  const reveils = reveilsDe(ecritures, '199');
+  assert.equal(reveils.length, 1);
+  assert.equal(reveils[0].corps.inputs.texte, `${PREFIXE}${DEP_ATTENDANT} libre ; suivante : #252 ; tâche ${DEP_FERMEE}#213 fermée ; ${DEP_ATTENDANT}#252 peut partir`);
+  assert.doesNotMatch(reveils[0].corps.inputs.texte, /Titre secret/);
+  assert.deepEqual(r.dependants, [DEP_ATTENDANT]);
+});
+
+test('dépendants : aucune citation = aucun réveil du dépôt', async () => {
+  const { r, ecritures } = await tourDep(donneesDep('aucune'));
+  assert.equal(reveilsDe(ecritures, '199').length, 0);
+  assert.equal(r.dependants, undefined);
+});
+
+test('dépendants : tâche abandonnée (non prouvée), ou sans jeton de réveil = aucun réveil du dépôt', async () => {
+  assert.equal(reveilsDe((await tourDep(donneesDep('app-template#213'), { raison: 'not_planned' })).ecritures, '199').length, 0);
+  assert.equal(reveilsDe((await tourDep(donneesDep('app-template#213'), {}, { jetonReveil: '' })).ecritures, '199').length, 0);
+});
+
+test('dépendants : la tâche citée n’est pas dans la file du dépôt = pas de réveil, dit dans le journal', async () => {
+  const bloquee = { ...attendante(252, 'app-template#213'), labels: [{ name: 'niveau:tâche' }, { name: 'qui:marc' }] };
+  const { ecritures, journal } = await tourDep(donneesDep('app-template#213', { [LIRE_TACHES(DEP_ATTENDANT)]: [bloquee], [`/repos/${DEP_ATTENDANT}/issues?state=open&per_page=100&page=1`]: [bloquee] }));
+  assert.equal(reveilsDe(ecritures, '199').length, 0);
+  assert.ok(journal.some((l) => l.includes(`${DEP_ATTENDANT} attendait ${DEP_FERMEE}#213`)));
+});
+
+test('dépendants : la lecture d’un dépôt en panne est un avertissement, le réveil du dépôt fermé part quand même', async () => {
+  const { r, journal } = await tourDep({ [LIRE_TACHES(DEP_ATTENDANT)]: new Error('HTTP 502') });
+  assert.equal(r.reveille, true);
+  assert.ok(journal.some((l) => l.startsWith('::warning::') && l.includes(DEP_ATTENDANT)));
+});
+
+test('dépendants : le même réveil posté depuis moins de 6 h n’est pas reposté', async () => {
+  const motif = `${PREFIXE}${DEP_ATTENDANT} libre ; suivante : #252 ; tâche ${DEP_FERMEE}#213 fermée ; ${DEP_ATTENDANT}#252 peut partir`;
+  const deja = { body: motif, user: { login: 'github-actions[bot]' }, created_at: new Date().toISOString() };
+  const { ecritures } = await tourDep(donneesDep('app-template#213', { [`/repos/${DEPOT_BOITE}/issues/199/comments`]: [deja] }));
+  assert.equal(reveilsDe(ecritures, '199').length, 0);
+});
