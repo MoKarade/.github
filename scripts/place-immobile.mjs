@@ -20,6 +20,9 @@ export const ATTENTE_H = 1;
 export const LABEL_EN_COURS = 'en-cours';
 export const LABEL_BLOQUE = 'bloqué';
 export const ETIQUETTES_PROTEGEES = ['preuve-attendue', 'qui:marc', 'jules'];
+// Une tâche qui attend un relevé du PC ou un déploiement n'est pas immobile (cas Hubperso#719, 29/10/2026) : un commentaire de ce genre posé APRÈS `en-cours` la protège 24 h.
+export const ATTENTE_RELEVE = /^\s*\*\*(Relevé PC demandé|Relevé PC|Preuve attendue)\*\*/i;
+export const PROTECTION_RELEVE_H = 24;
 
 const noms = (labels) => (labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
 const heures = (depuis, maintenant) => (maintenant.getTime() - Date.parse(depuis)) / 3_600_000;
@@ -29,10 +32,11 @@ const heures = (depuis, maintenant) => (maintenant.getTime() - Date.parse(depuis
  *   enCoursDepuis : ISO de la pose de `en-cours` (null = illisible : rien) ; marqueur : le commentaire marqueur ({ created_at }) ou null ;
  *   reponseDuFil : un commentaire autre que le marqueur existe-t-il après lui ? ; prOuverte : une PR ouverte cite-t-elle la tâche ?
  */
-export function decider({ labels, enCoursDepuis, marqueur, reponseDuFil, prOuverte, maintenant }) {
+export function decider({ labels, enCoursDepuis, marqueur, reponseDuFil, prOuverte, attenteReleve = false, maintenant }) {
   const l = noms(labels);
   if (ETIQUETTES_PROTEGEES.some((p) => l.includes(p)) || !l.includes(LABEL_EN_COURS)) return { action: 'rien', raison: 'protégée' };
   if (prOuverte) return { action: 'rien', raison: 'PR ouverte' };
+  if (attenteReleve) return { action: 'rien', raison: 'attend un relevé' };
   if (!enCoursDepuis) return { action: 'rien', raison: 'âge illisible' };
   const h = heures(enCoursDepuis, maintenant);
   if (h < SEUIL_H) return { action: 'rien', raison: 'récente', heures: h };
@@ -48,6 +52,13 @@ export function poseEnCours(evenements) {
 }
 
 const arrondi = (h) => Math.floor(h);
+
+/** Un commentaire de relevé/preuve, posé après `en-cours` et il y a moins de 24 h, dit que la tâche attend un déploiement ou le PC. */
+export function attendUnReleve({ commentaires, enCoursDepuis, maintenant }) {
+  return (commentaires ?? []).some(
+    (c) => ATTENTE_RELEVE.test(String(c.body ?? '')) && Date.parse(c.created_at) >= Date.parse(enCoursDepuis) && heures(c.created_at, maintenant) < PROTECTION_RELEVE_H,
+  );
+}
 
 /** Une PR ouverte, dans n'importe quel dépôt de MoKarade, cite-t-elle `depot#n` ? Une recherche en échec lève (l'appelant ne libère alors rien). */
 function prOuverteAilleurs({ depot, n, gh }) {
@@ -78,7 +89,7 @@ export function libererPlacesImmobiles({ depot, gh, maintenant = new Date(), aBl
       const commentaires = gh('GET', `repos/${depot}/issues/${t.number}/comments?per_page=100`);
       const marqueur = commentaires.find((c) => String(c.body ?? '').includes(MARQUEUR)) ?? null;
       const reponseDuFil = marqueur ? commentaires.some((c) => c !== marqueur && Date.parse(c.created_at) > Date.parse(marqueur.created_at)) : false;
-      const verdict = decider({ labels: t.labels, enCoursDepuis, marqueur, reponseDuFil, prOuverte: false, maintenant });
+      const verdict = decider({ labels: t.labels, enCoursDepuis, marqueur, reponseDuFil, prOuverte: false, attenteReleve: attendUnReleve({ commentaires, enCoursDepuis, maintenant }), maintenant });
       if (verdict.action === 'signaler') {
         if (!aBlanc) {
           gh('POST', `repos/${depot}/issues/${t.number}/comments`, {

@@ -21,6 +21,7 @@ Une tâche `en-cours` tient une place du dépôt (`PLACES_PAR_DEPOT`). Quand son
 
 - Une tâche `preuve-attendue`, `qui:marc` ou `jules`.
 - Une tâche citée par une PR ouverte, même dans un autre dépôt (.github#748 a ses PR dans les neuf dépôts d'app) : lue par la recherche GitHub.
+- Une tâche qui attend un relevé du PC ou un déploiement : un commentaire `**Relevé PC demandé**`, `**Relevé PC**` ou `**Preuve attendue**` posé après `en-cours`, il y a moins de 24 h, la protège (cas Hubperso#719, 29/10/2026 : le fil PC attendait un déploiement).
 - L'issue : elle n'est jamais fermée. On pose `bloqué`, le fil du dépôt décide (il retire `bloqué` pour reprendre).
 - Une lecture impossible (événements, commentaires, recherche) ne libère rien : mieux vaut une place occupée de trop qu'un travail réel retiré. Elle est dite dans les erreurs du pilotage (run rouge, donc issue `boucle:erreur`).
 
