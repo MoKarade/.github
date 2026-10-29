@@ -93,8 +93,8 @@ export const TYPES_POUR_LE_FIL = new Set(['pr_fusionnee', 'tache_fermee', 'tache
 
 // Boîte « preuve PC » (tâche MoKarade/.github#807, choix « A » de Marc du 29/10/2026 00:40Z) : le PC est réveillé directement, sans passer par le Coordinateur.
 // Le fil propriétaire d'une tâche en `preuve-attendue` demande un relevé d'écran par un commentaire `**Relevé PC demandé** — …` ; le PC répond par `**Relevé PC** — …`
-// sur la même issue, et la boîte du dépôt propriétaire est réveillée pour poser « Acceptée ». 0 tant que la PR boîte n'existe pas (#808) : la demande ne réveille alors personne.
-export const BOITE_PC = 0;
+// sur la même issue, et la boîte du dépôt propriétaire est réveillée pour poser « Acceptée ». PR brouillon permanente app-template#211 (tâche #808) ; 0 la désactive : la demande ne réveille alors personne.
+export const BOITE_PC = 211;
 export const RELEVE_MIN = 40;
 const ENTETE_DEMANDE_PC = /^\s*\*\*Relevé PC demandé\*\*/i;
 const ENTETE_RELEVE_PC = /^\s*\*\*Relevé PC\*\*\s*[—:-]\s*(.*)$/is;
