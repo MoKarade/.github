@@ -69,3 +69,11 @@ jobs:
           CONFORMITE_BLOQUANT: ${{ inputs.bloquant }}
           CONFORMITE_TITRE_PR: ${{ github.event.pull_request.title }}
         run: node .conformite/scripts/conformite.mjs depot "$DEPOT"
+
+      # Le graphe de code reste en place (tâche #841) : scripts/graphe.sh, hooks SessionStart et PreToolUse, serveur MCP graphify.
+      # Lu à la racine du dépôt appelant (pas sous `racine`) ; rouge si `bloquant`, sinon une annotation. Aucun réseau.
+      - name: Graphe de code en place
+        if: ${{ !cancelled() }}
+        env:
+          CONFORMITE_BLOQUANT: ${{ inputs.bloquant }}
+        run: node .conformite/scripts/graphe-en-place.mjs depot
