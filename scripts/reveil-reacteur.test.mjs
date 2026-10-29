@@ -1427,12 +1427,29 @@ test('routine : sans secrets, le réveil est identique et aucun appel ne part', 
   assert.equal(reveilDe(ecritures), decisionPrete().motif);
 });
 
-test('routine : tâche confiée à Jules ou dépôt dont un fil écoute la boîte → aucun appel', async () => {
-  for (const [depot, extra] of [['MoKarade/app-template', { jules: { n: 212 } }], ['MoKarade/CarAI', {}]]) {
-    const { api } = faux({ ...donneesRoutine, '/repos/MoKarade/CarAI/issues/212': { state: 'open', labels: [{ name: 'niveau:tâche' }] }, '/repos/MoKarade/CarAI/issues/212/comments': [] });
+test('routine : tâche confiée à Jules → aucun appel', async () => {
+  const { api } = faux(donneesRoutine);
+  const { appeler, appels } = fauxLancement();
+  await traiter({ boites: {}, api, appeler, routine: routineTest, evt: { type: 'tache_fermee', depot: 'MoKarade/app-template', issue: '9' }, decisionImposee: decisionPrete({ jules: { n: 212 } }), jetonReveil: 'jeton', journal: () => {} });
+  assert.equal(appels.length, 0);
+});
+
+test('routine : dépôt dont un fil écoute la boîte (CarAI) → la session neuve part quand même, une seule fois (tâche #871)', async () => {
+  const { api, ecritures } = faux({ '/repos/MoKarade/CarAI/issues/212': { state: 'open', labels: [{ name: 'niveau:tâche' }] }, '/repos/MoKarade/CarAI/issues/212/comments': [] });
+  const { appeler, appels } = fauxLancement();
+  const r = await traiter({ boites: {}, api, appeler, routine: routineTest, evt: { type: 'tache_fermee', depot: 'MoKarade/CarAI', issue: '9' }, decisionImposee: decisionPrete(), jetonReveil: 'jeton', journal: () => {} });
+  assert.equal(appels.length, 1);
+  assert.deepEqual(JSON.parse(appels[0].options.body), { text: 'MoKarade/CarAI#212' });
+  assert.ok(reveilDe(ecritures).endsWith('routine : #212 lancée'));
+  assert.equal(r.routine.n, 212);
+});
+
+test('routine : file occupée ou tâche écartée par une étiquette (en-cours) dans un dépôt avec fil → aucun appel (tâche #871)', async () => {
+  for (const [file, labels] of [[{ statut: 'occupe', suivante: 212 }, ['niveau:tâche']], [{ statut: 'libre', suivante: 212 }, ['niveau:tâche', 'en-cours']]]) {
+    const { api } = faux({ '/repos/MoKarade/CarAI/issues/212': { state: 'open', labels: labels.map((name) => ({ name })) }, '/repos/MoKarade/CarAI/issues/212/comments': [] });
     const { appeler, appels } = fauxLancement();
-    await traiter({ boites: {}, api, appeler, routine: routineTest, evt: { type: 'tache_fermee', depot, issue: '9' }, decisionImposee: decisionPrete(extra), jetonReveil: 'jeton', journal: () => {} });
-    assert.equal(appels.length, 0, depot);
+    await traiter({ boites: {}, api, appeler, routine: routineTest, evt: { type: 'tache_fermee', depot: 'MoKarade/CarAI', issue: '9' }, decisionImposee: decisionPrete({ file }), jetonReveil: 'jeton', journal: () => {} });
+    assert.equal(appels.length, 0);
   }
 });
 
