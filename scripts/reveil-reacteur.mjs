@@ -682,7 +682,8 @@ async function traiterDecision({ api, evt, jetonReveil, journal = console.log, m
   const suivante = d.file?.suivante;
   if (routine && suivante && !directes.has(evt.depot) && d.jules?.n !== suivante) {
     const lancee = await lancerRoutine({ api, depot: evt.depot, n: suivante, routine, file: d.file, maintenant, journal, appeler });
-    if (lancee.statut === 'lancee') d = { ...d, routine: { n: suivante }, motif: `${d.motif} ; routine : #${suivante} lancée`.slice(0, LONGUEUR_MAX) };
+    // « déjà lancée » : une session part pour cette tâche et n'a pas encore posé `en-cours` ; le réveil le dit aussi, pour que le Coordinateur ne lance pas un second fil.
+    if (lancee.statut === 'lancee' || lancee.statut === 'deja') d = { ...d, routine: { n: suivante }, motif: `${d.motif} ; routine : #${suivante} ${lancee.statut === 'deja' ? 'déjà ' : ''}lancée`.slice(0, LONGUEUR_MAX) };
     else if (lancee.statut === 'rien') journal(`Réacteur : routine non lancée pour ${evt.depot}#${suivante} (${lancee.raison}).`);
   }
   if (!jetonReveil) {

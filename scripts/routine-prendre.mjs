@@ -44,16 +44,19 @@ export function tacheLancable(issue) {
   return ecartee ? { ok: false, raison: `étiquette « ${ecartee} »` } : { ok: true };
 }
 
-/** Un commentaire marqueur de moins de `FENETRE_ROUTINE_H` heures ? Rend ce commentaire, sinon null. */
+// Le marqueur est écrit avec le jeton du job : seul `github-actions[bot]` compte. Dépôt public : un compte tiers qui poserait le même texte ne bloquerait pas la routine.
+export const AUTEUR_MARQUEUR = 'github-actions[bot]';
+
+/** Un commentaire marqueur du robot de moins de `FENETRE_ROUTINE_H` heures ? Rend ce commentaire, sinon null. */
 export function marqueRecente(commentaires, maintenant = new Date()) {
   const limite = maintenant.getTime() - FENETRE_ROUTINE_H * 3600 * 1000;
-  return (commentaires ?? []).find((c) => String(c?.body ?? '').startsWith(MARQUE_ROUTINE) && new Date(c.created_at).getTime() >= limite) ?? null;
+  return (commentaires ?? []).find((c) => c?.user?.login === AUTEUR_MARQUEUR && String(c?.body ?? '').startsWith(MARQUE_ROUTINE) && new Date(c.created_at).getTime() >= limite) ?? null;
 }
 
 /**
  * Lance la routine pour la tâche `depot#n`. `routine` : { url, token } (les secrets ; absents = rien). `api(methode, chemin, corps)` : chemin avec « / » initial,
  * 404 en lecture = null. `appeler` : `fetch` (injecté par les tests). `file` : le résultat de `fileDuDepot` (statut de la file) ; absent = on ne devine pas.
- * Rend { statut: 'lancee'|'rien'|'erreur', raison?, session? } ; ne lève jamais.
+ * Rend { statut: 'lancee'|'deja'|'rien'|'erreur', raison?, session? } ; ne lève jamais. `deja` : une session a déjà été lancée pour cette tâche (marqueur de moins de 6 h) et n'a pas encore posé `en-cours`.
  * Ordre : réserver (commentaire marqueur) → lancer → relâcher le marqueur si le lancement échoue. Deux événements simultanés ne lancent donc pas deux sessions
  * (la fenêtre qui reste est celle de deux réservations dans la même seconde).
  */
@@ -77,8 +80,10 @@ export async function lancerRoutine({ api, depot, n, routine = {}, file = null, 
     const issue = await api('GET', `/repos/${depot}/issues/${n}`);
     const lancable = tacheLancable(issue);
     if (!lancable.ok) return { statut: 'rien', raison: lancable.raison };
-    const commentaires = await api('GET', `/repos/${depot}/issues/${n}/comments?per_page=100`);
-    if (marqueRecente(commentaires, maintenant)) return { statut: 'rien', raison: `routine déjà lancée dans les ${FENETRE_ROUTINE_H} dernières heures` };
+    // `since` : seuls les commentaires de la fenêtre, donc jamais plus d'une page même sur une longue issue.
+    const depuis = new Date(maintenant.getTime() - FENETRE_ROUTINE_H * 3600 * 1000).toISOString();
+    const commentaires = await api('GET', `/repos/${depot}/issues/${n}/comments?per_page=100&since=${encodeURIComponent(depuis)}`);
+    if (marqueRecente(commentaires, maintenant)) return { statut: 'deja', raison: `routine déjà lancée dans les ${FENETRE_ROUTINE_H} dernières heures` };
     reservation = await api('POST', `/repos/${depot}/issues/${n}/comments`, {
       body: `${MARQUE_ROUTINE}\nRoutine « Prendre une tâche » en cours de lancement par le Réacteur (un événement du dépôt, aucun minuteur). Une session neuve livre cette tâche ; elle pose \`en-cours\` en la prenant.`,
     });

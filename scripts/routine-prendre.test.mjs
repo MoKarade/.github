@@ -7,6 +7,7 @@ const routine = { url: URL, token: 'jeton-de-test' };
 const depot = 'MoKarade/app-template';
 const maintenant = new Date('2026-10-29T15:00:00Z');
 const libre = { statut: 'libre', suivante: 212 };
+const robot = { login: 'github-actions[bot]', type: 'Bot' };
 const prete = { state: 'open', labels: [{ name: 'niveau:tâche' }, { name: 'prio:1' }], title: 'TITRE SECRET', body: 'CORPS SECRET' };
 
 // Fausse API GitHub : lectures dans `donnees`, écritures gardées (POST de commentaire rend { id: 77 }).
@@ -56,10 +57,13 @@ test('tacheLancable : ouverte, niveau tâche, sans étiquette qui l’écarte', 
 
 test('marqueRecente : marqueur de moins de 6 h seulement', () => {
   const il = (h) => new Date(maintenant.getTime() - h * 3600 * 1000).toISOString();
-  assert.ok(marqueRecente([{ body: `${MARQUE_ROUTINE}\nx`, created_at: il(FENETRE_ROUTINE_H - 1) }], maintenant));
-  assert.equal(marqueRecente([{ body: `${MARQUE_ROUTINE}\nx`, created_at: il(FENETRE_ROUTINE_H + 1) }], maintenant), null);
+  assert.ok(marqueRecente([{ user: robot, body: `${MARQUE_ROUTINE}\nx`, created_at: il(FENETRE_ROUTINE_H - 1) }], maintenant));
+  assert.equal(marqueRecente([{ user: robot, body: `${MARQUE_ROUTINE}\nx`, created_at: il(FENETRE_ROUTINE_H + 1) }], maintenant), null);
   assert.equal(marqueRecente([{ body: 'autre chose', created_at: il(1) }], maintenant), null);
   assert.equal(marqueRecente(null, maintenant), null);
+  // un compte tiers qui écrit le même texte ne bloque rien
+  assert.equal(marqueRecente([{ user: { login: 'intrus', type: 'User' }, body: `${MARQUE_ROUTINE}\nx`, created_at: il(1) }], maintenant), null);
+  assert.equal(marqueRecente([{ body: `${MARQUE_ROUTINE}\nx`, created_at: il(1) }], maintenant), null);
 });
 
 test('secrets absents : aucun appel, aucune écriture, aucun échec', async () => {
@@ -123,18 +127,36 @@ test('tâche prête : un seul appel, texte limité à dépôt#n, en-têtes de la
   assert.deepEqual(ecritures[1].corps.body.split('\n').filter((l) => l.includes('session_01X')).map((l) => l.split(' : ').at(-1)), ['https://claude.ai/code/session_01X']);
 });
 
+test('marqueur d’un compte tiers : la routine part quand même', async () => {
+  const faux_ = [{ user: { login: 'intrus', type: 'User' }, body: `${MARQUE_ROUTINE}\nlancée`, created_at: new Date(maintenant.getTime() - 3600 * 1000).toISOString() }];
+  const { api } = faux({ commentaires: faux_ });
+  const { appeler, appels } = fauxFetch();
+  assert.equal((await lancer({ api, appeler })).statut, 'lancee');
+  assert.equal(appels.length, 1);
+});
+
+test('lecture des commentaires : limitée à la fenêtre de 6 h (`since`)', async () => {
+  const chemins = [];
+  const { api } = faux();
+  const lecture = async (m, c, b) => { chemins.push(c); return api(m, c, b); };
+  const { appeler } = fauxFetch();
+  await lancer({ api: lecture, appeler });
+  const lu = chemins.find((c) => c.includes('/comments?'));
+  assert.ok(lu.includes(`since=${encodeURIComponent('2026-10-29T09:00:00.000Z')}`), lu);
+});
+
 test('marqueur de moins de 6 h : aucun second appel', async () => {
-  const recent = [{ body: `${MARQUE_ROUTINE}\nlancée`, created_at: new Date(maintenant.getTime() - 3600 * 1000).toISOString() }];
+  const recent = [{ user: robot, body: `${MARQUE_ROUTINE}\nlancée`, created_at: new Date(maintenant.getTime() - 3600 * 1000).toISOString() }];
   const { api, ecritures } = faux({ commentaires: recent });
   const { appeler, appels } = fauxFetch();
   const res = await lancer({ api, appeler });
-  assert.equal(res.statut, 'rien');
+  assert.equal(res.statut, 'deja');
   assert.equal(appels.length, 0);
   assert.equal(ecritures.length, 0);
 });
 
 test('marqueur de plus de 6 h : la routine repart', async () => {
-  const vieux = [{ body: `${MARQUE_ROUTINE}\nlancée`, created_at: new Date(maintenant.getTime() - 7 * 3600 * 1000).toISOString() }];
+  const vieux = [{ user: robot, body: `${MARQUE_ROUTINE}\nlancée`, created_at: new Date(maintenant.getTime() - 7 * 3600 * 1000).toISOString() }];
   const { api } = faux({ commentaires: vieux });
   const { appeler, appels } = fauxFetch();
   assert.equal((await lancer({ api, appeler })).statut, 'lancee');

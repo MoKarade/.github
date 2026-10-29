@@ -1313,3 +1313,13 @@ test('routine : lancement refusé (500) → avertissement, réveil inchangé, au
   assert.equal(reveilDe(ecritures), decisionPrete().motif);
   assert.equal(r.routine, undefined);
 });
+
+test('routine : session déjà lancée (marqueur récent, `en-cours` pas encore posé) → aucun second appel, le réveil le dit', async () => {
+  const marqueur = { user: { login: 'github-actions[bot]', type: 'Bot' }, body: '<!-- routine-lancee -->\nlancée', created_at: new Date(Date.now() - 3600 * 1000).toISOString() };
+  const { api, ecritures } = faux({ ...donneesRoutine, '/repos/MoKarade/app-template/issues/212/comments': [marqueur] });
+  const { appeler, appels } = fauxLancement();
+  const r = await traiter({ boites: {}, api, appeler, routine: routineTest, evt: { type: 'tache_fermee', depot: 'MoKarade/app-template', issue: '9' }, decisionImposee: decisionPrete(), jetonReveil: 'jeton', journal: () => {} });
+  assert.equal(appels.length, 0);
+  assert.ok(reveilDe(ecritures).endsWith('routine : #212 déjà lancée'));
+  assert.equal(r.routine.n, 212);
+});
