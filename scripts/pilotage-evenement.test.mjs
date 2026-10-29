@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ETAPES, PAR_EVENEMENT, etapesPour, lignesDesSignaux, piloteDuJob, pilotage } from './pilotage-evenement.mjs';
+import { spawn } from 'node:child_process';
+import { ETAPES, PAR_EVENEMENT, corpsJson, etapesPour, ghSynchrone, lignesDesSignaux, piloteDuJob, pilotage } from './pilotage-evenement.mjs';
 import { traiter } from './reveil-reacteur.mjs';
 
 const MAINTENANT = new Date('2026-10-29T12:00:00Z');
@@ -202,4 +203,49 @@ test('traiter sans pilotage se comporte comme avant (aucune clé de plus)', asyn
   const res = await traiter({ api: reacteur().api, evt: { type: 'inconnu', depot: DEPOT }, jetonReveil: 'jeton', journal: () => {}, maintenant: MAINTENANT });
   assert.equal(res.action, 'rien');
   assert.equal(res.pilotage, undefined);
+});
+
+// ── Le client synchrone n'a besoin d'aucune CLI `gh` (DriveAI#798 : « spawnSync gh ENOENT » sur le robot du PC) ─────────────────────────────────────────
+test('corpsJson : les clés en [] deviennent une liste, les autres gardent leur valeur', () => {
+  assert.deepEqual(corpsJson({ 'labels[]': 'hold' }), { labels: ['hold'] });
+  assert.deepEqual(corpsJson({ state: 'closed', state_reason: 'completed' }), { state: 'closed', state_reason: 'completed' });
+  assert.equal(corpsJson(undefined), undefined);
+});
+
+const reponseDe = (statut, texte) => () => ({ stdout: JSON.stringify({ statut, texte }), stderr: '' });
+
+test('ghSynchrone : une réponse vide (204) rend {}, une liste rend la liste, un statut 4xx lève avec « 404 Not Found »', () => {
+  assert.deepEqual(ghSynchrone({ jeton: 'x', lancer: reponseDe(204, '') })('DELETE', 'repos/o/r/issues/1/labels/a'), {});
+  assert.deepEqual(ghSynchrone({ jeton: 'x', lancer: reponseDe(200, '[{"number":1}]') })('GET', 'repos/o/r/issues'), [{ number: 1 }]);
+  assert.throws(() => ghSynchrone({ jeton: 'x', lancer: reponseDe(404, '{}') })('GET', 'repos/o/r/contents/a'), (e) => /404 Not Found/.test(e.message) && /404 Not Found/.test(e.stderr));
+  assert.throws(() => ghSynchrone({ jeton: 'x', lancer: reponseDe(502, 'bad') })('GET', 'repos/o/r'), /HTTP 502/);
+});
+
+test('ghSynchrone : le processus enfant qui ne démarre pas, ou une sortie illisible, lèvent une erreur claire (jamais de silence)', () => {
+  assert.throws(() => ghSynchrone({ jeton: 'x', lancer: () => ({ error: new Error('spawn ENOENT') }) })('GET', 'repos/o/r'), /spawn ENOENT/);
+  assert.throws(() => ghSynchrone({ jeton: 'x', lancer: () => ({ stdout: 'pas du json', stderr: '' }) })('GET', 'repos/o/r'), /illisible/);
+});
+
+test('ghSynchrone : le vrai processus enfant fait la requête (serveur local, sans réseau ni gh), jeton et corps compris', async () => {
+  const serveur = spawn(process.execPath, ['-e', `
+    const http = require('node:http');
+    const s = http.createServer((req, res) => {
+      let corps = '';
+      req.on('data', (c) => { corps += c; });
+      req.on('end', () => {
+        if (req.url === '/repos/o/r/absent') { res.statusCode = 404; res.end('{}'); return; }
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ methode: req.method, url: req.url, auth: req.headers.authorization, corps: corps ? JSON.parse(corps) : null }));
+      });
+    }).listen(0, '127.0.0.1', () => console.log(s.address().port));
+  `], { stdio: ['ignore', 'pipe', 'inherit'] });
+  try {
+    const port = await new Promise((ok, ko) => { serveur.stdout.once('data', (d) => ok(Number(String(d).trim()))); serveur.once('error', ko); });
+    const gh = ghSynchrone({ jeton: 'jeton-essai', base: `http://127.0.0.1:${port}` });
+    const r = gh('POST', 'repos/o/r/issues/5/labels', { 'labels[]': 'hold' });
+    assert.deepEqual(r, { methode: 'POST', url: '/repos/o/r/issues/5/labels', auth: 'Bearer jeton-essai', corps: { labels: ['hold'] } });
+    assert.throws(() => gh('GET', 'repos/o/r/absent'), /404 Not Found/);
+  } finally {
+    serveur.kill();
+  }
 });
