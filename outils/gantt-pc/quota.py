@@ -307,9 +307,12 @@ def gemini():
     cg = cache.setdefault('gemini', {})
     debut = NOW - LONG * 24 * H
     publics = [r for r in REPOS if not prive(r)]        # « rien de privé » : Gemini ne lit que les dépôts publics
+    # `since` arrondi au début du jour (UTC) : une adresse qui change à chaque passage n'a jamais d'ETag, donc jamais de 304 (72 appels comptés par tour le 29/10/2026,
+    # les listes vides relues 3 fois). L'adresse reste la même une journée ; le filtre exact (`updated_at >= debut`) est refait ici, le résultat ne change pas.
+    since_url = iso(debut.replace(hour=0, minute=0, second=0, microsecond=0))
     def lister(rl):
         r, lab = rl
-        return pages(f'repos/MoKarade/{r}/issues?state=all&labels={lab}&since={iso(debut)}', None, maxp=3)
+        return [i for i in pages(f'repos/MoKarade/{r}/issues?state=all&labels={lab}&since={since_url}', None, maxp=3) if i['updated_at'] >= iso(debut)]
     couples = [(r, lab) for r in publics for lab in ('gemini:fait', 'gemini:echec', 'gemini')]
     with ThreadPoolExecutor(8) as ex: listes = list(ex.map(lambda x: _essai(lister, x), couples))
     termines, attente, nonlus = {}, {}, []
