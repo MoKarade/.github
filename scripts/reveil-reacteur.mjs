@@ -91,6 +91,28 @@ export const BOITES_DIRECTES = new Set(['MoKarade/Hubperso', 'MoKarade/MemoryAI'
 // Ce qui regarde le fil d'une app (une place libre, une tâche prête, une preuve à poser) ; la CI rouge, les notes LIA et le filet restent au Coordinateur.
 export const TYPES_POUR_LE_FIL = new Set(['pr_fusionnee', 'tache_fermee', 'tache_ouverte', 'deploiement', 'preuve_page']);
 
+// Boîte « preuve PC » (tâche MoKarade/.github#807, choix « A » de Marc du 29/10/2026 00:40Z) : le PC est réveillé directement, sans passer par le Coordinateur.
+// Le fil propriétaire d'une tâche en `preuve-attendue` demande un relevé d'écran par un commentaire `**Relevé PC demandé** — …` ; le PC répond par `**Relevé PC** — …`
+// sur la même issue, et la boîte du dépôt propriétaire est réveillée pour poser « Acceptée ». 0 tant que la PR boîte n'existe pas (#808) : la demande ne réveille alors personne.
+export const BOITE_PC = 0;
+export const RELEVE_MIN = 40;
+const ENTETE_DEMANDE_PC = /^\s*\*\*Relevé PC demandé\*\*/i;
+const ENTETE_RELEVE_PC = /^\s*\*\*Relevé PC\*\*\s*[—:-]\s*(.*)$/is;
+
+/**
+ * Que dit le DERNIER commentaire d'une tâche ? { sorte: 'demande' | 'releve' | null, erreur }. Seul un humain (compte de Marc, donc le fil ou le PC) compte :
+ * un robot n'ouvre ni ne ferme un relevé. Un relevé trop court n'en est pas un.
+ */
+export function lireCommentairePc(commentaire) {
+  if (!commentaire || commentaire.user?.type !== 'User') return { sorte: null, erreur: 'commentaire absent ou posé par un robot' };
+  const corps = String(commentaire.body ?? '');
+  if (ENTETE_DEMANDE_PC.test(corps)) return { sorte: 'demande', erreur: null };
+  const m = ENTETE_RELEVE_PC.exec(corps);
+  if (!m) return { sorte: null, erreur: 'ni demande ni relevé PC' };
+  if (m[1].trim().length < RELEVE_MIN) return { sorte: null, erreur: `relevé PC trop court (${RELEVE_MIN} caractères au moins)` };
+  return { sorte: 'releve', erreur: null };
+}
+
 /** Les numéros de boîte qui reçoivent ce réveil, dans l'ordre : la #58 d'abord (sauf dépôt direct), puis la boîte du dépôt. */
 export function boitesDuReveil({ evt, boites = BOITES, directes = BOITES_DIRECTES }) {
   const fil = boites[evt.depot];
@@ -380,8 +402,8 @@ export const signalSur = (v) => (/^[0-9A-Za-z._-]{1,40}$/.test(String(v ?? '')) 
  * Décide quoi faire d'un événement, puis lit les preuves différées dues du dépôt (scripts/preuve-attendue-auto.mjs). Le résultat ne change pas
  * quand rien n'est accepté ni refusé par erreur : la clé `differees` n'apparaît que s'il y a quelque chose à dire.
  */
-export async function decider({ api, evt, maintenant = new Date(), accepter = accepterApresFusion, accepterDifferees = accepterPreuvesAttendues, jetonLecture = '' }) {
-  const d = await deciderEvenement({ api, evt, maintenant, accepter });
+export async function decider({ api, evt, maintenant = new Date(), accepter = accepterApresFusion, accepterDifferees = accepterPreuvesAttendues, jetonLecture = '', boitePc = BOITE_PC }) {
+  const d = await deciderEvenement({ api, evt, maintenant, accepter, boitePc });
   if (!TYPES_PREUVE_DIFFEREE.has(evt.type)) return d;
   const config = { deploiement: evt.deploiement === 'aucun' ? 'aucun' : 'vercel', workflows: String(evt.workflows ?? '').split(',').map((x) => x.trim()).filter(Boolean) };
   const differees = await accepterDifferees({ api, depot: evt.depot, maintenant, config, jeton: jetonLecture, lues: evt.type === 'filet' ? LUES_FILET : LUES_EVENEMENT }).catch((e) => ({ acceptees: [], ignorees: [], erreur: e.message }));
@@ -417,7 +439,7 @@ async function reveilApresAcceptation({ api, depot, maintenant, taches }) {
  * Décide quoi faire d'un événement. Rend { action: 'reveiller', motif } | { action: 'relance', run } | { action: 'balayer' } | { action: 'rien', raison }.
  * `evt` : { type, depot, pr, issue, raison, evenement, sha, run, brancheRun, brancheDefaut, forcer }.
  */
-async function deciderEvenement({ api, evt, maintenant, accepter }) {
+async function deciderEvenement({ api, evt, maintenant, accepter, boitePc = BOITE_PC }) {
   const { type, depot } = evt;
   if (type === 'filet') return filet({ api, evt, maintenant });
   if (type === 'pr_ouverte') return { action: 'balayer' };
@@ -450,6 +472,21 @@ async function deciderEvenement({ api, evt, maintenant, accepter }) {
       }
     }
     return { action: 'rien', raison: 'déploiement sans tâche à accepter' };
+  }
+  // Relevé PC (BOITE_PC) : la demande réveille le PC, le relevé réveille le fil propriétaire. Rien d'autre ne bouge pour un commentaire.
+  if (type === 'commentaire') {
+    const n = Number(evt.issue);
+    if (Number.isInteger(n) && n > 0 && /^[\w.-]+\/[\w.-]+$/.test(depot)) {
+      const dernier = (await commentairesDe(api, depot, n).catch(() => [])).at(-1);
+      const { sorte } = lireCommentairePc(dernier);
+      if (sorte === 'demande') {
+        if (!boitePc) return { action: 'rien', raison: 'relevé PC demandé, boîte PC pas encore créée (#808) : le fil prouve comme avant' };
+        return { action: 'reveiller', motif: construireMotif([`relevé PC demandé sur ${depot}#${n}`]), sujets: [n], cibles: [boitePc] };
+      }
+      if (sorte === 'releve') {
+        return { action: 'reveiller', motif: construireMotif([`relevé PC posé sur ${depot}#${n}`, 'poser « Acceptée » en citant le relevé']), sujets: [n], cibles: boitesDuReveil({ evt: { depot, type: 'preuve_page' } }) };
+      }
+    }
   }
   // Un commentaire « Preuve attendue » et la fin d'un cron d'app : seules les preuves différées dues se lisent (`decider`), rien d'autre ne bouge.
   if (type === 'commentaire' || type === 'fin_de_cron') return { action: 'rien', raison: type === 'commentaire' ? 'commentaire lu (preuves différées)' : `fin de cron ${signalSur(evt.signal) || 'inconnu'} lue (preuves différées)` };
@@ -545,8 +582,8 @@ async function deciderEvenement({ api, evt, maintenant, accepter }) {
 }
 
 /** Exécute la décision. `journal` reçoit les lignes à afficher ; rend un résumé court. */
-export async function traiter({ api, evt, jetonReveil, journal = console.log, maintenant = new Date(), jetonLecture = '', accepterDifferees, boites = BOITES, directes = BOITES_DIRECTES }) {
-  const d = await decider({ api, evt, maintenant, jetonLecture, ...(accepterDifferees ? { accepterDifferees } : {}) });
+export async function traiter({ api, evt, jetonReveil, journal = console.log, maintenant = new Date(), jetonLecture = '', accepterDifferees, boites = BOITES, directes = BOITES_DIRECTES, boitePc = BOITE_PC }) {
+  const d = await decider({ api, evt, maintenant, jetonLecture, boitePc, ...(accepterDifferees ? { accepterDifferees } : {}) });
   if (d.differees?.acceptees.length) journal(`Réacteur : preuve différée lue et acceptée automatiquement sur ${d.differees.acceptees.map((n) => `#${n}`).join(', ')} (docs/cycle-de-vie-tache.md §10 quater).`);
   if (d.differees?.erreur) journal(`::warning::Réacteur : preuves différées non lues (${d.differees.erreur}). Un fil prouvera.`);
   if (d.acceptation?.statut === 'acceptee') journal(`Réacteur : tâche #${d.acceptation.tache} acceptée automatiquement (docs/cycle-de-vie-tache.md §10 ter).`);
@@ -583,9 +620,9 @@ export async function traiter({ api, evt, jetonReveil, journal = console.log, ma
   // Une boîte par cible : la #58 (Coordinateur) sans entrée neuve, pour qu'une ancienne version de `boite-reacteur.yml` l'accepte ; la boîte du dépôt avec `boite`.
   // Un échec sur la boîte du dépôt est un avertissement tant que la #58 a reçu le réveil ; si elle est la seule cible, l'échec remonte comme avant.
   let echecReveil = null;
-  let cibles = boitesDuReveil({ evt, boites, directes });
+  let cibles = d.cibles ?? boitesDuReveil({ evt, boites, directes });
   // Hubperso : deux fils, donc deux boîtes ; la tâche en jeu dit laquelle réveiller (seulement quand le dépôt est réveillé en direct par sa boîte).
-  if (evt.depot === DEPOT_PAGE_CHANTIER && boites[evt.depot] && directes.has(evt.depot) && TYPES_POUR_LE_FIL.has(evt.type)) {
+  if (!d.cibles && evt.depot === DEPOT_PAGE_CHANTIER && boites[evt.depot] && directes.has(evt.depot) && TYPES_POUR_LE_FIL.has(evt.type)) {
     const apres = await boitesDuDepotAvecChantier({ sujets: d.sujets, lire: (n) => api('GET', `/repos/${evt.depot}/issues/${n}`), boiteDepot: boites[evt.depot] });
     cibles = apres;
   }
