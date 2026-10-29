@@ -49,10 +49,10 @@ function github({ issues = [], fermees = [], ouvertes = [], fermeesPr = [], fich
 }
 
 test('chaque événement du Réacteur a ses étapes, et un type inconnu n’en a aucune', () => {
-  assert.deepEqual(etapesPour('tache_ouverte'), ['perimees', 'completer', 'fichiers', 'acceptation', 'marquer']);
-  assert.deepEqual(etapesPour('tache_fermee'), ['menage']);
+  assert.deepEqual(etapesPour('tache_ouverte'), ['perimees', 'completer', 'fichiers', 'acceptation', 'marquer', 'immobiles']);
+  assert.deepEqual(etapesPour('tache_fermee'), ['menage', 'immobiles']);
   assert.deepEqual(etapesPour('pr_ouverte'), ['suivi', 'parJules']);
-  assert.deepEqual(etapesPour('pr_fusionnee'), ['suivi', 'parJules']);
+  assert.deepEqual(etapesPour('pr_fusionnee'), ['suivi', 'parJules', 'immobiles']);
   assert.deepEqual(etapesPour('deploiement'), ['suivi']);
   assert.deepEqual(etapesPour('filet'), ETAPES);
   assert.deepEqual(etapesPour('ci_rouge'), []);

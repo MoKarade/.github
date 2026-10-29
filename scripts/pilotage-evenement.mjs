@@ -20,9 +20,10 @@ import { marquerFaisables, retirerPerimees } from './jules-marquage.mjs';
 import { completerDepot as completerGabarit } from './jules-gabarit.mjs';
 import { completerDepot as estimerFichiers, PAR_TOUR_MAX as ESTIMATIONS_PAR_TOUR } from './fichiers-touches.mjs';
 import { completerDepot as marquerAcceptation, PAR_TOUR_MAX as MARQUAGES_PAR_TOUR } from './acceptation-marquage.mjs';
+import { libererPlacesImmobiles } from './place-immobile.mjs';
 
 /** Les étapes, dans l'ordre où le tour du PC les faisait : une étiquette périmée libère la tâche avant qu'on la complète, la complétion précède la réservation. */
-export const ETAPES = ['suivi', 'parJules', 'menage', 'perimees', 'completer', 'fichiers', 'acceptation', 'marquer'];
+export const ETAPES = ['suivi', 'parJules', 'menage', 'perimees', 'completer', 'fichiers', 'acceptation', 'marquer', 'immobiles'];
 
 /**
  * Quelle étape pour quel événement du Réacteur.
@@ -30,13 +31,15 @@ export const ETAPES = ['suivi', 'parJules', 'menage', 'perimees', 'completer', '
  *   tache_fermee : les étiquettes de travail d'une tâche fermée ;
  *   pr_ouverte / pr_fusionnee : le suivi des PR de Jules (nettoyage du corps, `hold`, acceptation d'une PR de tests fusionnée) et son étiquette `par-jules` ;
  *   deploiement : une PR de Jules fusionnée n'est acceptée qu'une fois le déploiement de production réussi ;
+ *   `immobiles` (tâche #868) : une tâche `en-cours` sans PR depuis 3 h est signalée, puis libérée une heure après (scripts/place-immobile.mjs) ; elle part avec les
+ *   événements qui libèrent ou prennent une place (tâche ouverte ou fermée, PR fusionnée) ;
  *   filet : tout, en rattrapage d'un événement manqué.
  */
 export const PAR_EVENEMENT = {
-  tache_ouverte: ['perimees', 'completer', 'fichiers', 'acceptation', 'marquer'],
-  tache_fermee: ['menage'],
+  tache_ouverte: ['perimees', 'completer', 'fichiers', 'acceptation', 'marquer', 'immobiles'],
+  tache_fermee: ['menage', 'immobiles'],
   pr_ouverte: ['suivi', 'parJules'],
-  pr_fusionnee: ['suivi', 'parJules'],
+  pr_fusionnee: ['suivi', 'parJules', 'immobiles'],
   deploiement: ['suivi'],
   filet: ETAPES,
 };
@@ -150,13 +153,19 @@ export function pilotage({ evt, gh = ghSynchrone(), maintenant = new Date(), aBl
       const r = marquerFaisables({ depot, gh, aBlanc });
       if (r.marquees.length) dire(`faisable-jules posé (${r.marquees.join(', ')})`);
     },
+    immobiles: () => {
+      const r = libererPlacesImmobiles({ depot, gh, maintenant, aBlanc });
+      for (const ref of r.signalees) sortie.signaux.push({ nature: 'place', ref, raison: 'en-cours sans PR depuis plus de 3 h, signalée' });
+      if (r.liberees.length) dire(`places immobiles libérées (${r.liberees.slice(0, 4).join(', ')})`);
+      if (r.illisibles.length) sortie.erreurs.push(`immobiles (lecture impossible : ${r.illisibles.slice(0, 3).join(', ')})`);
+    },
   };
   for (const nom of sortie.etapes) essayer(nom, actions[nom]);
   return sortie;
 }
 
 /** Les signaux du suivi de Jules, en lignes du motif de réveil (quatre au plus : le texte part dans un champ borné). */
-export const lignesDesSignaux = (signaux) => signaux.slice(0, 4).map((x) => `jules : ${x.ref} ${x.raison}`);
+export const lignesDesSignaux = (signaux) => signaux.slice(0, 4).map((x) => `${x.nature === 'place' ? 'place immobile' : 'jules'} : ${x.ref} ${x.raison}`);
 
 /** Le pilotage tel que le Réacteur l'appelle : `pilote({ evt, maintenant })`. Ne lève jamais. */
 export const piloteDuJob = ({ gh = ghSynchrone(), aBlanc = false } = {}) => async ({ evt, maintenant }) => {
