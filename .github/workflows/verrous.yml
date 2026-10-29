@@ -1,0 +1,71 @@
+name: Verrous (workflow commun)
+
+# Option C de Marc (29/10/2026), étape 2 : les trois contrôles que le Garde-fou fait pour les lignes rouges, refaits en CI
+# ordinaire (aucun test retiré ou sauté, aucun secret en clair ajouté, aucune migration destructive). MODE MIROIR : posé EN PLUS
+# du Garde-fou, NON REQUIS ; il ne le remplace qu'à l'étape 4 du plan, après 3 observations concordantes (README).
+# La logique est dans scripts/verrous.mjs (testée, sans dépendance) ; ce fichier ne fait que l'appeler. Le script vient de ce
+# dépôt (`ref-script`, `main` par défaut), jamais du code de l'appelant. Aucun secret : le jeton du job suffit.
+#
+# Appel depuis un dépôt (sur `pull_request`) :
+#
+#   jobs:
+#     verrous:
+#       name: Verrous (essai)
+#       permissions: { contents: read }
+#       uses: MoKarade/.github/.github/workflows/verrous.yml@main
+#       with:
+#         runner: ${{ github.event.repository.visibility == 'public' && '"ubuntu-latest"' || '["self-hosted","pc-marc"]' }}
+on:
+  workflow_call:
+    inputs:
+      base-ref:
+        description: 'Branche de base à comparer (facultatif : la base de la PR).'
+        type: string
+        default: ''
+      ref-script:
+        description: 'Version de scripts/verrous.mjs prise dans MoKarade/.github (main par défaut).'
+        type: string
+        default: main
+      runner:
+        description: 'Machine, en JSON : "ubuntu-latest" (dépôt public) ou ["self-hosted","pc-marc"] (dépôt privé).'
+        type: string
+        default: '"ubuntu-latest"'
+
+permissions: {}
+
+jobs:
+  verrous:
+    name: Verrous
+    timeout-minutes: 5
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    permissions:
+      contents: read
+    steps:
+      - name: Récupérer le dépôt de l'appelant (historique complet)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Récupérer le script des verrous
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: MoKarade/.github
+          ref: ${{ inputs.ref-script }}
+          path: .verrous
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Comparer à la branche de base
+        env:
+          BASE_CHOISIE: ${{ inputs.base-ref || github.base_ref }}
+        run: |
+          if [ -n "$BASE_CHOISIE" ]; then
+            git fetch --no-tags origin "+refs/heads/$BASE_CHOISIE:refs/remotes/origin/$BASE_CHOISIE"
+            export VERROUS_BASE="origin/$BASE_CHOISIE"
+          fi
+          node .verrous/scripts/verrous.mjs
