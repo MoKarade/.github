@@ -54,7 +54,7 @@ import { controleFiniQuand } from './fini-quand.mjs';
 import { accepterPreuvesAttendues, LUES_EVENEMENT, LUES_FILET } from './preuve-attendue-auto.mjs';
 import { fileDuDepot } from './file-depot.mjs';
 import { confierJulesDuDepot } from './jules-auto.mjs';
-import { lignesDesSignaux, piloteDuJob } from './pilotage-evenement.mjs';
+import { ghSynchrone, lignesDesSignaux, piloteDuJob } from './pilotage-evenement.mjs';
 
 export const DEPOT_BOITE = 'MoKarade/app-template';
 export const WORKFLOW_BOITE = 'boite-reacteur.yml';
@@ -769,9 +769,8 @@ export async function main(env = process.env) {
     signal: env.REVEIL_SIGNAL || '',
   };
   try {
-    // `gh` (CLI du job) lit `GH_TOKEN` : le pilotage des tâches et de Jules écrit avec le jeton du job, jamais avec celui du réveil.
-    process.env.GH_TOKEN ||= env.GITHUB_TOKEN;
-    const r = await traiter({ api: apiGitHub(env.GITHUB_TOKEN), evt, jetonReveil: env.REVEIL_TOKEN, jetonLecture: env.GITHUB_TOKEN, pilote: piloteDuJob() });
+    // Le pilotage des tâches et de Jules écrit avec le jeton du job, jamais avec celui du réveil, et sans la CLI `gh` (absente du PATH du robot du PC : DriveAI#798).
+    const r = await traiter({ api: apiGitHub(env.GITHUB_TOKEN), evt, jetonReveil: env.REVEIL_TOKEN, jetonLecture: env.GITHUB_TOKEN, pilote: piloteDuJob({ gh: ghSynchrone({ jeton: env.GITHUB_TOKEN }) }) });
     // Une étape du pilotage en échec rend le run rouge APRÈS le réveil : `signaler-echec.yml` ouvre alors l'issue `boucle:erreur` (rien ne se perd en silence).
     if (r?.pilotage?.erreurs.length) process.exitCode = 1;
   } catch (e) {
