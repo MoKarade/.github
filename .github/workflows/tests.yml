@@ -1,0 +1,30 @@
+name: Tests
+
+# Tous les tests node du dépôt dans UN seul workflow (nettoyage « go reco » de Marc, 29/10/2026) : scripts/*.test.mjs (joker, aucun fichier énuméré)
+# et tests/*.test.mjs. Aucune dépendance, aucun réseau. Aucun `paths:` : un contrôle exigé filtré ne tournerait pas.
+# Le job garde le nom « Tests du garde-fou », exigé par .mergify.yml.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  tests:
+    name: Tests du garde-fou
+    timeout-minutes: 10
+    runs-on: ubuntu-latest # dépôt public : machines GitHub (gratuites)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: node --test scripts/*.test.mjs tests/*.test.mjs
