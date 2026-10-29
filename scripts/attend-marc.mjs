@@ -1,4 +1,4 @@
-// Une PR qui n'attend plus qu'un geste de Marc n'occupe pas le dépôt (docs/cycle-de-vie-tache.md §6, tâches #197 et #216).
+// Une PR qui n'attend plus qu'un geste de Marc n'occupe pas le dépôt (docs/archive/cycle-de-vie-tache-2026-10-29.md §6, tâches #197 et #216).
 //
 // Le signe est UN seul : le Garde-fou, quand il est rouge « la PR attend Marc », ouvre une issue `qui:marc` au titre
 // « Garde-fou : la PR #n attend un geste de Marc » (scripts/garde-fou.mjs) et la ferme quand le blocage est levé.

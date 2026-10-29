@@ -1,6 +1,6 @@
 # Contrôle « gestes de Marc à jour » (tâche .github#478, choix « Signaler et retirer » de Marc, fil Gestes, 22/10/2026) : des issues `qui:marc`
 # traînaient après un geste fait ou périmé, et deux listes s'écrivaient à la main. Aucun appel d'API de plus, aucun coût IA : tout vient du relevé.
-# Cinq contrôles (détail : docs/cycle-de-vie-tache.md §13) : « fait » clair de Marc (étiquette retirée, même commentaire que le bouton « Fait »),
+# Cinq contrôles (détail : docs/archive/cycle-de-vie-tache-2026-10-29.md §13) : « fait » clair de Marc (étiquette retirée, même commentaire que le bouton « Fait »),
 # « fait » ambigu (signalé, jamais retiré), `Attend` vers une issue fermée ou introuvable, `qui:marc` avec `preuve-attendue` ou `bloqué`,
 # sept jours sans activité ; plus les deux listes générées. Fonctions pures d'un côté, écritures de l'autre (`retirer`, avec `appliquer` injecté).
 import datetime, re, unicodedata

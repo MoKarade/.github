@@ -1,4 +1,4 @@
-// Tâche liée (docs/cycle-de-vie-tache.md §8, plan commun/plans/2026-10-16_gantt-source-de-verite.md, règle 2) :
+// Tâche liée (docs/archive/cycle-de-vie-tache-2026-10-29.md §8, plan commun/plans/2026-10-16_gantt-source-de-verite.md, règle 2) :
 // aucune PR sans tâche. Toute PR (hors robots) porte une ligne `Tâche : #n` ou `Tâche : MoKarade/<dépôt>#n` qui
 // désigne une issue `niveau:tâche` OUVERTE. Sans cela le travail échappe au backlog et le Gantt ne le voit pas.
 //

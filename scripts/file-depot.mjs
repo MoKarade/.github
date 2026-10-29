@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// La file d'UN dépôt, calculée à l'instant d'un événement (docs/cycle-de-vie-tache.md §5 quinquies, mission MoKarade/.github#703, tâche #711).
+// La file d'UN dépôt, calculée à l'instant d'un événement (docs/archive/cycle-de-vie-tache-2026-10-29.md §5 quinquies, mission MoKarade/.github#703, tâche #711).
 //
 // Avant : la file était `prochaines.json`, écrit par le relevé du PC toutes les 10 minutes ; PC éteint ou tour raté, plus de file, donc plus de départ.
 // Maintenant : ce module lit les issues et les PR OUVERTES d'un seul dépôt avec le jeton du job (1 000 appels/h par dépôt, pas les 5 000 partagés de Marc),

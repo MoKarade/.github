@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Réacteur : ce qui se fait SANS IA à un événement GitHub (docs/cycle-de-vie-tache.md §6, mission MoKarade/.github#116).
+// Réacteur : ce qui se fait SANS IA à un événement GitHub (docs/archive/cycle-de-vie-tache-2026-10-29.md §6, mission MoKarade/.github#116).
 //
 // Nettoyage du 29/10/2026 (« go reco » de Marc) : le Réacteur ne réveille plus le Coordinateur ni les fils d'app, et ne réveille plus les dépôts dont une tâche en attendait
 // une autre. Chaque tâche prête part dans une session neuve (routine « Prendre une tâche »). Ce qui reste :
@@ -451,9 +451,9 @@ async function commenterBoites({ api, d, evt, jetonReveil, journal }) {
 
 async function traiterDecision({ api, evt, jetonReveil, journal = console.log, maintenant = new Date(), jetonLecture = '', accepterDifferees, decisionImposee = null, pause, fetchImpl, apps, routine = null, appeler = fetch }) {
   let d = decisionImposee ?? await decider({ api, evt, maintenant, jetonLecture, pause, fetchImpl, journal, apps, ...(accepterDifferees ? { accepterDifferees } : {}) });
-  if (d.differees?.acceptees.length) journal(`Réacteur : preuve différée lue et acceptée automatiquement sur ${d.differees.acceptees.map((n) => `#${n}`).join(', ')} (docs/cycle-de-vie-tache.md §10 quater).`);
+  if (d.differees?.acceptees.length) journal(`Réacteur : preuve différée lue et acceptée automatiquement sur ${d.differees.acceptees.map((n) => `#${n}`).join(', ')} (docs/archive/cycle-de-vie-tache-2026-10-29.md §10 quater).`);
   if (d.differees?.erreur) journal(`::warning::Réacteur : preuves différées non lues (${d.differees.erreur}). Un fil prouvera.`);
-  if (d.acceptation?.statut === 'acceptee') journal(`Réacteur : tâche #${d.acceptation.tache} acceptée automatiquement (docs/cycle-de-vie-tache.md §10 ter).`);
+  if (d.acceptation?.statut === 'acceptee') journal(`Réacteur : tâche #${d.acceptation.tache} acceptée automatiquement (docs/archive/cycle-de-vie-tache-2026-10-29.md §10 ter).`);
   else if (d.acceptation?.statut === 'erreur') journal(`::warning::Réacteur : acceptation automatique non faite (${d.acceptation.motifs.join(' ; ')}). Un fil prouvera.`);
   if (d.action === 'rien') {
     journal(`Réacteur : rien à faire (${d.raison}).`);
@@ -481,7 +481,7 @@ async function traiterDecision({ api, evt, jetonReveil, journal = console.log, m
     return { ...d, reveille: true };
   }
   // action « lancer ». Chaque tâche prête, de n'importe quel dépôt, part dans une session neuve (tâche MoKarade/.github#860, étendue à tous les dépôts par la tâche #871, demande de Marc du 29/10/2026 :
-  // « à chaque tâche une session neuve » ; docs/cycle-de-vie-tache.md §6). Sans les secrets de la routine, rien ne se lance ; un lancement raté est un avertissement, jamais une exception.
+  // « à chaque tâche une session neuve » ; docs/archive/cycle-de-vie-tache-2026-10-29.md §6). Sans les secrets de la routine, rien ne se lance ; un lancement raté est un avertissement, jamais une exception.
   const suivante = d.file?.suivante;
   if (routine && suivante) {
     const lancee = await lancerRoutine({ api, depot: evt.depot, n: suivante, routine, file: d.file, maintenant, journal, appeler });

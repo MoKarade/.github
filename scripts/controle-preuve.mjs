@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Contrôle automatique de la preuve d'une tâche en `preuve-attendue` (tâche MoKarade/.github#248, demande de Marc du 19/10/2026 :
 // « c'est automatiquement que ça doit se faire »). Une preuve n'attend jamais Marc : la tâche porte une ligne `**Contrôle**` dans un format
-// FERMÉ (docs/cycle-de-vie-tache.md §10 quater), ce script va voir la production et dit ce qu'il a observé. Il ne pose jamais « Acceptée » :
+// FERMÉ (docs/archive/cycle-de-vie-tache-2026-10-29.md §10 quater), ce script va voir la production et dit ce qu'il a observé. Il ne pose jamais « Acceptée » :
 // le fil de la tâche le fait, avec la PR, le déploiement et le résultat observé ici (le garde-fou de preuve exige la PR fusionnée).
 //
 // Trois sortes de contrôle, rien d'autre (aucun JavaScript libre, aucune URL hors hubperso.com) :

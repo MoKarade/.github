@@ -2,7 +2,7 @@ name: Réacteur (workflow commun)
 
 # Remplace la routine « Réacteur » (session Claude lancée à chaque événement, donc du quota). Écrit UNE fois ici ;
 # le `reacteur.yml` de chaque dépôt l'appelle quand une PR est fusionnée, quand la CI devient rouge, quand une
-# tâche est fermée ET prouvée, etc. (docs/cycle-de-vie-tache.md §6). Depuis le nettoyage du 29/10/2026 il ne réveille plus le Coordinateur ni
+# tâche est fermée ET prouvée, etc. (docs/archive/cycle-de-vie-tache-2026-10-29.md §6). Depuis le nettoyage du 29/10/2026 il ne réveille plus le Coordinateur ni
 # les fils d'app : il accepte seul ce qui se prouve par une machine, confie à Jules, lance la routine « Prendre une tâche » pour la suivante
 # et les balayages de `.github`, relance un échec de charge du robot, et réveille le PC (relevé demandé) ou le Coordinateur (signaux du pilotage).
 # Tâches : MoKarade/.github#139 (événements) et #143 (filet).

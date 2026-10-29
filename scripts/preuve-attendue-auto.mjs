@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Preuve différée lue par une machine (docs/cycle-de-vie-tache.md §10 ter et §10 quater, tâche MoKarade/.github#700, mission #698).
+// Preuve différée lue par une machine (docs/archive/cycle-de-vie-tache-2026-10-29.md §10 ter et §10 quater, tâche MoKarade/.github#700, mission #698).
 //
 // Demande de Marc, 28/10/2026 (« fais le A ») : 48 tâches sur 65 qui ont attendu plus d'un jour sa preuve étaient en `preuve-attendue`
 // avec une heure prévue, et `controle-preuve.mjs` sait lire la production mais « ne pose jamais Acceptée » : un fil devait revenir.

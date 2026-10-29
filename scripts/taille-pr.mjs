@@ -1,4 +1,4 @@
-// Taille d'une PR (docs/cycle-de-vie-tache.md §1 : une tâche = une PR d'environ 400 lignes modifiées au plus, hors tests et
+// Taille d'une PR (docs/archive/cycle-de-vie-tache-2026-10-29.md §1 : une tâche = une PR d'environ 400 lignes modifiées au plus, hors tests et
 // fichiers générés). Jusqu'au 22/10/2026 la règle n'était vue qu'après coup, par la pastille du Gantt (driveai#468 : 1101 lignes,
 // Hubperso#286 : 3356, memoryai#10 : 626). Ce module est appelé par le Garde-fou (scripts/garde-fou.mjs), donc par le contrôle
 // « Garde-fou » déjà exigé dans les dix dépôts : une PR sortie du brouillon qui dépasse la limite est refusée, sauf dérogation.

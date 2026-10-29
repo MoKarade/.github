@@ -1,6 +1,6 @@
 name: Preuve de page, classe B (workflow commun)
 
-# Une tâche dont le « Fini quand » est de classe B (docs/cycle-de-vie-tache.md §2 bis) se prouve ICI, sans le PC et sans secret : l'app du commit
+# Une tâche dont le « Fini quand » est de classe B (docs/archive/cycle-de-vie-tache-2026-10-29.md §2 bis) se prouve ICI, sans le PC et sans secret : l'app du commit
 # fusionné est lancée avec les DONNÉES FICTIVES des tests (comme `captures.yml`), un navigateur sans tête lit les pages demandées par les lignes
 # « Lecture de page » de la tâche, puis `accepterApresFusion` (scripts/acceptation-auto.mjs) pose « **Acceptée** » et ferme la tâche APRÈS le déploiement
 # READY. Le commentaire dit que la lecture est fictive. Si rien n'est accepté, la tâche reste ouverte et personne n'est réveillé (type `preuve_page`) : le fil qui l'a livrée prouve (nettoyage du 29/10/2026).

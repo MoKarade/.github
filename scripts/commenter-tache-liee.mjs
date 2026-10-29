@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Commentaire « tâche liée » sur les PR refusées (docs/cycle-de-vie-tache.md §8, mission MoKarade/.github#116).
+// Commentaire « tâche liée » sur les PR refusées (docs/archive/cycle-de-vie-tache-2026-10-29.md §8, mission MoKarade/.github#116).
 //
 // Le Garde-fou (scripts/garde-fou.mjs) dit déjà dans son journal pourquoi une PR est rouge, mais il ne peut pas le
 // poser en commentaire : le jeton de ses workflows n'a pas `pull-requests: write` (HTTP 403), et le lui donner

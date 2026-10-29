@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Acceptation automatique d'une tâche dont la preuve est entièrement lisible par une machine (docs/cycle-de-vie-tache.md §10 ter).
+// Acceptation automatique d'une tâche dont la preuve est entièrement lisible par une machine (docs/archive/cycle-de-vie-tache-2026-10-29.md §10 ter).
 //
 // Décision de Marc, 21/10/2026 (fil « Fusion rapide », option B) : l'attente la plus longue n'est pas la fusion (Mergify :
 // une minute après la CI verte, en médiane) mais le temps entre la fusion et le « **Acceptée** » posé par un fil

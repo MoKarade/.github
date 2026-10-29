@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Tâche suivante de chaque dépôt (docs/cycle-de-vie-tache.md §5 et §6) : UN seul calcul, lu par le Gantt ET par la routine.
+// Tâche suivante de chaque dépôt (docs/archive/cycle-de-vie-tache-2026-10-29.md §5 et §6) : UN seul calcul, lu par le Gantt ET par la routine.
 //
 // Rôle : lit le relevé `backlog.json` (écrit par fetch.py) et écrit `prochaines.json` : pour chaque dépôt, son état
 // (`libre`, `occupe`, `incident`, `frein`, `rien`), les tâches suivantes, la file complète dans l'ordre, et pour chaque tâche
@@ -24,7 +24,7 @@
 // sort de `occupe_par`, reste dans `attend_marc`. Statut : `libre` (au moins une tâche à lancer), `occupe` (des travaux en cours et rien à lancer),
 // `incident`, `frein`, `rien`. `suivantes` : les tâches à lancer, dans l'ordre de la file ; `suivante` en est la tête.
 //
-// Frein de quota (MoKarade/.github#184, docs/cycle-de-vie-tache.md §5 bis) : le pourcentage hebdomadaire du quota Claude,
+// Frein de quota (MoKarade/.github#184, docs/archive/cycle-de-vie-tache-2026-10-29.md §5 bis) : le pourcentage hebdomadaire du quota Claude,
 // relevé par la tâche du PC (`quota.json`, .github#45), fixe un palier `frein` (`normal`, `1`, `2`) qui ne laisse passer
 // que les tâches permises. Aucune IA, aucun réseau : un nombre, deux seuils, une hystérésis.
 //
@@ -322,7 +322,7 @@ export function analyserAttentes(resultats, idx, maintenant = new Date(), seuils
   for (const d of resultats) {
     const attendMarc = new Set((d.attend_marc ?? []).map((a) => a.ref));
     for (const [r, e] of Object.entries(d.exclues)) {
-      // Une preuve n'attend jamais Marc (décision du 19/10/2026) : `preuve-attendue` = travail de Claude, avec une date de contrôle (docs/cycle-de-vie-tache.md §7).
+      // Une preuve n'attend jamais Marc (décision du 19/10/2026) : `preuve-attendue` = travail de Claude, avec une date de contrôle (docs/archive/cycle-de-vie-tache-2026-10-29.md §7).
       // Les deux étiquettes ensemble sont une contradiction, pas un geste de Marc : la tâche sort en `preuve-chez-marc` et le fil la corrige.
       const etiquettes = idx.noeuds.get(r)?.noeud.labels ?? [];
       const chezMarc = etiquettes.includes('preuve-attendue') && etiquettes.includes('qui:marc');

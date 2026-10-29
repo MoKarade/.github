@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Contrôle d'un geste réclamé à Marc (docs/cycle-de-vie-tache.md §5 ter, mission MoKarade/.github#703, tâche #706).
+// Contrôle d'un geste réclamé à Marc (docs/archive/cycle-de-vie-tache-2026-10-29.md §5 ter, mission MoKarade/.github#703, tâche #706).
 //
 // Constat du 28/10/2026 : 5 gestes sur 7 de la liste de Marc n'étaient pas à lui (une tâche du PC, une obsolète, une déjà faite,
 // une mal étiquetée, une à reporter). Une étiquette `qui:marc` posée à la légère fait attendre la tâche et encombre sa liste.
@@ -56,7 +56,7 @@ export function texteDuCommentaire({ geste, pourquoi }) {
     '',
     'Écrire la ou les lignes en commentaire (ou dans le corps). Si rien de cela n\'est vrai (tâche du PC, déjà faite, obsolète, à reporter), ce n\'est pas un geste de Marc : le fil retire `qui:marc` et dit à qui revient la tâche.',
     '',
-    'Règle : docs/cycle-de-vie-tache.md §5 ter. `qui:marc` reste posé tant que personne ne l\'a retiré.',
+    'Règle : docs/archive/cycle-de-vie-tache-2026-10-29.md §5 ter. `qui:marc` reste posé tant que personne ne l\'a retiré.',
   ].join('\n');
 }
 
