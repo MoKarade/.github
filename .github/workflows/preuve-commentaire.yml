@@ -3,7 +3,7 @@ name: Contrôle de la preuve à l'écriture
 # Une preuve mal écrite n'était vue qu'APRÈS la fermeture : le garde-fou rouvrait l'issue (13 % des tâches, 28/10/2026). Ici, dès qu'une personne écrit un
 # commentaire qui commence par « **Acceptée** » sur une tâche OUVERTE, le même jugement que le garde-fou (scripts/preuve.mjs, importé, jamais modifié) est rendu
 # comme si l'issue se fermait maintenant, et UNE réponse le dit : « serait acceptée » ou la liste des motifs. Rien n'est fermé, édité, rouvert ni étiqueté.
-# Tâche MoKarade/.github#713 ; règle : docs/cycle-de-vie-tache.md §10 bis, « Contrôle à l'écriture ».
+# Tâche MoKarade/.github#713 ; règle : docs/archive/cycle-de-vie-tache-2026-10-29.md §10 bis, « Contrôle à l'écriture ».
 # Aucun minuteur, aucun secret : le jeton du job suffit. Le script vient de ce dépôt, jamais du code de l'appelant.
 #
 # Les autres dépôts l'appellent depuis un petit workflow à eux (tâches sœurs de #712) :

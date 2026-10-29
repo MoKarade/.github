@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Garde-fou de preuve (docs/cycle-de-vie-tache.md §10 bis) : une tâche ne reste fermée que si sa preuve est valide.
+// Garde-fou de preuve (docs/archive/cycle-de-vie-tache-2026-10-29.md §10 bis) : une tâche ne reste fermée que si sa preuve est valide.
 //
 // Rôle : quand une issue `niveau:tâche` est fermée, ce script relit ses commentaires et vérifie, sur GitHub,
 // que la fermeture est justifiée.
@@ -40,7 +40,7 @@ const SANS_SERVICE =
 export const servi = (fichiers) => fichiers.some((f) => !SANS_SERVICE.test(f));
 
 const humain = (c) => c.user?.type === 'User' && !/jules/i.test(c.user.login ?? '') && estDeConfiance(c);
-// Seule exception à « jamais un robot » (docs/cycle-de-vie-tache.md §10 ter) : l'acceptation automatique de scripts/acceptation-auto.mjs,
+// Seule exception à « jamais un robot » (docs/archive/cycle-de-vie-tache-2026-10-29.md §10 ter) : l'acceptation automatique de scripts/acceptation-auto.mjs,
 // écrite par le robot des workflows et qui porte ce marqueur. Elle n'est reconnue que pour « Acceptée », jamais pour un abandon.
 export const MARQUEUR_AUTO = '<!-- acceptation-auto -->';
 const automatique = (c) => c.user?.login === 'github-actions[bot]' && String(c.body ?? '').includes(MARQUEUR_AUTO);
@@ -128,7 +128,7 @@ export const corpsReouverture = (motifs, raison) =>
       ? 'Pour la refermer : poser un commentaire qui commence par `**Acceptée** — PR #p fusionnée (<sha court>), déploiement READY (<id>), preuve : <ce qui a été LU en production et le résultat>`, puis fermer l’issue. Si la preuve dépend d’un événement ou d’un geste de Marc, rester ouverte avec l’étiquette `preuve-attendue` et la ligne `**Preuve attendue** : AAAA-MM-JJ HH:MM (heure du Québec) — événement`.'
       : 'Pour la refermer : poser un commentaire `**Abandonnée** — <la raison>`, puis fermer l’issue `not_planned`.',
     '',
-    'Règle : docs/cycle-de-vie-tache.md §10 bis (MoKarade/.github). La fusion d’une PR ne ferme jamais une tâche.',
+    'Règle : docs/archive/cycle-de-vie-tache-2026-10-29.md §10 bis (MoKarade/.github). La fusion d’une PR ne ferme jamais une tâche.',
   ].join('\n');
 
 const pages = async (api, chemin) => {

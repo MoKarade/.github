@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Retour en arrière automatique quand une app tombe juste après un déploiement (tâche #30, §11 de
-// docs/cycle-de-vie-tache.md).
+// docs/archive/cycle-de-vie-tache-2026-10-29.md).
 //
 // Pourquoi ici et pas dans le workflow de fumée : le retour en arrière demande un jeton Vercel. Il est rangé
 // UNE seule fois, dans les secrets de ce dépôt (secret VERCEL_TOKEN), jamais dans les dix dépôts d'apps.

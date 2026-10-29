@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Contrôle d'une preuve AU MOMENT où elle est écrite (docs/cycle-de-vie-tache.md §10 bis ter, mission MoKarade/.github#703, tâche #713).
+// Contrôle d'une preuve AU MOMENT où elle est écrite (docs/archive/cycle-de-vie-tache-2026-10-29.md §10 bis ter, mission MoKarade/.github#703, tâche #713).
 //
 // Constat du 28/10/2026 : 87 tâches sur 660 (13 %) ont été rouvertes par le garde-fou de preuve parce que la preuve, souvent de bon fond, avait un mauvais format
 // (empreinte du déploiement au lieu de celle de la PR, « Preuve » sans deux-points, PR non citée). Chaque réouverture coûte des heures d'attente et un rouge.

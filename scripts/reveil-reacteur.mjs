@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Réacteur : ce qui se fait SANS IA à un événement GitHub (docs/cycle-de-vie-tache.md §6, mission MoKarade/.github#116).
+// Réacteur : ce qui se fait SANS IA à un événement GitHub (docs/archive/cycle-de-vie-tache-2026-10-29.md §6, mission MoKarade/.github#116).
 //
 // Chaîne de lancement RETIRÉE (tâche « Retirer la chaîne de lancement », décision de Marc du 29/10/2026 : voie courte, une étiquette `go` lance claude-code-action dans la CI de l'app) :
 // le Réacteur ne calcule plus la file des tâches, ne lance plus la routine « Prendre une tâche » (action `lancer`, marqueur `routine-lancee`) et ne réveille plus personne pour « un dépôt libre ».
@@ -330,9 +330,9 @@ async function reveillerCoordinateur({ api, d, jetonReveil, journal }) {
 
 async function traiterDecision({ api, evt, jetonReveil, journal = console.log, maintenant = new Date(), jetonLecture = '', accepterDifferees, decisionImposee = null, pause, fetchImpl, apps }) {
   const d = decisionImposee ?? await decider({ api, evt, maintenant, jetonLecture, pause, fetchImpl, journal, apps, ...(accepterDifferees ? { accepterDifferees } : {}) });
-  if (d.differees?.acceptees.length) journal(`Réacteur : preuve différée lue et acceptée automatiquement sur ${d.differees.acceptees.map((n) => `#${n}`).join(', ')} (docs/cycle-de-vie-tache.md §10 quater).`);
+  if (d.differees?.acceptees.length) journal(`Réacteur : preuve différée lue et acceptée automatiquement sur ${d.differees.acceptees.map((n) => `#${n}`).join(', ')} (docs/archive/cycle-de-vie-tache-2026-10-29.md §10 quater).`);
   if (d.differees?.erreur) journal(`::warning::Réacteur : preuves différées non lues (${d.differees.erreur}). Un fil prouvera.`);
-  if (d.acceptation?.statut === 'acceptee') journal(`Réacteur : tâche #${d.acceptation.tache} acceptée automatiquement (docs/cycle-de-vie-tache.md §10 ter).`);
+  if (d.acceptation?.statut === 'acceptee') journal(`Réacteur : tâche #${d.acceptation.tache} acceptée automatiquement (docs/archive/cycle-de-vie-tache-2026-10-29.md §10 ter).`);
   else if (d.acceptation?.statut === 'erreur') journal(`::warning::Réacteur : acceptation automatique non faite (${d.acceptation.motifs.join(' ; ')}). Un fil prouvera.`);
   if (d.action === 'rien') {
     journal(`Réacteur : rien à faire (${d.raison}).`);

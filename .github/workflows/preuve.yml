@@ -1,6 +1,6 @@
 name: Garde-fou de preuve (workflow commun)
 
-# Une tâche (issue `niveau:tâche`) ne reste fermée que si sa preuve est valide (docs/cycle-de-vie-tache.md §10 bis).
+# Une tâche (issue `niveau:tâche`) ne reste fermée que si sa preuve est valide (docs/archive/cycle-de-vie-tache-2026-10-29.md §10 bis).
 # Écrit UNE fois ici ; chaque dépôt l'appelle depuis son `reacteur.yml`, quand une issue se ferme :
 #
 #   jobs:

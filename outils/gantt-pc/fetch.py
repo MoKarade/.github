@@ -1,5 +1,5 @@
 # Relevé GitHub en lecture seule : backlog (issues niveau:*) de chaque dépôt -> backlog.json
-# v6 (15/10/2026) : applique le cahier des charges du §13 de MoKarade/.github docs/cycle-de-vie-tache.md
+# v6 (15/10/2026) : applique le cahier des charges du §13 de MoKarade/.github docs/archive/cycle-de-vie-tache-2026-10-29.md
 # (PR reliée par « Tâche : #n » ou Closes, états du §7, preuve d'acceptation, geste de Marc, contrôles de la pastille).
 # v7 (16/10/2026) : deux modes qui rendent les MÊMES données.
 #   PLEIN (défaut)  : relit tout. Sert de référence.

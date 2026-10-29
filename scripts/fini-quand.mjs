@@ -101,7 +101,7 @@ export function avertissement(corps) {
     '',
     ...v.motifs.map((m) => `- ${m}`),
     '',
-    'A = lisible par machine (HTTP public, déploiement, CI) · B = page connectée, lue en mode fictif par `preuve-page.yml` · C = Chrome sur le PC, avec sa raison. Règle : `docs/cycle-de-vie-tache.md` §2 bis.',
+    'A = lisible par machine (HTTP public, déploiement, CI) · B = page connectée, lue en mode fictif par `preuve-page.yml` · C = Chrome sur le PC, avec sa raison. Règle : `docs/archive/cycle-de-vie-tache-2026-10-29.md` §2 bis.',
   ].join('\n');
 }
 

@@ -1,0 +1,578 @@
+Archive du 29/10/2026 : remplacé par docs/cycle-de-vie-tache.md ; ne décrit plus l'état réel.
+Texte intégral de l'ancien docs/cycle-de-vie-tache.md (574 lignes), conservé tel quel ci-dessous.
+Les renvois « § n » des scripts, workflows et outils visent désormais cette archive.
+
+# Cycle de vie d'une tâche
+
+> **Ce document fait foi** pour tout le travail fait dans les dépôts de MoKarade : comment il naît,
+> qui le prend, comment il est codé, relu, mis en ligne, accepté, défait et audité.
+> Décidé par Marc le 15/10/2026 (réponses « 1a 2a 3b 4a 5a 6a 7a 8b 9a 10a 11c 12a », puis « ok pour
+> plan », en ajoutant le Gantt, les cartes et la répartition du travail).
+> On le change par une PR sur ce dépôt, jamais ailleurs. Une copie qui le contredit a tort.
+
+## 0. En cinq lignes
+
+1. Trois niveaux : **chantier** (objectif de plusieurs semaines) › **mission** (résultat livrable en une semaine au plus) › **tâche** (une PR, une journée au plus, environ 400 lignes modifiées hors tests). Chacun est une issue GitHub.
+2. Claude crée le travail. Le Coordinateur tient les chantiers et les missions, et les fils créent et ferment les tâches. Marc décide de la direction : il force une tâche avec `prio:1`.
+3. L'ordre suit une règle fixe, calculée par un script (§5) : d'abord la panne, le rouge et la preuve due, puis `prio:1`, puis la sécurité, puis le chantier en cours jusqu'au bout, puis le standard et les fonctions en alternance. Les événements GitHub réveillent le Coordinateur (§6), un filet quotidien vérifie le reste, avec **autant de travaux par dépôt que les fichiers le permettent** (plus de limite de places depuis le 29/10/2026 16:13Z), sur des fichiers disjoints, et les tâches de Jules n'en tiennent aucun (décisions de Marc du 29/10/2026 16:13Z et du 23/10/2026 22:45Z ; règle complète au §6, capacité).
+4. La CI décide. Chaque PR qui change un écran porte des captures avant/après, prises avec des données fictives. Mergify fusionne.
+5. Une tâche est **acceptée** quand trois conditions sont remplies : elle est fusionnée, le déploiement est en ligne, et le « Fini quand » est prouvé en production par un commentaire de preuve, **posé dans l'heure qui suit la mise en ligne** (§10). Si le test de fumée échoue, la version précédente revient seule et une PR d'annulation s'ouvre. Un rapport hebdomadaire mesure la vitesse, la qualité et les retours en arrière. **Sans cette preuve, une tâche n'est jamais finie** : un garde-fou rouvre toute tâche fermée sans preuve valide (§10 bis), et une preuve qui dépend d'un événement ou d'un geste de Marc laisse la tâche ouverte, étiquetée `preuve-attendue`, jamais comptée comme finie (§10).
+
+---
+
+## 1. Hiérarchie
+
+| Niveau | Ce que c'est | Taille | Exemple |
+|---|---|---|---|
+| **Chantier** | Un objectif que Marc reconnaît | Plusieurs semaines | « Standardiser les 9 dépôts » |
+| **Mission** | Un résultat livrable et visible | Une semaine au plus | « Sauvegarder chaque nuit les bases Neon » |
+| **Tâche** | Une PR, ou un lot de petits gestes (ci-dessous) | Une journée au plus, environ 400 lignes modifiées (hors tests et fichiers générés) | « Ajouter le test de fumée à BatchChef » |
+
+- Chaque niveau est une issue GitHub portant son étiquette `niveau:chantier`, `niveau:mission` ou `niveau:tâche`.
+- Les niveaux sont reliés par **sous-issues**. Une tâche a toujours un parent, mission ou chantier. Une tâche orpheline est un défaut, signalé par le Gantt.
+- Un travail qui touche plusieurs dépôts a son chantier et ses missions dans `MoKarade/.github`, et ses tâches dans chaque dépôt concerné, rattachées à la mission commune.
+- **Trop gros pour une tâche** (plus de 400 lignes, ou plus d'une journée) : la tâche devient une mission, découpée en tâches.
+- **Lot de petits gestes** (décision de Marc, 26/10/2026 17:39Z, après la mesure du relevé de 15:11Z sur 7 jours : 268 des 397 travaux, soit 67 %, duraient moins de 30 minutes, et 241, soit 61 %, commençaient moins de 10 minutes après la création de leur tâche : le Gantt n'était qu'un nuage de points). Un geste de moins de 30 minutes et de moins de 100 lignes (retouche, petit correctif, renommage) ne crée PAS sa propre tâche : il se range dans le **lot** du dépôt. Le lot est une tâche ordinaire (`niveau:tâche`, rattachée à une mission, titre « Lot : petits gestes de <dépôt> (AAAA-MM-JJ) »), dont le corps liste les gestes en puces `- [ ] <geste> (PR #n)` ; elle porte `preuve-attendue` et une ligne `**Preuve attendue** : AAAA-MM-JJ 18:00 (heure du Québec) — le lot du jour est prouvé`, de sorte que les PR fusionnées dans la journée ne déclenchent pas « fusionnée sans preuve ». Chaque PR du geste cite `Tâche : #<lot>` : le Garde-fou y voit une tâche ouverte. Le soir, un seul commentaire `**Acceptée**` (§10 bis) cite la dernière PR fusionnée et énumère les autres, puis le lot se ferme ; un lot ne dépasse pas dix gestes ni un jour. Un geste plus gros reste une tâche à part. Le Gantt montre le lot comme UNE barre. Ouvrir le lot du jour est le premier geste du fil qui ne le trouve pas ; une ouverture automatique est une tâche à part, pas encore faite.
+- **Durée et fermeture d'une mission** (décision de Marc, 26/10/2026 17:53Z, « calculé + mission qui se ferme », tâche #591 ; mesure du relevé de 15:11Z : 64 missions sur 64 sans début réel, 9 fermées plus de 24 h après leur dernière tâche, 8 ouvertes alors que tout était fini). La barre d'une mission ou d'un chantier se calcule depuis ses tâches (`outils/gantt-pc/missions.py`, champs `deb`, `fin`, `nt`, `nf` du relevé) : début = la première tâche réellement commencée, fin = la dernière fermeture, seulement quand toutes les tâches sont fermées ; jamais les dates de l'issue. Une mission n'a PAS d'étiquette `en-cours` : elle compterait comme un travail dans les places du dépôt (§6). Une mission dont toutes les tâches sont fermées depuis 24 heures, dont une au moins acceptée, se ferme toute seule : le PC (`tour.py`, jeton `gh` de Marc) écrit un commentaire `**Acceptée**` qui compte les tâches acceptées et abandonnées, puis ferme `completed` ; au plus dix par tour, et jamais une mission portant `qui:marc`, `bloqué` ou `preuve-attendue`, ni une dont un enfant manque au relevé. Une tâche ajoutée plus tard à une mission fermée : le Coordinateur la rouvre.
+- Il n'y a pas d'autre niveau. L'étiquette `niveau:plan` est retirée.
+
+## 2. Gabarits des issues
+
+Titre : un verbe et un objet, en mots simples. Le corps suit toujours ces gabarits, dans cet ordre.
+
+**Chantier**
+```
+**Objectif** : ce qui sera vrai pour Marc à la fin.
+**Pourquoi** : le problème de départ.
+**Fini quand** : critère vérifiable.
+**Source** : demande de Marc (date, fil) ou audit.
+```
+
+**Mission**
+```
+**Résultat** : ce que Marc voit ou peut faire à la fin.
+**Fini quand** : critère vérifiable.
+**Source** : chantier, demande ou audit.
+```
+
+**Tâche**
+```
+**Avant** : ce que Marc voit aujourd'hui.
+**Après** : ce qu'il verra quand c'est fait.
+**Fini quand** (classe A, B ou C, voir §2 bis) : critère vérifiable EN PRODUCTION (réponse HTTP, écran, contrôle CI, donnée), **prouvable dans l'heure** qui suit la mise en ligne.
+**Lecture de page** : GET /chemin → 200, contient « texte » (une ligne par page, classe B seulement, 5 au plus).
+**Source** : ligne, PR, fil ou audit d'où vient la tâche.
+**Fichiers touchés** (liste à puces (« - » ou « * » suivi d'une espace : une ligne en gras comme `**Attend**` n'est pas une puce) de chemins entre `backticks`) : ce que la tâche modifie. Facultatif depuis le 29/10/2026 (nettoyage « go reco » de Marc : plus d'estimation automatique, plus d'obligation) ; quand elle existe, la file l'utilise pour la seule règle de capacité, « pas deux PR sur les mêmes fichiers » (§6, capacité). Sans elle, ou avec `non déterminés`, rien ne bloque la tâche.
+**Attend** : aucune — OU — #n — raison (OBLIGATOIRE : la ligne existe toujours ; une dépendance n'est écrite que si elle est prouvée).
+**Preuve attendue** : AAAA-MM-JJ HH:MM (heure du Québec) — événement (seulement si la preuve dépend d'un événement, voir §10).
+**Acceptation automatique** : oui — raison (à écrire par celui qui crée la tâche DÈS que le « Fini quand » est un contrôle CI ou un déploiement et que la tâche ne touche aucun écran ; jamais pour une donnée ou un écran, et une lecture de la production s'écrit en « Fini quand exécutable » : voir §10 ter. Sans cette ligne un fil prouve, donc une tâche qui y a droit et ne l'écrit pas attend pour rien ; si personne ne l'écrit, le Réacteur la pose seul quand c'est évident (§10 ter), et un fil peut la retirer ou la remplacer par « non »).
+```
+
+Un « Fini quand » non vérifiable (« c'est mieux ») est refusé. Un « Fini quand » qui dépend d'un événement lent (un cron, une échéance) est refusé tel quel : on le réécrit pour qu'il soit prouvable dans l'heure, ou on applique la règle du §10. On le réécrit avant de prendre la tâche.
+
+## 2 bis. Classe de preuve du « Fini quand » (A, B, C), demande de Marc du 28/10/2026, MoKarade/.github#781
+
+Constat du 28/10/2026 22:38Z : presque chaque tâche attendait une preuve lue dans Chrome sur le PC, puis relayée par le Coordinateur ; aucune tâche sur dix n'était finie sans relais. Le « Fini quand » dit donc QUELLE sorte de preuve il demande, pour que la machine lise tout ce qu'elle peut lire :
+
+- **A, lisible par machine** : réponse HTTP publique, déploiement READY, test ou contrôle de la CI. Lue par le Réacteur à la fusion (§10 ter, `scripts/acceptation-auto.mjs`).
+- **B, page connectée** : lue dans GitHub Actions, sans le PC et sans secret, par un navigateur sans tête, sur l'app du commit fusionné lancée avec les DONNÉES FICTIVES des tests (comme `captures.yml`), après le déploiement READY. Workflow commun `.github/workflows/preuve-page.yml`, script `scripts/preuve-page.mjs`. Le commentaire « **Acceptée** » dit que la lecture est fictive (« données des tests, jamais la production ») : il ne prétend pas avoir lu la production.
+- **C, Chrome sur le PC** : seulement si la page exige vraiment la session de Marc ou un écran que la machine ne peut pas rejouer. Rare ; la ligne `**Raison de la classe C** : …` (20 caractères au moins) dit pourquoi.
+
+**Écrire la classe** : `**Fini quand** (classe B) : …`. Classe B : une ou plusieurs lignes `**Lecture de page** : GET /chemin → 200, contient « texte »` (chemin de l'app, jamais une adresse libre : le texte d'une tâche est une donnée). `scripts/fini-quand.mjs` juge la forme ; un « Fini quand » sans classe, de classe inconnue, ou une classe B sans lecture lisible est SIGNALÉ (avertissement), jamais bloqué à la création.
+
+**Classe B, pas à pas** : l'app appelle `preuve-page.yml` quand une de ses PR est fusionnée (même appel que `captures.yml`, voir l'en-tête du workflow). La PR doit citer UNE tâche ouverte, qui n'attend rien ; les contrôles de la PR sont verts ; si elle change du code servi, un déploiement READY existe sur le commit fusionné (mêmes garde-fous que §10 ter). Quand tout est vrai, la tâche est acceptée et fermée, et la routine part pour la suivante (« libre ; suivante : #n ») comme après une acceptation automatique. Sinon (app qui ne démarre pas, page différente, déploiement absent), la tâche reste ouverte, personne n'est réveillé (type `preuve_page`) et le fil qui l'a livrée prouve comme pour une classe A ou C ; le guetteur de silence voit une tâche restée sans preuve.
+
+**Sans réveil** : `preuve-page.yml` n'utilise aucun secret (y ajouter une référence à un secret rend la PR à Marc, Garde-fou). Depuis le nettoyage du 29/10/2026 (« go reco » de Marc), une lecture de page refusée ne réveille plus le fil de l'app (plus de boîte locale `reveilLocal`) : la tâche reste ouverte et le fil qui l'a livrée prouve, comme pour une classe A ou C ; une lecture acceptée libère la place et lance la routine pour la suivante.
+
+**Un secret n'est proposé à Marc que si le mode fictif ne suffit pas** (une page qui n'a pas de données de test) : une carte avec une recommandation, jamais un secret posé d'office.
+
+## 3. Étiquettes
+
+| Étiquette | Sens | Posée par |
+|---|---|---|
+| `niveau:chantier` / `niveau:mission` / `niveau:tâche` | Niveau | Celui qui crée l'issue |
+| `prio:1` / `prio:2` / `prio:3` | 1 passe devant tout, sauf la panne. Pas d'étiquette = `prio:3` | Marc (`prio:1`), Claude (2 et 3) |
+| `en-cours` | Prise par un fil. C'est l'heure de début | Le fil, en la prenant ; sinon le balayage « tâche liée », dans les minutes qui suivent l'ouverture de la PR qui cite la tâche (§8) |
+| `jules` | Confiée à Jules | La routine |
+| `qui:marc` | Attend un geste de Marc, décrit en commentaire | Celui qui découvre le geste |
+| `bloqué` | Attend autre chose qu'une tâche, dit en commentaire | Celui qui découvre le blocage |
+| `preuve-attendue` | PR fusionnée, mais la preuve n'est pas possible tout de suite (événement futur, geste de Marc). La tâche reste **ouverte et non finie** ; elle ne bloque pas le dépôt (§10) | Le fil, en remplaçant `en-cours` |
+| `preuve-manquante` | Tâche fermée sans preuve valide, rouverte par le garde-fou (§10 bis) | Le garde-fou de preuve |
+| `incident` | Panne en production, ou retour en arrière automatique | Le workflow de fumée |
+| `chantier:standard` / `chantier:fonction` (sur un chantier) | Type du chantier, pour l'alternance (§5) | Le Coordinateur, à la création du chantier |
+| `essai` | Issue créée par un essai ; fermée `not_planned` par l'essai lui-même ; ignorée par le Gantt et par le garde-fou de preuve (§13) | Le test qui la crée |
+| `hold` (sur une PR) | Mergify ne fusionne pas | Marc ou Claude |
+
+## 4. Qui fait quoi
+
+| Rôle | Fait | Ne fait jamais |
+|---|---|---|
+| **Marc** | Fixe la direction ; répond aux cartes ; force une tâche (`prio:1`) ; fait les gestes `qui:marc` (dont fusionner à la main une PR que le garde-fou a bloquée) | Fermer une issue à la main ; valider chaque tâche |
+| **Coordinateur** (chat du projet) | Crée et modifie chantiers et missions ; lance les fils ; tient le texte de la routine ; relaie au fil propriétaire | Coder ; modifier les fichiers d'un fil |
+| **Fil** (une session par tâche) | Prend une tâche, la livre, prouve l'acceptation ; crée les tâches de sa mission ; ouvre une issue pour un bug trouvé en chemin | Toucher la structure (chantiers, missions) ; prendre une deuxième tâche dans un autre dépôt |
+| **Fil PC** | Tout ce qui ne tourne que sur le PC : robot de tests, Drive, NotebookLM, sauvegardes, bascule en public | Agir sur un oui relayé ; le oui de Marc est écrit dans ce fil |
+| **Jules** | Les tâches `jules` : simples, un fichier, sans chemin protégé, sans base, sans secret, sans donnée perso | Les chemins protégés (le garde-fou les permettrait, mais une tâche simple n'en a pas besoin) ; une tâche sans « Fini quand » |
+| **Routine continue** (une fois par jour à 6 h, et au réveil par la boîte) | Fait le ménage, choisit la tâche suivante, la distribue (§6) | Inventer du travail |
+| **Réacteur** (workflow commun `reveil-reacteur.yml`, sans IA) | Relance une fois un échec de charge du robot de tests, accepte seul ce qui se prouve par une machine (§10 ter, §10 quater) et lance la routine « Prendre une tâche » pour la suivante du dépôt (§6) ; il ne réveille plus le Coordinateur ni les fils d'app. Les PR en retard sont tenues à jour par la file de Mergify | Résoudre un conflit, fusionner, poser « Acceptée », nommer une tâche suivante |
+| **CI** | Décide si une PR peut fusionner | |
+| **Mergify** | Fusionne en squash une PR verte, hors brouillon, sans `hold`, une à la fois ; les chemins protégés aussi, quand le contrôle « Garde-fou » est vert (§9) | Fusionner une PR dont le garde-fou est rouge |
+
+**Qui crée quoi** :
+- Claude crée le travail à partir des demandes de Marc, des audits et des bugs trouvés. Tout apparaît dans le Gantt, et Marc corrige la direction quand il le veut.
+- Le Coordinateur est seul à créer ou modifier un chantier ou une mission. Un fil qui en a besoin le lui demande.
+- Un fil crée les tâches de la mission qu'on lui a confiée, et ferme les siennes.
+- Un bug trouvé en chemin devient une issue `niveau:tâche` dans son dépôt, rattachée à la mission la plus proche. Il n'est jamais corrigé dans la PR en cours.
+
+## 5. Ordre (règle fixe)
+
+**La file est calculée par UN script** : `scripts/prochaine-tache.mjs` (ce dépôt) lit le relevé du Gantt et écrit `prochaines.json` : pour chaque dépôt, son état (`libre` : au moins une tâche prête ; `occupe` : des travaux en cours et rien de lançable, à cause de fichiers pris par une PR ouverte ; `incident`, `frein`, `rien` ; plus de `partiel`, ni de `places` ni de `couloirs` depuis le 29/10/2026), les tâches suivantes (`suivantes`, la tête est `suivante`), la file complète et la raison de chaque tâche écartée. Le Gantt l'affiche, la routine continue le lit. Ce texte décrit ce que le script calcule ; en cas de divergence, on corrige le script (et ses tests), jamais une routine ni une page.
+
+Pour chaque dépôt, la tâche suivante est la première de cette liste :
+
+1. **Panne, rouge ou preuve due** : issue `incident` (le dépôt passe alors à l'état `incident`), branche par défaut rouge, PR rouge d'un fil, tâche `preuve-manquante` (fermée sans preuve, rouverte), ou PR fusionnée dont la tâche n'est pas acceptée : la preuve est due avant tout travail neuf.
+2. **`prio:1`** posée par Marc. **Une demande directe de Marc ne coupe jamais un travail en cours** (décision de Marc, 26/10/2026 17:39Z, après la mesure des travaux lâchés : 17 en 7 jours) : le fil qui la reçoit crée sa tâche `prio:1` (ou la range dans le lot, §1, si elle fait moins de 30 minutes) et la lance sur une place libre ; il n’y a plus de limite de places par dépôt (§6), seulement les fichiers disjoints. Dépôt plein, elle prend la première place libérée. Seul le mot « urgent » de Marc autorise à couper un travail : la tâche coupée perd `en-cours` avec un commentaire `Suspendue : <raison>, reprise après #n`, et la tâche qui coupe écrit `Coupe #n` dans son corps, pour que l'interruption se lise dans le Gantt.
+3. **Sécurité** : avis npm ou Dependabot de gravité haute, fuite de secret, donnée perso en ligne (le script ne lit que l'étiquette `sécurité` ; les avis sont à vérifier par l'appelant).
+4. **Le chantier en cours jusqu'au bout** (décision de Marc, 16/10/2026) : la prochaine tâche prenable de la même mission que la dernière tâche lancée ou fermée dans le dépôt, sinon du même chantier.
+5. **Alternance** (décision 16b) : seulement quand ce chantier n'a plus rien de prenable : si la dernière tâche venait d'un chantier `chantier:standard`, on prend un chantier `chantier:fonction`, et inversement ; si un côté n'a rien de prenable, l'autre.
+6. **Le reste**, par `prio` croissante, puis par numéro d'issue.
+
+Chaque chantier porte `chantier:standard` (socle, CI, conformité, sécurité, dépendances, tests, contrat, gabarit, outillage) ou `chantier:fonction` (ce que Marc voit ou utilise). Sans cette étiquette, l'alternance n'est pas calculable et le script le signale dans `alertes` en nommant le chantier. Le script remonte de la tâche jusqu'au premier ancêtre de niveau chantier (quatre sauts au plus) ; une tâche dont les missions n'ont aucun chantier au-dessus (mission commune à plusieurs dépôts) n'alterne pas et ne déclenche pas l'alerte : il n'y a rien à étiqueter.
+
+**Avant de lancer**, l'agent revérifie en direct la tâche choisie (ouverte, sans `en-cours`, sans PR ouverte) : `prochaines.json` peut dater de 40 minutes. Il revérifie aussi, en direct, qu'aucune PR ouverte n'a pris un fichier de la tâche (« pas deux PR sur les mêmes fichiers » : §6, capacité). Plus de limite de places : toute tâche prête part, des travaux d'un même dépôt peuvent se chevaucher.
+
+Une tâche n'est **prenable** que si elle remplit cinq conditions :
+- elle est ouverte et porte `niveau:tâche` ;
+- elle n'a ni `qui:marc`, ni `bloqué`, ni `en-cours`, ni `jules`, ni `preuve-attendue` (livrée, il ne reste que la preuve) ;
+- toutes les tâches qu'elle attend sont fermées ;
+- aucune PR ouverte ne la cite ;
+- son « Fini quand » est vérifiable, et prouvable dans l'heure ou couvert par une preuve programmée (§10).
+
+## 5 quinquies. La file se calcule à l'événement, pas sur le tour du PC (demande de Marc, 28/10/2026, MoKarade/.github#703 et #711)
+
+Avant, la file était `prochaines.json`, écrit par le relevé du PC toutes les 10 minutes : PC éteint ou tour raté, plus de file, donc plus de départ (création → départ : 8 h 51 en moyenne le 28/10). Maintenant, `scripts/file-depot.mjs` lit les issues et les PR OUVERTES d'un seul dépôt avec le jeton du job (1 000 appels par heure et par dépôt, pas les 5 000 partagés du compte de Marc), en fait le même relevé à un dépôt que `fetch.py` et le passe à `calculer` de `prochaine-tache.mjs` : un seul calcul de la file, deux sources de données.
+
+- **Qui l'appelle** : le Réacteur du dépôt (`reveil-reacteur.mjs`), sur une PR fusionnée ou une tâche fermée. La décision du Réacteur calcule « suivante : #n » (le NUMÉRO seulement, jamais le titre, règle .github#136) et la routine « Prendre une tâche » (§6) part pour elle. La session neuve relit la tâche en direct avant de commencer.
+- **Ce qui est rendu** : `{ statut, suivante, suivantes, eligibleDepuis, illisibles }`. `eligibleDepuis` est le plus tard entre la création de la tâche, et la fermeture de sa dernière dépendance : c'est le point de départ des trois délais (en file, avant d'être pris, preuve) que la page « En cours » mesure, cible 10 minutes.
+- **Prudence** : une dépendance « Attend : dépôt#n » est lue sur son dépôt ; illisible (dépôt privé, panne), la tâche n'est PAS lancée, jamais comptée libre. Un dépôt en `incident` ne rend aucune suivante. Une lecture qui échoue rend `illisible` et le réveil part sans suivante : le Coordinateur lit le Gantt comme avant.
+- **Ce que ce calcul sait de moins que le relevé du PC** : la hiérarchie (les préférences « même mission » et « même chantier », rangs 4 à 6, ne s'appliquent pas : l'ordre est preuve due, `prio:1`, sécurité, puis prio puis numéro) ; les PR fusionnées sans tâche acceptée ; le frein de quota, que l'appelant passe s'il le connaît (sans lui, palier normal : sa source n'a pas changé).
+
+## 5 sexies. Les travaux de Jules et les écritures de tâche partent sur événement (demande de Marc, 28/10/2026, MoKarade/.github#703 et #715)
+
+Avant, le tour du PC (`filet-pc.mjs`, toutes les 10 min) écrivait « Fichiers touchés » et « Acceptation automatique », suivait les PR de Jules et retirait les étiquettes des tâches fermées : un PC éteint, rien de tout cela. Maintenant le **Réacteur** appelle les mêmes fonctions, avec les mêmes règles et les mêmes plafonds, sur l'événement qui les rend utiles (`scripts/pilotage-evenement.mjs`, table `PAR_EVENEMENT`), AVANT de décider s'il réveille quelqu'un (une tâche acceptée ou réservée ici change ce que la décision voit) :
+
+| Événement du Réacteur | Ce qui part |
+|---|---|
+| Tâche qui s'ouvre, change ou change d'étiquette (`tache_ouverte`) | écrire « Acceptation automatique » (8 au plus) |
+| Tâche fermée (`tache_fermee`) | retirer `en-cours`, `jules`, `preuve-attendue` d'une tâche fermée |
+| PR ouverte, rouverte, sortie du brouillon, corps modifié (`pr_ouverte`) | suivi des PR de Jules (corps nettoyé de `Fixes #n`, `hold` si un fichier sort de « Fichiers permis ») et étiquette `par-jules` de CETTE PR |
+| PR fusionnée (`pr_fusionnee`), déploiement de production réussi (`deploiement`) | suivi des PR de Jules (une PR de tests seuls fusionnée et verte est acceptée seule ; une PR qui change du code servi attend son déploiement), étiquette `par-jules` |
+| Filet (`filet`, lancement manuel ou battement externe) | tout, en rattrapage d'un événement manqué |
+
+Ce qui est différent du tour du PC : un job GitHub ne garde rien d'un passage à l'autre, donc la mémoire des signalements ne vit que le temps du passage ; le signalement d'un problème vu par le suivi (PR hors « Fichiers permis », PR fusionnée non acceptée seule) part dans son propre message `RÉACTEUR : jules : …`, que le Réacteur ne reposte pas s'il est déjà sur la boîte depuis moins de 6 h. Les appels GitHub se font avec le jeton du job (`issues` et `pull-requests` en écriture, déjà donnés par `reacteur.yml`), aucun nouveau secret, et SANS la CLI `gh` : un `node` enfant fait la requête (`ghSynchrone`), car le robot du PC, qui sert les dépôts privés, n'a pas `gh` dans son PATH (DriveAI#798, 29/10/2026). Une écriture faite avec ce jeton ne relance aucun workflow : pas de boucle. **Une étape qui échoue** est un avertissement du journal (`::warning::Réacteur : pilotage, étape en échec : …`), les autres étapes passent, et le run se termine en échec APRÈS le réveil : `signaler-echec.yml` ouvre alors l'issue `boucle:erreur` du dépôt (`docs/boucle-erreur.md`).
+
+**Ce qui reste sur le PC** : la file Mergify (`tourFile`). Remettre en file une PR `dequeued` demande un `update-branch` fait avec un jeton qui relance la CI ; GitHub ne lance aucun workflow sur une écriture du jeton du job, la PR resterait donc sans contrôle et Mergify l'attendrait pour rien. Elle quittera le PC avec une règle `update` de Mergify (`.mergify.yml`, geste de Marc) ou un jeton dédié.
+
+## 5 bis. Frein de quota (décision de Marc, 16/10/2026, MoKarade/.github#184)
+
+Le même script lit le pourcentage hebdomadaire du quota Claude (`quota.json`, relevé chaque heure par la tâche du PC, .github#45, latence d'une heure au plus) et écrit le palier dans `prochaines.json` : `frein` vaut `normal`, `1` ou `2`, et `frein_detail` dit le pourcentage, la date de la mesure et la raison. Aucune IA dans ce calcul.
+
+| Palier | Seuil | Ce qui part |
+|---|---|---|
+| `normal` | moins de 80 % | tout |
+| `1` | 80 % et plus | `prio:1`, `sécurité`, `incident`, preuve due ; les fils et PR en cours se terminent |
+| `2` | 90 % et plus | `sécurité`, `incident`, preuve due ; plus aucune nouvelle tâche |
+
+- Une tâche retenue n'est pas proposée : elle sort de la file et porte le code `frein-quota` dans `exclues`. Un dépôt dont toute la file est retenue passe à l'état `frein`. Un incident ouvert garde l'état `incident` à tout palier, et la preuve due (fin d'un travail déjà fait) n'est jamais retenue. **Les alertes du PC** (titre « … du PC » ou « … sur le PC », par ex. « Entretien du PC : rouge le 21-10 », « Gemini en panne sur le PC ») portent l'étiquette `incident` mais attendent un geste de Marc sur sa machine : elles ne gèlent pas la file du dépôt, `prochaines.json` les liste dans `incidents_pc`, la pastille les compte encore (« incident ouvert »). Une panne de production garde l'état `incident`.
+- **Hystérésis de 2 points** : on monte tout de suite, on ne redescend d'un palier que 2 points sous son seuil (sous 78 % pour quitter le palier 1, sous 88 % pour quitter le palier 2).
+- **Relevé périmé** (plus de 3 heures) : le dernier palier connu est gardé, `frein_detail.perime` vaut `true` et une alerte le dit ; jamais un faux `normal`. Sans relevé ni palier précédent, le palier est `normal` avec `frein_detail.inconnu` à `true` : ce n'est pas une mesure.
+- **Remise à zéro hebdomadaire** (panne de quota du 19-21/10/2026, MoKarade/.github#319) : une mesure dont le `reset_utc` est passé depuis plus de 15 minutes (`apresResetMin`) alors qu'elle date d'AVANT ce `reset_utc` est le quota de la semaine précédente. Le palier est `normal`, `frein_detail.apres_reset` vaut `true` et la raison le dit ; la première mesure fraîche (écrite par la tâche « Quota-Claude » du PC) reprend la main. Sans cela, une mesure morte (tâche arrêtée avec le quota) gardait le palier 2 pour toujours, et la remise à zéro ne relançait rien. Garde-fou de dernier recours : palier 2 sans mesure depuis plus de 36 h (`perimeMaxHeures`) et sans remise à zéro passée = palier 1 (`frein_detail.plafonne`), jamais plus bas. La ligne du tour (`etat.json`) dit « quota Claude : mesure vieille de N h » au-delà de 3 h, pour qu'une tâche de mesure arrêtée se voie.
+- **Mesure du quota morte** (MoKarade/.github#337) : si `frein_detail.perime` est vrai et que la mesure a plus de 6 h (ou n'existe pas), le filet du PC (`tourQuota` de `filet-pc.mjs`, sans IA) lance `boite-reacteur.yml` avec « RÉACTEUR : quota Claude non mesuré depuis N h (tâche Quota-Claude du PC arrêtée ?) », au plus une fois par 24 h ; une mesure fraîche efface le signalement. Sa ligne (« filet quota : … ») se lit dans `etat.json`, son état est `<etat>-quota.json`. La panne de la mesure ne coince plus le frein (remise à zéro ci-dessus), mais elle se voit désormais sans que personne ouvre `prochaines.json`.
+- **Réglage** : seuils, hystérésis et durée de péremption sont dans `FREIN`, en tête de `scripts/prochaine-tache.mjs`, et nulle part ailleurs. Le script lit `quota.json` et le `prochaines.json` précédent dans le dossier du relevé, sans option.
+- **Limite assumée** : le palier a jusqu'à une heure de retard, et les fils déjà lancés continuent. Le frein retarde le mur, il ne le supprime pas.
+- Lecteurs : le coordinateur et la routine continue lisent `frein` avant de lancer un fil ; la page de suivi affiche le palier (alerte « Frein de quota » du script, et état `frein` à ajouter à sa table des raisons).
+
+**Frein par rythme (décision de Marc, 17/10/2026, tâche #198).** Un seuil fixe ne distingue pas une nuit calme (+1 point en 9 h) d'une journée à +2 points/h. Le script projette le quota jusqu'à la remise à zéro : `projection = quota + rythme des 3 dernières heures × heures restantes` (rythme lu dans l'`historique` de la jauge Claude de `quota.json`, remise à zéro = `reset_utc`).
+
+- **Monter** : projection de 95 % ou plus (plafond 100 moins une marge de 5) = palier 1. Sous 95 %, les tâches partent. Le palier 2 reste celui du secours : 90 % de quota et plus, sans condition de projection (il se quitte sous 88 %). **Hybride** (choix de Marc, 17/10/2026 17 h 32 UTC, relayé par le coordinateur) : le rythme ne joue qu'à partir de 80 % de quota ; en dessous, mode normal des seuils (aucune projection, palier 1 quitté sous 78 %). À 80 % et plus, le seuil de 80 % n'est plus un plancher quand la projection est calculable.
+- **Lever** (hystérésis) : le palier 1 n'est levé que lorsque la projection reste sous 90 % pendant 30 minutes de suite (3 calculs de 10 min ; `frein_detail.bas_depuis` garde le début, d'un calcul à l'autre). Entre 90 et 95 %, le palier en vigueur est gardé. Le seuil de levée est 90 et non 80 : à 80 % de quota la projection ne peut pas passer sous 80, un palier n'y serait jamais levé.
+- **Sans projection** (moins d'une heure d'historique dans la fenêtre, remise à zéro inconnue ou passée) ou mesure périmée (plus de 3 h) : comportement des seuils 80 / 90 décrit plus haut, dernier palier connu gardé si périmé.
+- **Lecture** : `frein_detail` dit `mode` (`rythme` ou `seuils`), `rythme_pt_h`, `heures_restantes`, `projection_pct`, `bas_depuis` et la raison en clair. Réglage : `FREIN_RYTHME` en tête de `scripts/prochaine-tache.mjs`.
+- **Limite connue** : le quota est un entier, le rythme sur 3 h est donc grossier (un point en 3 h = 0,3 point/h, soit +30 points projetés sur 90 h), et la projection compte les nuits au rythme du moment. Rejeu sur les mesures du 16-17/10 : la projection dépassait 95 % à chaque mesure (186 à 335 %, y compris à 63 % de quota), car le rythme observé (1 à 2 points/h) épuiserait réellement le quota avant la remise à zéro ; c'est la raison de l'hybride (rythme seulement dès 80 %).
+
+## 5 ter. Aucune tâche oubliée : états complets, liens posés, preuve chez Claude (décisions de Marc, 19/10/2026)
+
+**Une tâche ouverte n'est jamais « oubliée » : elle est dans exactement un de ces états**, calculé à chaque relevé par `scripts/prochaine-tache.mjs` (`etats` dans `prochaines.json`) :
+
+| État | Ce que ça veut dire | Qui fait avancer |
+|---|---|---|
+| **À faire** | dans la file, prenable | la file (§5) |
+| **En cours** | `en-cours`, `jules` ou PR ouverte | le fil ; silencieux plus de 24 h : relancé |
+| **En attente** | attend UNE chose nommée : une tâche (`**Attend** : #n`), un geste de Marc (`qui:marc`), une preuve (`preuve-attendue`), le frein de quota | le propriétaire de cette chose (le script remonte la chaîne jusqu'à elle) |
+| **Bloquée** | `bloqué` ET une raison nommée : `**Attend**` vers une tâche ouverte | idem |
+
+Un geste de Marc (`qui:marc`) qui a lui-même une dépendance ouverte (`**Attend** : #n`) n'est pas encore faisable : la tâche est « en attente » de celle-là, pas de Marc. Elle ne compte pas dans `file_marc` et ne devient pas « geste en retard » ; le geste revient à Marc quand la dépendance se ferme (ex. choisir une direction d'interface une fois les maquettes dessinées).
+
+**Écrire une dépendance** (`**Attend**`) : `#n` (même dépôt), `Dépôt#n` (« Hubperso#311 », « MemoryAI#63 ») ou `MoKarade/dépôt#n`, séparés par des virgules, la raison après « — ». Le relevé (`outils/gantt-pc/deps.py`, `lire_attend`) lit les trois formes ; avant le 22/10/2026 la forme courte « Hubperso#311 » était lue comme `#311` du dépôt de la tâche et donnait une fausse « dépendance inconnue » (batchchef-#275, memoryai#63, hub-contract#78).
+| **Invalide** | tout le reste | personne : c'est un défaut, traité comme tel |
+
+Sont invalides, avec leur cause : `bloquee-sans-reprise` (`bloqué` sans rien de nommé), `dependance-illisible` (`**Attend**` vers un numéro inconnu), `fini-quand-absent`, `dependance-circulaire`, `attend-absent` (aucune ligne `**Attend**` et aucun lien natif : écrire `**Attend** : aucune` après avoir vérifié, ou `**Attend** : #n — raison`), `sans-mission` (aucune mission au-dessus : la tâche n'est pas dans la hiérarchie), `preuve-chez-marc` (voir plus bas). Une tâche invalide sort dans `oubliees` et **réveille le Coordinateur** (une fois par 24 h et par racine, `RÉACTEUR : oubli : …`, quatre lignes au plus) jusqu'à ce que l'issue soit corrigée : nommer ce qu'elle attend (`**Attend** : #n`), la rattacher à sa mission, ou la fermer avec la raison. Un geste de Marc en retard (plus de 48 h s'il retient d'autres tâches, 168 h sinon) et un fil silencieux sont signalés de la même façon. Seuils : `ATTENTE` en tête du script.
+
+**Chaque tâche dit ce qu'elle attend** (décision de Marc, 19/10/2026 : « full auto, mécaniquement »). Toute tâche ouverte porte une ligne `**Attend**` : `aucune` ou `#n — raison`. Sans elle (et sans dépendance native GitHub), la tâche est `invalide` (`attend-absent`), sort de la file et réveille le Coordinateur comme tout oubli ; son fil l'écrit en vérifiant, sans rien deviner. Les tâches créées depuis le 19/10/2026 16:00Z y sont tenues tout de suite ; les plus anciennes ont jusqu'au 20/10/2026 16:00Z (12 h au Québec), et `attend_absent` de `prochaines.json` les liste d'ici là (`applique` : faux pendant la grâce). Constantes : `ATTEND_OBLIGATOIRE` en tête de `prochaine-tache.mjs`. `fetch.py` écrit `attend_ligne` (vrai si la ligne existe) ; un relevé sans ce champ ne déclenche aucune règle. **Les écritures `**Attend :**` et `**Attend:**` (les deux-points dans le gras) sont lues comme `**Attend** :`** (`deps.py`, `reste_attend`) : constat du 23/10/2026, .github#503 (« **Attend :** aucune. ») restait écartée de la file comme `attend-absent` alors qu'elle était prenable, un dépôt libre sans rien à lancer de nuit pour deux signes mal placés.
+
+**Fichiers touchés : facultatif** (tâche #360 du 21/10/2026, supprimée par le nettoyage du 29/10/2026, « go reco » de Marc). La ligne n'est plus exigée (`fichiers-absents`, `FICHIERS_OBLIGATOIRES` et `fichiers_absents` de `prochaines.json` n'existent plus) et plus rien ne l'estime. `fetch.py` écrit toujours `ft_ligne`, sans effet.
+
+**Les liens sont posés, pas seulement écrits.** Une tâche qui en attend une autre l'écrit en `**Attend**` ; le script de la file la lit, mais GitHub n'affiche « Bloquée par » que pour une dépendance native. `liens_manquants` (dans `prochaines.json`) liste celles qui manquent ; `scripts/lier-taches.mjs` les crée (idempotent, jamais destructif), appelé à chaque tour du PC par `filet-pc.mjs` (20 au plus par tour ; sa ligne `liens : …` se lit dans `etat.json`, un échec n'arrête rien). Quand `fetch.py` voit une dépendance native, il la sépare dans `deps_natives`.
+
+**Une preuve n'attend jamais Marc.** `preuve-attendue` veut dire : le travail est livré, **Claude** doit prouver, automatiquement, quitte à ouvrir un navigateur (Playwright, Chromium est dans les conteneurs) et à aller voir la production. Elle est exclue comme `preuve-attendue` (jamais « attend ton geste »), hors de la file de Marc, et son propriétaire est la preuve elle-même. `qui:marc` + `preuve-attendue` sur la même tâche est une contradiction (`preuve-chez-marc`) : le fil retire l'une des deux. Si la preuve exige VRAIMENT une action de Marc dans son compte (un secret à poser, un bouton à presser dans une application qui lui est réservée), le fil le lui dit UNE fois, avec la raison, dans une **tâche de geste séparée** (`qui:marc`, la raison dans son « Avant »), et la tâche à prouver l'attend par `**Attend** : #geste` : elle est alors « en attente » d'un geste nommé, et le geste de Marc n'est jamais « prouver ».
+
+**Contrôle automatique d'une preuve** (§10 quater, tâche #248, demande de Marc du 19/10/2026 : « c'est automatiquement que ça doit se faire »). Une tâche en `preuve-attendue` dit ce qui se vérifie par une ligne **fermée** dans son corps (ou dans un commentaire de son propriétaire), à côté de la ligne `**Preuve attendue**` :
+
+- `**Contrôle** : http https://<hôte>.hubperso.com/chemin statut 200 [contient "texte"]` : un GET anonyme, sans suivre les redirections (un `302` vers la connexion du hub se vérifie tel quel) ;
+- `**Contrôle** : navigateur https://<hôte>.hubperso.com/chemin texte "texte visible"` : Chromium (Playwright) ouvre la page et attend le texte 15 s au plus ;
+- `**Contrôle** : actions MoKarade/<dépôt> <workflow>.yml réussi depuis 2026-10-22T23:30:00Z` : un run terminé en succès créé depuis cette date (dépôts publics, événements, crons).
+
+Rien d'autre n'est lu : aucun JavaScript libre, aucune adresse hors `hubperso.com`, aucune authentification. Une ligne illisible est dite, jamais ignorée. `node scripts/controle-preuve.mjs <propriétaire/dépôt>#<n>` (ou le workflow `controle-preuve.yml`, lancé à la demande : `gh workflow run controle-preuve.yml -f tache=MoKarade/CarAI#84`, avec `-f navigateur=true` si une ligne `navigateur` existe) lit la tâche (ouverte, `preuve-attendue`, au moins un contrôle), exécute chaque ligne et écrit ce qui a été VU, dans les deux sens (`OK : GET … → HTTP 200`, `ÉCHEC : texte « … » absent`). **Il ne ferme et n'accepte jamais seul** : le fil de la tâche pose « **Acceptée** » avec la PR fusionnée, le déploiement et le résultat du lancement dans « preuve : » (le garde-fou de preuve exige la PR). Un échec refuse la preuve : la tâche reste ouverte, avec la cause observée. Ce qui exige VRAIMENT le compte de Marc (juger, valider des exemples, poser un secret) n'est pas un contrôle : c'est une tâche de geste séparée (§5 ter).
+
+**Acceptation automatique d'une preuve différée** (tâche #700, mission #698, demande de Marc du 28/10/2026 : « fais le A » ; sur les 7 jours du 21 au 28/10, 48 des 65 tâches restées plus d'un jour sans preuve étaient en `preuve-attendue`). `scripts/preuve-attendue-auto.mjs` lit les preuves différées DUES et pose lui-même « **Acceptée** », sans minuteur de plus : le Réacteur l'appelle sur les événements qui passent déjà par lui (PR fusionnée, tâche fermée, filet quotidien ; 10 tâches lues par événement, les plus anciennes d'abord, 30 par filet, 5 acceptations au plus par passage). Une tâche ouverte en `preuve-attendue` s'accepte seule SEULEMENT si TOUT est vrai :
+1. elle porte `niveau:tâche` et aucune étiquette `qui:marc`, `bloqué`, `preuve-manquante`, `essai` ;
+2. sa DERNIÈRE ligne `**Preuve attendue** : AAAA-MM-JJ HH:MM (heure du Québec) — …` (corps, puis commentaires de son propriétaire dans l'ordre : une tâche reprogrammée l'écrit en commentaire) donne une heure passée ; l'heure est convertie en UTC avec le fuseau `America/Toronto` (heure d'été et d'hiver) ; sans « heure du Québec » ou sans heure (« événement, pas une heure ») rien ne se lit ;
+3. elle porte au moins une ligne `**Contrôle**` lisible (corps ou commentaires de son propriétaire, jamais ceux d'un tiers) et TOUTES sont de type `http` ou `actions` : un contrôle `navigateur`, ou une ligne illisible, la laisse à un fil ;
+4. une PR fusionnée du dépôt cite la tâche (lue par la chronologie de l'issue) et aucune PR ouverte ne la cite ;
+5. chaque contrôle réussit au moment du passage (`executer` de `controle-preuve.mjs` : hubperso.com, https, aucune adresse libre) ;
+6. si la PR change du code servi, un déploiement de production réussi existe sur le commit fusionné ;
+7. le commentaire passe le garde-fou de preuve (§10 bis) AVANT d'être posé.
+Le commentaire est écrit par `github-actions[bot]` avec le marqueur du §10 ter ; il copie ce que les contrôles ont lu (« contrôle automatique à la date prévue … lu le … »). Un contrôle en échec ne ferme rien et n'écrit rien : la tâche reste ouverte et un fil prouve comme avant. Un échec de l'API est un avertissement, jamais un job rouge. Pour retirer la règle : enlever l'appel dans `decider` (`reveil-reacteur.mjs`, `TYPES_PREUVE_DIFFEREE`).
+
+**Sortie** (`prochaines.json`) : `etats` (une entrée par tâche ouverte : état, ce qu'elle attend, propriétaire, depuis, cause si invalide), `oubliees` (les invalides, les gestes de Marc en retard, les fils silencieux), `attentes`, `file_marc` (les gestes de Marc par racine, le plus bloquant en tête), `liens_manquants`, `seuils_oubli`. Le format de `exclues` ne change pas. `node scripts/filet-pc.mjs prochaines.json --etat <fichier> --a-blanc` décide sans rien envoyer ni poser.
+
+**Un geste réclamé à Marc dit pourquoi lui seul** (tâche #706, constat du 28/10/2026 : 5 gestes sur 7 de sa liste n'étaient pas à lui). Une tâche `qui:marc` porte une ligne `Geste : …` (ce qu'il fait, étapes exactes) ET une ligne `Pourquoi lui seul : …` (compte à lui, argent, décision, écran à regarder), dans le corps ou dans un commentaire. À la pose de l'étiquette, `geste-controle.yml` (`scripts/geste-controle.mjs`, événement `issues: labeled`, aucun minuteur) lit les deux lignes ; s'il en manque une, UN commentaire le dit et l'étiquette `geste-incomplet` est posée, sans retirer `qui:marc`.
+
+## 5 quater. Jules : le fil pose lui-même l'étiquette (nettoyage du 29/10/2026)
+
+Plus rien ne repère ni ne confie seul une tâche à Jules (« go reco » de Marc, 29/10/2026 17:50Z : « supprime direct ce qui est plus utile », tâche du nettoyage « Jules repéré seul »). Supprimés : le filet de confiage (`jules-auto.mjs`), la pose automatique de l'étiquette de réserve, la rédaction automatique du gabarit (`jules-gabarit.mjs`, `docs/jules-gabarit-issue.md`), le type d'événement `tache_reservee` et la liste `reservees_jules` de la file. **Quand une tâche est simple, le fil qui la range ou la prend pose lui-même l'étiquette `jules`** et confie la tâche à Jules ; une tâche `jules` ne tient aucune place (§6 capacité) et reste hors de `occupe_par`. Ce qui reste, et qui sert la PR de Jules déjà ouverte : le suivi des PR (ci-dessous, `scripts/jules-suivi.mjs`), le ménage des tâches fermées et l'étiquette `par-jules`.
+
+**Une PR verte sortie de la file Mergify revient seule** (tâche #285, 19/10/2026). Mergify étiquette `dequeued` une PR qui quitte la file (délai de contrôles dépassé, entre autres : `checks_timeout: 30 min` est fixé depuis #283 dans `.mergify.yml`). Le même filet (`tourFile`, `<etat>-file.json`, ligne `file : …` dans `etat.json`) repère toute PR ouverte, hors brouillon et sans `hold`, étiquetée `dequeued` depuis plus de 10 min, et met sa branche à jour (`update-branch`) : c'est la remise en file que décrit la doc de Mergify, sans commande `@mergifyio`, que seul Marc peut taper. Un essai par PR et par heure. Branche déjà à jour (GitHub répond 422 « rien de neuf sur la base ») ou conflit de fusion : le filet réveille le Coordinateur une fois par 2 h avec la PR et la raison (`RÉACTEUR : file Mergify : <PR> hors file (<raison>)`), au lieu de laisser la PR dehors sans que personne le sache (cas de #262 le 19/10, restée hors file avec un conflit).
+
+**Le suivi d'une tâche Jules est automatique** (tâche #289, 19/10/2026, demande de Marc « go full auto »). Le filet (`tourJulesSuivi`, `scripts/jules-suivi.mjs`, `<etat>-jules-suivi.json`, ligne `jules-suivi : …` dans `etat.json`) lit chaque tâche `niveau:tâche` étiquetée `jules` :
+- **PR ouverte** qui la cite : le corps perd les lignes `Fixes|Closes|Resolves #n` (Jules les remet : une PR qui ferme la tâche à la fusion contourne le garde-fou de preuve du §10 bis) et gagne `Tâche : #n` s'il manque. Si un fichier touché n'est pas dans « Fichiers permis », la PR reçoit `hold` et le Coordinateur est réveillé une fois par 24 h ; le filet ne retire jamais un `hold`.
+- **PR fusionnée** dont tous les fichiers sont dans « Fichiers permis », dont tous les contrôles de la tête sont verts (Mergify exclu), qui ne touche aucun outil MCP (`registerTool` ajouté, `lib/mcp/`, `app/api/mcp/` : hors du full auto, décision de Marc du 19/10/2026 « 4 oui ») : si elle ne change rien de servi (tests, docs, CI : même liste que `servi` de `scripts/preuve.mjs`), le filet pose `**Acceptée** — PR #p fusionnée (<sha>), sans déploiement : … preuve : …` ; si elle change du code servi, il attend en plus un déploiement « Production » réussi, créé après la fusion, sur le commit fusionné ou un commit qui le contient, et, pour un écran (css, tsx, jsx, `components/`), le commentaire `<!-- captures-avant-apres -->` de `captures.yml` sur la PR (son lien va dans l'Acceptée ; personne n'examine les images, accepté par Marc, tâche #300) : « **Acceptée** — PR #p fusionnée (<sha>), déploiement READY (<id>), preuve : … ». Puis il retire `jules`, `en-cours`, `preuve-manquante`, `preuve-attendue` et ferme la tâche. La preuve est posée AVANT la fermeture. Déploiement ou captures pas encore là : il attend sans bruit ; plus d'une heure après la fusion, le Coordinateur est réveillé.
+- **Tout autre cas** (fichier hors permis, contrôle rouge, outil MCP) : rien n'est fermé, le Coordinateur est réveillé une fois par 24 h. Un outil MCP ajouté (corps ou diff) garde sa preuve de production par un fil (session avec le connecteur).
+
+**Une tâche fermée ne garde aucune étiquette d'avancement** (demande de Marc, 19/10/2026 : « ou en attente », « inacceptable »). Le même rôle (`menageFermees`) lit, à chaque tour, les 30 dernières issues fermées de chaque dépôt et retire `en-cours`, `jules` et `preuve-attendue` (la ligne `jules-suivi` dit « N étiquette(s) retirée(s) sur tâches fermées »). Il ne touche ni à l'état, ni aux commentaires, ni à `qui:marc`.
+
+**Les PR de Jules portent l'étiquette `par-jules`** (tâche #426, demande de Marc du 21/10/2026 18:00Z relayée par le fil Jules). Jules ouvre ses PR sous l'identité de Marc : rien ne les distingue, et la page de suivi ne pouvait ni les compter ni les isoler. Mesure du 21/10/2026 sur 1 483 PR de 30 jours : 17 sont de Jules, aucune autre. À chaque tour, `marquerParJules` (`scripts/jules-suivi.mjs`) pose `par-jules` (violet 9b7be0, créée au premier besoin) sur toute PR ouverte ou fermée récemment dont le corps contient `jules.google.com/task/` SUIVI du numéro de tâche (le critère cité sans numéro, comme dans les PR #425 et #434 de Claude, ne compte pas : faux positif du 21/10/2026), et sur toute PR OUVERTE où le compte `google-labs-jules[bot]` a commenté (20 lectures de commentaires par dépôt et par tour au plus ; une PR ouverte depuis 15 minutes ou plus sans aucune trace de Jules est mémorisée « pas Jules » dans `etat` (clé `nonjules:<dépôt>#<n>`) et n'est plus relue : le rôle `jules-suivi` pesait 88 des 111 appels comptés du filet au tour du 28/10/2026 23:11Z ; le poids de ces seules lectures se lira sur la ligne « appels filet » des tours suivants). Une branche `claude/` n'exclut pas Jules, et la branche numérique de Jules ne prouve rien seule : seuls le pied de page et le commentaire du bot comptent. Sa ligne dans `etat.json` : `jules-suivi : … N PR marquée(s) par-jules`.
+
+**Machine des workflows communs** (tâche #443) : `securite.yml`, `conformite.yml`, `fumee.yml` et `captures.yml` choisissent leur machine selon la visibilité du dépôt appelant, avec la même expression que `garde-fou.yml` : public = `ubuntu-latest` (gratuit), privé = `[self-hosted, pc-marc]`. L'appelant n'a rien à fournir : un dépôt qui passe privé (FinanceAI, 21/10/2026) garde des contrôles qui démarrent. Le job `codeql` reste sauté en privé. Le robot du PC n'a pas Docker : le job OSV-Scanner télécharge partout le binaire 2.7.0 (somme SHA-256 vérifiée) et ne référence jamais l'action Docker, dont le runner tire l'image même quand son étape est sautée (tâche #451). Il n'a pas non plus sudo : `captures.yml` n'ajoute `--with-deps` à l'installation de Chromium qu'en dépôt public (tâche #474). Il n'a pas non plus le CLI `gh` : `captures.yml` en installe la 2.74.0 (somme SHA-256 vérifiée, dans `$RUNNER_TEMP`) quand `command -v gh` ne le trouve pas (tâche #550). `scripts/runners.test.mjs` échoue si un `runs-on` de ces quatre fichiers redevient `ubuntu-latest` seul.
+
+**Captures d'une app dont l'écran demande des gestes** (tâche #307) : `captures.yml` accepte, en plus des pages, `etapes` (une par ligne, format fermé, aucun JavaScript libre : `aller /chemin`, `cliquer-bouton Nom exact`, `attendre-texte Texte` avec 15 s au plus, `pointeur x y`) et `stockage-local` (`cle=valeur` posé dans le localStorage avant le premier chargement), jouées de chaque côté avant de photographier. Les pages peuvent porter un fragment (`/#DEBT`). Une étape qui échoue marque les pages « étape impossible » sans détail interne. C'est ce qui permet à FinanceAI (mode test activé par l'écran) d'appeler le workflow commun.
+
+**La version du code qui tourne se lit sur la ligne du tour** (tâche #314) : la ligne que `filet-pc.mjs` imprime se termine par `code : filet-pc <sha7>, jules-suivi <sha7>, fichiers-touches <sha7>, acceptation-marquage <sha7>, preuves-retard <sha7>`, le sha git de chaque fichier tel que le PC le fait tourner (le PC reçoit les scripts un par un, sans dépôt). Une preuve cite ces sha et les compare à `git rev-parse origin/main:scripts/<nom>.mjs` : « sans ÉCHEC » seul ne prouve pas qu'une fonction fusionnée tourne.
+
+## 6. Répartition du travail
+
+**Qui lance** : un **événement** d'abord, un relevé à l'heure seulement en filet quotidien (décision de Marc, 15/10/2026 : « plus de vérifications toutes les X heures »). Une demande directe de Marc n'attend rien : le Coordinateur ouvre le fil tout de suite.
+
+**Ce que le Réacteur ne fait plus** (nettoyage du 29/10/2026, « go reco » de Marc : « supprime direct ce qui est plus utile »). Le Réacteur ne réveille plus ni le Coordinateur ni les fils d'app : plus de commentaire sur app-template#58, plus de boîte par dépôt (`BOITES`, `BOITES_DIRECTES`, `boitesDuReveil`, la seconde boîte de la Page chantier app-template#210 et son tri par tâche, tâches #750 et #769), plus de boîte locale `claude/boite-reacteur` (`reveilLocal`, tâche #772), plus d'issue « Réacteur sans jeton » (`signalerSansJeton`, `leverSansJeton`, tâche #826), plus de « preuve à poser » (`preuveAPoser`, lecture de classe B par `parLaClasseB`), plus de signal du filet (PR rouge depuis 30 min, `incident`, branche par défaut rouge, rappel du jeudi : `lignesDuFiletPour`, `rougeDepuis`, `heureQuebec`), plus de réveil du Coordinateur pour une CI rouge, une note LIA (`note_lia` est accepté et ne fait rien) ou un alias Vercel figé (l'issue `incident` est toujours ouverte), et plus de réveil entre dépôts (`reveillerDependants`, `scripts/dependants-autres-depots.mjs`, tâche #870 : `docs/reacteur-dependances.md` est supprimé). Ce qui reste : l'acceptation automatique (§10 ter, §10 quater), le lancement de la routine « Prendre une tâche » pour la suivante (action `lancer`, ci-dessous), les balayages de `.github` (tâche liée, relecture IA), la relance d'un échec de charge du robot et les signaux du pilotage (place immobile, suivi de Jules : `pilotage-evenement.mjs`), seul message qui réveille encore le Coordinateur (app-template#58, sans doublon dans les 6 h). `boite-reacteur.yml` (dans `app-template`) sert donc encore à ce réveil et au tour du PC ; la boîte « relevé PC » (app-template#211) et la demande « Relevé PC demandé » n'existent plus (§10 quinquies) ; la couper est un geste dans `app-template`, hors de ce dépôt.
+
+**Qui peut écrire une preuve** (tâche #836, avis Gemini du 29/10/2026 vérifié). Sur un dépôt public, tout compte GitHub peut commenter une issue ; `user.type === 'User'` ne prouve donc rien. Le garde-fou de preuve (`trouverPreuve`) ne lit un `**Acceptée**` que d'un commentaire dont `author_association` est `OWNER`, `MEMBER` ou `COLLABORATOR` (`scripts/auteur-de-confiance.mjs`) : les fils écrivent avec le compte de Marc, donc `OWNER`. Un commentaire de tiers est ignoré. Le champ vient toujours de l'API ; absent, il s'agit de données synthétiques de test.
+
+**Prise d'une tâche : ce qui démarre seul et ce qui ne le fait pas** (tâche #857, constat du 29/10/2026 : app-template#212 ne se prenait pas seule). Une seule voie démarre seule, évaluée dans le même passage du Réacteur (`tache_ouverte`) : **une session neuve**. Si la tâche est la suivante du calcul de file et qu'une place est libre, le Réacteur décide `lancer` et la routine ci-dessous part pour elle ; aucun commentaire de boîte n'est plus posé (nettoyage du 29/10/2026). **La routine « Prendre une tâche »** (tâche #860, choix « A » de Marc le 29/10/2026 13:50Z, `scripts/routine-prendre.mjs`) : pour TOUS les dépôts (depuis la tâche #871, demande de Marc du 29/10/2026 : « à chaque tâche une session neuve » ; d'abord app-template et hub-contract seulement, parce que les autres avaient un fil à l'écoute de leur boîte, fils qui n'existent plus ou ne repartent pas seuls), quand le Réacteur désigne une `suivante`, que la file a une place (`libre` ou `partiel`) et que les secrets `ROUTINE_PRENDRE_URL` et `ROUTINE_PRENDRE_TOKEN` existent dans le dépôt, il lance la routine par son déclencheur d'API (`POST /v1/claude_code/routines/<id>/fire`, en-tête bêta `experimental-cc-routine-2026-04-01`) avec pour seul texte `dépôt#numéro`. La routine ouvre une session neuve qui livre la tâche (`livrer-une-tache`) et pose `en-cours` en la prenant. Garde-fous : l'issue est relue en direct (ouverte, `niveau:tâche`, sans `en-cours`, `jules`, `qui:marc`, `bloqué`, `preuve-attendue`) ; un commentaire marqueur `<!-- routine-lancee -->` de `github-actions[bot]` et de moins de 6 h empêche un second lancement (il est posé AVANT l'appel et retiré si l'appel échoue ; un marqueur écrit par un autre compte est ignoré) ; le jeton ne part que vers une adresse `https://api.anthropic.com/v1/claude_code/routines/trig_…/fire` ; la ligne « routine : #n lancée » est ajoutée au message de la décision (journal du job). **Sans les deux secrets, rien ne se lance et rien n'échoue** ; un refus (401, 429 : plafond de 30 lancements par heure et par routine, 5xx) est un avertissement du journal ; la tâche reste prenable à l'événement suivant. L'en-tête bêta peut changer [À vérifier à chaque mise à jour de la documentation des routines]. **Mise en service (geste de Marc, hors projet)** : créer sur claude.ai/code/routines une routine « Prendre une tâche » sans planification, avec un déclencheur d'API seul, dont l'instruction dit d'agir sur le bloc `routine-fire-payload` (`dépôt#numéro` d'une tâche prête), de suivre la compétence `livrer-une-tache` en relisant l'état en direct avant de commencer ; générer le jeton ; poser `ROUTINE_PRENDRE_URL` (l'adresse /fire) et `ROUTINE_PRENDRE_TOKEN` dans les secrets de chaque dépôt qui doit lancer la routine (le workflow commun les reçoit par `secrets: inherit` ; un dépôt qui ne les a pas ne lance rien). Une tâche dont le gabarit est refusé n'écrit rien et ne se réessaie qu'à l'événement suivant sur son issue. La frise événement par événement : https://claude.ai/artifact/3YNBEgzR4dj7R5BCQGWyWA.
+
+1. **Événement.** Une PR fusionnée, ou une CI rouge, dans l'un des dix dépôts déclenche le workflow `reacteur.yml` du dépôt, qui appelle le workflow commun `reveil-reacteur.yml` de ce dépôt (script `scripts/reveil-reacteur.mjs`, testé, **sans IA** : aucun quota Claude ; le seul appel à une routine est celui de « Prendre une tâche », §6, pour app-template et hub-contract). Il filtre l'événement, relance une seule fois les jobs d'une CI morte par échec de charge du robot (sans étape en échec), puis tente l'acceptation automatique (§10 ter) et décide `lancer` : le message de la décision (« D libre » quand D n'a aucun travail, « D : une place libre » avec un seul, « suivante : #n » avec le NUMÉRO seulement) va au journal du job, et la routine « Prendre une tâche » part pour la suivante. « D libre » n'est écrit que si D n'a aucune issue ouverte `en-cours` ni PR ouverte hors robots et hors PR d'une tâche `jules` (la tâche de la PR qui vient de fusionner ne compte pas) ; sinon, une fusion ou une fermeture ne lance rien (tâche #164). Sur une PR fusionnée, une CI rouge ou une tâche fermée (jamais sur le filet), le même script lance `commentaire-tache-liee.yml` et `relecture-ia.yml` de `.github` (`workflow_dispatch`, chacun balaie toutes les PR ouvertes) avec le jeton `REVEIL_TOKEN` (jeton fin de Marc, Actions en lecture et écriture), parce que GitHub n'exécute presque pas leurs planifications (tâche #148) ; si `REVEIL_TOKEN` n'a pas le droit sur `.github`, un avertissement le dit. À l'ouverture d'une PR (ouverte, rouverte, sortie du brouillon, corps modifié), le `reacteur.yml` appelle le même workflow en mode `pr_ouverte` : il ne réveille PERSONNE, il lance seulement `commentaire-tache-liee.yml` (tâche #157). À la fin en échec du workflow `Garde-fou` d'une PR (le `reacteur.yml` écoute `workflow_run: [CI, Garde-fou]`), le type `garde_fou_rouge` lance seulement `relecture-ia.yml`, sans réveiller personne ni commenter la boîte : la relecture IA n'a plus de minuteur (tâches #626 et #633). Plus aucune boîte n'est commentée pour un événement de PR ou de tâche (voir « Ce que le Réacteur ne fait plus »).
+
+2. **Pourquoi le bot.** Un commentaire fait avec le compte de Marc ne réveille personne : GitHub ne notifie pas un abonné pour ses propres commentaires (prouvé le 15/10/2026).
+3. **Filet.** Une fois par jour vers 6 h (heure du Québec), deux choses vérifient ce qu'aucun événement n'a signalé.
+   - **Le Réacteur** (tâche #143, sans IA, sans quota) : le `reacteur.yml` de chaque dépôt avait deux déclencheurs `schedule` (10 h 11 et 11 h 11 UTC, jamais une heure ronde : GitHub n'a lancé aucun des passages `0 10` et `0 11` du 17/10/2026). **Depuis le 28/10/2026 (tâche #712, « rien avec timer »), `MoKarade/.github` n'en a plus** ; les dix autres dépôts les perdent un par un (une tâche sœur chacun) : le filet ne part plus que sur « Run workflow » ou un `repository_dispatch` `filet`, et chaque chose qui attendait une passe a son événement. **Événements ajoutés** : `issues` ouverte, modifiée, étiquetée ou désétiquetée (`tache_ouverte` : si la tâche devient LA suivante d'un dépôt qui a une place, la routine part pour elle (« D libre ; suivante : #n ; tâche D#n prête » au journal)) ; `deployment_status` réussi en Production (`deploiement` : la tâche de la PR fusionnée sur ce commit s'accepte seule si sa règle le permet, §10 ter, puis la routine part pour la suivante) ; `issue_comment` sur une tâche `preuve-attendue` (`commentaire` : une preuve différée due se lit, §10 quater) ; `repository_dispatch` `fin-de-cron` (`fin_de_cron`, même lecture) et `note-lia` (`note_lia` : accepté, ne fait plus rien). Une tâche acceptée par l'un de ces événements libère une place sans lancer d'autre workflow (la fermeture par le jeton du job n'en lance aucun) : le même passage lance donc la routine pour la suivante. `check_suite` et `merge_group` ne sont pas écoutés : la fin d'un contrôle passe déjà par `workflow_run` et Mergify tient sa file. **Aucune garde d'heure** : chaque passage agit, même lancé avec des heures de retard (le 17/10/2026 ils sont partis 3 h trop tard et la garde « 6 h au Québec » les avait tous fait sauter, tâche #194) ; le filet appelle `reveil-reacteur.yml` en mode `filet`, qui relit le dépôt avec le jeton du job (le quota du compte de Marc n'est pas touché) pour une seule chose : lire les preuves différées dues (§10 quater). Il ne signale plus rien au Coordinateur (PR rouge, incident, branche par défaut rouge et rappel du jeudi sont retirés).
+   - **Le filet du PC** (tâche #196, `scripts/filet-pc.mjs`, appelé par `tour.py` toutes les 10 min, sans IA ; depuis le 29/10/2026 il ne suit plus Jules, ne réserve plus et n'écrit plus dans les tâches : tâche #715, §5 sexies) : un dépôt `libre` ou `partiel` (une place libre et une tâche compatible, §6 capacité) dans `prochaines.json`, avec une suivante, resté ainsi plus de 30 min d'observations continues sans lancement, réveille le Coordinateur. Il passe par `boite-reacteur.yml` d'`app-template` avec le jeton `gh` du PC, jamais par un commentaire du compte de Marc (§6.2 : il ne réveillerait personne). Un réveil par couple (dépôt, tâche) et par 2 h, un seul message par tour (dépôts et minutes, jamais le nom de la tâche suivante). `prochaines.json` périmé (plus de 30 min) ou observation plus vieille que 40 min (PC éteint) : rien, le compte repart de zéro. Le frein de quota ne coupe pas le filet : `suivante` ne contient que les tâches qu'il laisse passer, un dépôt dont tout est retenu est `frein` et non `libre` (décision du Coordinateur, 17/10/2026). Un échec du réveil se lit dans `etat.json` (« filet PC : ÉCHEC … ») et le tour suivant réessaie. `node scripts/filet-pc.mjs prochaines.json --etat <fichier> --a-blanc` décide et imprime sans rien envoyer. **Passage quotidien du Réacteur par le PC** (tâche #143, incident du 18/10/2026) : les `schedule` de GitHub sont au mieux, pas garantis (aucun passage à 10 h 11 UTC le 18/10 dans les dix dépôts, après 3 h de retard le 17/10). Le même script lance donc lui-même `reacteur.yml` (`gh workflow run`, `workflow_dispatch`, donc mode `filet` avec `forcer`) dans chacun des dix dépôts, une fois par jour du Québec, dès 6 h 00 (fuseau `America/Toronto`, heure d'hiver comprise), avec trois essais au plus par dépôt et par jour ; son état est `<etat>-quotidien.json` et sa ligne (« filet quotidien : … ») se lit dans `etat.json` à côté de l'autre. Les `schedule` de GitHub restent en renfort. Un PC éteint à 6 h rattrape au premier tour qui suit son retour. **Preuves en retard** (tâche #513, demande de Marc du 22/10/2026 : « ça devrait être fait automatiquement ») : le relevé écrit `defauts-preuve.json` (fusionnée sans preuve depuis 2 h, preuve programmée dépassée depuis plus d'1 h, fermée sans preuve, `preuve-manquante`, hors `qui:marc`) ; `scripts/preuves-retard.mjs` redit chaque tâche au Coordinateur (`RÉACTEUR : preuve en retard : <réf> (<motif>)`, quatre au plus par message) puis toutes les 4 h tant que le défaut dure ; état `<etat>-preuves.json`, ligne « preuves-retard : … » dans `etat.json`. Le relevé reconnaît aussi comme preuve l'acceptation automatique marquée du §10 ter (tâche #510), comme le fait le garde-fou. **Drive absent** (tâche #529, incident du 22/10/2026 : lecteur G: démonté de 18:31Z à 19:20Z, relevé de la page figé 56 min sans rien de dit) : si le dépôt dans le dossier Drive échoue, `tour.py` le dit (`DRIVE ABSENT depuis N tour(s) : <raison>` dans le résultat local) et sort en code 1 au lieu de planter ; au deuxième tour de suite, il réveille le Coordinateur (`RÉACTEUR : Drive absent depuis N tours …`, même route `boite-reacteur.yml`), puis toutes les 4 h tant que ça dure ; au retour, `etat.json` porte « Drive : de retour après N tour(s) sans dépôt ». **Workflow en file sans robot** (tâche #532, 22/10/2026 : MemoryAI `apprentissage.yml` et CarAI `smartcar-poll.yml` demandaient `[self-hosted, pc-marc]` dans un dépôt devenu public, jamais pris, jamais dit) : le relevé lit les lancements `queued` de chaque dépôt (un appel par dépôt, `workflows_en_file.py`) et signale un défaut « workflow en file sans robot » pour un lancement `schedule` en file depuis plus d'1 h ou tout autre depuis plus de 6 h (un robot du PC simplement occupé n'est pas ce défaut). **Onzième dépôt** (tâche #535, 22/10/2026) : `lia-ui` (composant partagé de LIA) figure dans toutes les listes de dépôts (relevé `fetch.py`, `quota.py`, `deps.py`, `reponses.py`, filet du PC, commentaire de tâche liée, rapport hebdomadaire ; la relecture IA, `scripts/relecture-ia.mjs`, est un fichier protégé : lia-ui y est ajouté par une PR à part, qui attend Marc) ; là où ce document dit « les dix dépôts », lire onze. Le filet lance `reacteur.yml` dans lia-ui : le dépôt doit donc porter son propre `reacteur.yml` (posé par lia-ui#3) avant que ces listes soient fusionnées.
+   - **La routine continue** du Coordinateur fait son ménage et distribue les tâches.
+4. **Règle.** Toute nouvelle surveillance passe d'abord par un événement. Une horloge n'est permise que comme filet quotidien. Les six minuteurs Windows du PC (Carnet questions, Gemini-demandes, NotebookLM sync et connexion, Carnet dépôts directs, Quota-Claude) sont inventoriés dans `docs/pc-minuteurs.md` (tâche #777) : ce que chacun lit, écrit, coûte en appels GitHub, et la décision proposée ; GitHub ne pouvant pas lancer une tâche du PC, aucune ne devient événementielle sans écouteur sur le PC.
+
+**Capacité** : **plus de limite de places** par dépôt depuis le 29/10/2026 16:13Z (Marc : « On va arrêter le 3 max maintenant plus de limite », tâche #874), et plus de comptage de places du tout depuis le nettoyage du 29/10/2026 (« go reco » de Marc, mission #703 : `capacite.mjs`, `places-depot.mjs`, `PLACES_PAR_DEPOT`, `couloirs` et `places` de `prochaines.json`, la pastille « plus d'un fil » et l'estimation des fichiers `fichiers-touches.mjs` sont supprimés). Il reste UNE règle, celle de Marc : **pas deux PR sur les mêmes fichiers**, lue sur les fichiers RÉELS des PR ouvertes (`scripts/fichiers-communs.mjs`) et, quand elle existe, sur la ligne « Fichiers touchés » (ou « Fichiers permis » du gabarit Jules) de la tâche. Sans ligne lisible, ou si la liste de fichiers d'une PR est tronquée (100 fichiers ou plus), rien ne bloque (avant : « dans le doute, un seul »). Un travail est une tâche `en-cours` ouverte, ou la PR ouverte d'une tâche ; **une tâche `jules` n'en est pas un** (décision de Marc, 23/10/2026 22:45Z : « il prend quand même ») : elle sort de `occupe_par` et se lit dans `jules_en_cours`. Le filet de Jules garde son propre doute (`raisonIncompatible` : fichiers inconnus = il attend) et évite les fichiers déjà touchés par une PR ouverte et les dépôts gelés (§5 quater, point 2). **Dans la file** (`prochaine-tache.mjs`) : une tâche qui déclare ses fichiers est sautée si l'un d'eux est touché par une PR ouverte, ou déclaré par une tâche déjà retenue ; `sautees_conflit` dit pourquoi. Deux chemins se recouvrent s'ils sont identiques, ou si l'un est un dossier parent ou un motif qui recouvre l'autre ; `HANDOVER.md`, `CHANGELOG.md`, `docs/INDEX.md` et `docs/adr/README.md` sont ignorés (tous les travaux les touchent) ; `package.json`, le lockfile, `CLAUDE.md` et `AGENTS.md` comptent. Les fichiers réels d'une PR ouverte viennent de `fetch.py` (`pr.ff`, un renommage compte pour l'ancien chemin aussi). **Dans le Garde-fou** : voir §9 (contrôle « Fichiers »). Statuts : `libre` (au moins une tâche à lancer), `occupe` (des travaux en cours et rien de lançable), `incident`, `frein`, `rien`. Une tâche `preuve-attendue` n'occupe pas le dépôt (le fil a livré, la preuve est programmée), mais elle n'est **pas finie** : elle reste ouverte et ne compte comme acceptée nulle part. Un dépôt n'est libéré par une fermeture que si le garde-fou de preuve (§10 bis) l'a validée. **Exception (décision de Marc, 17/10/2026, tâche #197) : une PR qui n'attend plus qu'un geste de Marc n'occupe pas le dépôt, donc ne retient plus ses fichiers.** Quand le Garde-fou est rouge « attend Marc », il ouvre l'issue `qui:marc` « Garde-fou : la PR #n attend un geste de Marc » ; `fetch.py` la lit dans les issues déjà chargées, `prochaine-tache.mjs` sort alors la tâche de cette PR de `occupe_par` (elle apparaît dans `attend_marc`). Le Réacteur lit le même signe par `scripts/attend-marc.mjs`, et un test de `scripts/reveil-reacteur.test.mjs` échoue si l'expression de `fetch.py` s'en écarte. Limite : le relevé ne relit que les issues modifiées depuis le 15/10/2026.
+
+**Aiguillage** :
+
+| La tâche… | Va à |
+|---|---|
+| change un seul fichier de texte ou de code simple, sans chemin protégé, base, secret ni donnée perso | **Jules** (étiquette `jules`) |
+| demande le PC (robot de tests, Drive, NotebookLM, fichiers locaux) | **Fil PC** |
+| demande un compte, un secret, un paiement, une approbation de code owner ou une décision | **Marc** (`qui:marc` + le geste exact en commentaire). Sauf ce que Mergify fusionne seul : les chemins protégés dont le garde-fou est vert (oui de Marc, 15/10), et les mises à jour mineures des actions par Dependabot : rien à faire |
+| tout le reste | **Un fil** neuf, brief : « une tâche, une PR, ce document ». **Une tâche = un fil neuf**, jamais une tâche de plus dans un fil existant : chaque appel relit tout le contexte du fil, donc un fil qui s'allonge coûte de plus en plus. Un fil fini est fermé, pas réutilisé |
+
+**Ménage, avant chaque choix**, pour toute issue `en-cours` ou `jules` liée à une PR :
+
+| État de la PR | Action |
+|---|---|
+| ouverte | rien |
+| fusionnée, acceptation prouvée | fermer l'issue avec la preuve (le garde-fou vérifie la fermeture, §10 bis) |
+| fusionnée, preuve absente depuis plus de 2 h (hors preuve programmée dont l'heure n'est pas passée, §10) | commenter ce qui manque, et la tâche revient en file |
+| fermée sans fusion | retirer `en-cours` ou `jules`, commenter, et la tâche revient en file |
+| tâche fermée `completed` sans preuve valide (garde-fou en retard, PC éteint) | la rouvrir, poser `preuve-manquante` et dire ce qui manque (§10 bis) : elle n'est jamais laissée fermée |
+
+Une issue `jules` sans PR depuis 24 h perd l'étiquette et redevient prenable.
+
+**Fichiers partagés** : chaque fichier commun a un seul fil propriétaire. Les autres lui envoient leurs changements par le Coordinateur.
+
+## 7. États d'une tâche
+
+| État | Signal GitHub | Gantt |
+|---|---|---|
+| À faire | ouverte, aucune étiquette d'état | gris |
+| En cours | `en-cours` ou `jules` | bleu, depuis l'heure de l'étiquette |
+| En relecture | PR liée ouverte, hors brouillon | bleu rayé |
+| Attend Marc | `qui:marc` | orange, filtre « Toi » |
+| Bloquée | `bloqué` ou une tâche attendue ouverte | rouge clair |
+| Fusionnée, non prouvée | PR fusionnée, issue ouverte, moins de 2 h | vert clair |
+| Preuve programmée | PR fusionnée, issue ouverte, `preuve-attendue`, ligne `**Preuve attendue**` dont l'heure n'est pas passée. **Pas finie**. C'est Claude qui prouve (§5 ter), jamais `qui:marc` | orange rayé (jamais vert) |
+| Preuve manquante | tâche fermée sans preuve valide, rouverte par le garde-fou (`preuve-manquante`) | rouge |
+| Preuve en retard | PR fusionnée, issue ouverte depuis plus de 2 h (ou plus d'une heure après l'heure de la preuve programmée) | rouge clair |
+| **Acceptée** | issue fermée `completed` avec un commentaire de preuve | vert, fin à l'heure de fermeture |
+| Abandonnée | issue fermée `not_planned` avec la raison | gris barré |
+
+## 8. Coder et livrer
+
+La procédure pas à pas est la compétence `livrer-une-tache`. Elle applique ce document ; en cas d'écart, c'est ce document qui gagne. Les points fixes :
+
+- Branche `claude/<slug>` (Jules : sa branche), PR en **brouillon**, `--base` explicite.
+- Gate complet du dépôt en local avant chaque push. Jamais `--force` sur la branche par défaut, jamais `--no-verify`, jamais un test désactivé.
+- Corps de PR :
+  - les lignes d'attribution ;
+  - `Tâche : #n`, ou `Tâche : MoKarade/<dépôt>#n` ;
+  - **Avant :** / **Après :** / **Comment :** ;
+  - **Fini quand :** ;
+  - les captures, si un écran change.
+- **Pas de PR sans tâche** : le contrôle « Garde-fou » (déjà exigé dans les dix dépôts, `scripts/tache-liee.mjs`) est rouge si le corps de la PR ne cite aucune issue `niveau:tâche` OUVERTE. Dispensés : Dependabot, Mergify, GitHub Actions et la boîte du Réacteur ; Jules ne l'est pas. Un travail d'outillage a sa tâche dans `MoKarade/.github`. Corriger le corps, puis relancer le contrôle (Re-run jobs) ou pousser un commit. La raison est dans le journal du contrôle ; le workflow `commentaire-tache-liee.yml` (`scripts/commenter-tache-liee.mjs`, lancé par le Réacteur à chaque PR fusionnée, CI rouge ou tâche fermée (§6), à l'ouverture, la réouverture, la sortie du brouillon et la modification du corps d'une PR (type `pr_ouverte`), et par un filet quotidien (`41 9 * * *`, qui a remplacé la planification toutes les 10 minutes le 26/10/2026, tâche #625) ; jeton `RELECTURE_PAT`) la pose aussi en commentaire sur la PR, la met à jour et la lève une fois la PR corrigée, sans jamais changer le verdict. Si la tâche citée n'a pas de parent (mission ou chantier), le même commentaire le dit en avertissement, sans changer le verdict : une tâche sans parent est un défaut du backlog (pastille du Gantt) et le dire à celui qui la travaille l'empêche de durer (tâche #151). **Prise tracée par la machine** (tâche #157) : le même passage marque `en-cours` toute tâche ouverte citée par une PR ouverte (brouillon compris) quand elle ne porte ni `en-cours`, ni `jules`, ni `preuve-attendue`, et le dit en un commentaire sur la tâche. Il ne retire jamais une étiquette. Le fil qui la pose lui-même avant la PR reste la voie normale ; le balayage rattrape l'oubli. Le jeton `RELECTURE_PAT` appartient à Marc et son plafond d'appels est partagé avec les autres boucles : si le plafond est atteint, le passage s'arrête avec un avertissement (pas de rouge) et reprend au suivant.
+- **Jamais `Closes`, `Fixes` ni `Resolves`** (Jules et Mergify compris) : la fusion ne ferme pas l'issue, la preuve d'acceptation la ferme (§10). Si une PR en porte quand même un, GitHub ferme l'issue à la fusion et le garde-fou de preuve (§10 bis) la rouvre aussitôt avec `preuve-manquante`. La transition est finie : le Gantt relie les PR par `Tâche : #n`.
+- Taille : environ 400 lignes modifiées au plus, hors tests et fichiers générés. Au-delà, on découpe. **Tenu par la machine** (tâche #515, `scripts/taille-pr.mjs`, appelé par le Garde-fou) : une PR sortie du brouillon dont les lignes ajoutées + supprimées hors tests, lockfiles, `dist/`, captures et `drizzle/meta/` (instantané et journal de drizzle-kit, tâche #539 ; les `.sql` restent comptés) dépassent 400 rend le contrôle « Garde-fou » rouge, avec le nombre de lignes, la règle et les deux sorties : découper, ou demander la dérogation (étiquette `derogation-taille`, posée par Marc ou le Coordinateur avec la raison en commentaire, puis relancer le contrôle). Un brouillon n'est jamais refusé (il itère), ni un robot dispensé de la tâche liée. Le Gantt ne compte plus comme défaut « plus de 400 lignes » une PR qui porte l'étiquette (`dg` dans le relevé). La définition de « hors tests » est la même dans `taille-pr.mjs` et `outils/gantt-pc/fetch.py` : si l'une change, l'autre aussi.
+- **Fichiers communs entre PR** (nettoyage du 29/10/2026, remplace le contrôle « Places » de la tâche #516 ; `scripts/fichiers-communs.mjs`, appelé par le Garde-fou) : une PR sortie du brouillon est refusée quand elle touche un fichier déjà touché par une AUTRE PR ouverte sortie du brouillon et plus ancienne (numéro plus petit : la plus ancienne garde ses fichiers, la règle ne rougit jamais les deux). Les fichiers sont les fichiers réels (un renommage compte pour l'ancien chemin) ; les journaux (`HANDOVER.md`, `CHANGELOG.md`, `docs/INDEX.md`, `docs/adr/README.md`) sont ignorés ; une liste de plus de 300 fichiers, illisible, ou une PR de robot ne prouve rien. Un brouillon, un robot dispensé et la PR d'une tâche `jules` ne sont jamais refusés ; une liste illisible est un avertissement, pas un refus. Le message nomme les PR et le premier fichier commun, et les trois sorties : attendre la fusion de l'autre PR, retirer ces fichiers, ou repasser en brouillon. Commentaire de PR : marqueur `<!-- garde-fou-fichiers -->`, un seul, mis à jour (l'ancien commentaire « Places » est levé une fois).
+- Commit et titre préfixés selon le dépôt : `feat:`, `fix:`, `docs:`… ou `[ID]`.
+- Doc touchée mise à jour dans la même PR.
+
+### Captures d'écran (toute PR qui change un écran)
+
+- Le workflow commun `captures` lance l'app sur les machines GitHub (dépôt public) ou sur le robot du PC (dépôt privé : `ubuntu-latest` y échoue aussitôt, tâche #443), **avec les données fictives des tests uniquement**, jamais la production. Il photographie chaque page touchée avant (sur la branche par défaut) et après (sur la PR).
+- Les images sont rangées dans la branche `captures` du dépôt, sous `pr-<n>/`, et la PR reçoit un commentaire avec les deux images côte à côte. Ce commentaire est mis à jour à chaque push.
+- La branche `captures` est orpheline : le `vercel.json` de la branche par défaut ne la couvre pas, et Vercel lit `git.deploymentEnabled` dans celui du commit poussé. `scripts/captures.mjs` écrit donc à chaque commit un `vercel.json` à la racine (`{"git":{"deploymentEnabled":false}}`), pour qu'aucune préversion ne parte (une était en erreur dans FinanceAI, tâche #315). Une branche `captures` ancienne le reçoit à son prochain push.
+- L'historique reste dans la branche `captures`. Les fichiers temporaires d'Actions ne servent pas : ils disparaissent après 90 jours au plus.
+- Une capture qui montre une donnée réelle est un incident de données perso : on retire l'image et on corrige la fixture.
+
+## 9. Relecture
+
+- **La CI décide.** Tous les contrôles requis sont verts, sinon pas de fusion. Une PR rouge est la priorité de son fil.
+- **Sécurité et données perso** : un commentaire de relecture qui les touche est toujours traité avant la sortie du brouillon. Le fil corrige ce qui est vrai et dans le périmètre, et répond en une ligne au reste.
+- **Chemins protégés** (`.github/`, `scripts/hooks/`, `qualite/`, `vercel.json`, `drizzle/`, `.env*`, plus les extras de chaque `.mergify.yml`) : Mergify les fusionne quand le contrôle **« Garde-fou »** est vert, comme le reste (oui écrit de Marc, 15/10/2026). Le garde-fou (`scripts/garde-fou.mjs`, tests dans `scripts/garde-fou.test.mjs`) est rouge si la PR : retire ou saute un test, ou affaiblit une étape de test de la CI ; baisse un seuil de `qualite/` ou touche au mécanisme du cliquet ; ajoute ou modifie une référence à un secret (CI, `.env*`, valeur en clair, scan de secrets, ou variable secrète lue SANS repli dans un chemin protégé) ; lire une variable d'environnement dans le code d'une app (`process.env.SENTRY_DSN`) n'en est pas une, la valeur vient de l'hébergeur (17/10/2026, tâche #199) ; contient une migration destructive ou réécrit une migration existante ; modifie `.mergify.yml`, `CODEOWNERS`, le workflow ou le script du garde-fou lui-même.
+- **Garde-fou rouge** : la PR attend et une issue `qui:marc` s'ouvre avec le geste (« Geste : ... ») ; un commentaire sur la PR dit pourquoi quand le droit d'écriture le permet, sinon le rapport est dans le contrôle et dans l'issue. Marc fusionne à la main si c'est voulu, sinon le fil corrige. Il n'existe aucune étiquette pour le contourner : une session pourrait la poser. Le garde-fou ne change que par PR sur ce dépôt, que Marc fusionne.
+- **Où il tourne** : `.github/workflows/garde-fou.yml` de chaque dépôt (`pull_request_target`, donc le workflow de la branche par défaut, que la PR ne peut pas changer). Il lit la liste des fichiers par l'API et ne récupère jamais le code de la PR. Un READY ne prouve pas que le domaine le sert ; lire le commit servi.
+
+## 10. Mise en ligne et acceptation
+
+**Règle : valider vite.** Une tâche finie se valide tout de suite, pas quand on y repense (décision de Marc, 15/10/2026). Le commentaire « **Acceptée** » est posé **au plus 1 h après** le déploiement `READY` (ou après la fusion, quand rien de servi ne change). Au-delà de **2 h** sans preuve, la tâche est en retard : le ménage du §6 la remet en file et le Gantt la signale en rouge.
+
+1. La CI est verte : le fil sort la PR du brouillon, et Mergify fusionne.
+2. Le fil vérifie qu'un déploiement de production existe et est `READY` **sur le commit fusionné**. S'il n'y en a pas, il fait un nouveau push, jamais « Redeploy ». Un `READY` ne prouve pas que le domaine le sert (alias figé après un retour en arrière) : le Réacteur lit `/api/sante` de l'app à chaque déploiement de production réussi (`verifierAliasVercel`, `surveillance/apps.json`, tâche #822) et compare son champ `commit` au sha déployé ; un commit servi **différent et plus récent** (un second déploiement est déjà en ligne, `compare` rend `ahead`) n'est pas un alias figé (tâche #864), un commit **introuvable, plus ancien ou divergent** ouvre une issue `incident` et réveille le fil propriétaire ; une app sans champ `commit` est « non couverte », jamais verte par défaut.
+3. Le test de fumée commun tourne (§11).
+4. Le fil prouve le « Fini quand » **en production** : réponse HTTP, page, contrôle ou donnée.
+5. Le fil écrit le **commentaire de preuve** sur l'issue, puis la ferme `completed`. Le format est contrôlé par une machine (§10 bis) : le commentaire commence par `**Acceptée**` en gras, tel quel (« **Acceptée.** » ou « Acceptée » sans gras ne sont pas reconnus) :
+   ```
+   **Acceptée** — PR #p fusionnée (<sha court>), déploiement READY (<id>), preuve : <ce qui a été vérifié et le résultat>.
+   ```
+6. Cas d'une PR qui ne change rien de servi (docs, tests, CI) : pas de déploiement à vérifier, et le commentaire écrit `sans déploiement : <raison>`. La preuve n'est pas « le fichier existe » : c'est la commande ou le contrôle du « Fini quand » exécuté sur le commit fusionné, avec son résultat (sortie copiée, lien de l'exécution CI).
+7. Tâche sans code (réglage, geste de Marc, révocation) : `sans PR` à la place de `PR #p`, avec une preuve d'au moins 60 caractères qui dit ce qui a été LU (code de réponse, valeur, capture). Quand Marc fait le geste, son « fait » n'est pas la preuve : Claude vérifie l'effet, puis prouve.
+
+**Le fil reste jusqu'à l'acceptation.** Il ne se ferme pas entre la fusion et la preuve : il n'est marqué résolu que quand l'issue est fermée avec un commentaire accepté par le garde-fou, ou en `preuve-attendue` avec sa routine programmée. S'il approche de la limite de contexte (§16), il passe la main avec l'état dans un fichier, et la preuve reste due dans le même délai.
+
+**Quand la preuve dépend d'un événement** (un cron, une échéance, un premier passage de données), on ne laisse pas la tâche en attente sans date :
+
+1. **D'abord, déclencher l'événement soi-même** : lancement manuel du workflow ou du cron (`workflow_dispatch`, route protégée d'un cron, appel de la fonction). Si c'est possible, la preuve se fait dans l'heure, comme toute tâche.
+2. **Sinon, programmer le contrôle au plus tôt.** Le fil écrit la ligne `**Preuve attendue** : AAAA-MM-JJ HH:MM (heure du Québec) — événement` dans l'issue, avec l'heure de l'événement prévue plus 15 minutes. Il crée une routine à usage unique à cette heure, qui part en session neuve et fait la preuve. Il commente la PR et l'issue pour dire la date. **La tâche reste ouverte** : le fil remplace `en-cours` par `preuve-attendue` (le dépôt est libre, le fil suivant peut partir), mais elle n'est comptée comme finie nulle part (Gantt orange, rapport hebdomadaire, règle « une chose à la fois »). Une preuve qui attend un geste de Marc suit le même chemin, avec `qui:marc` en plus et la ligne « Geste : ».
+3. **À l'heure dite**, la preuve est posée dans l'heure qui suit l'événement, avec le même commentaire « **Acceptée** ». Si l'événement n'a pas eu lieu ou la preuve échoue, l'issue est rouverte comme un échec de fumée : incident, pas silence.
+4. Un « Fini quand » qui exige plus d'une journée d'attente n'est pas une tâche. On sépare : la tâche s'accepte sur ce qui se prouve tout de suite, et le suivi long devient une tâche à part avec son propre « Fini quand ».
+
+**Ce qui n'est PAS une preuve** (le garde-fou rouvre la tâche) :
+- un déploiement réussi dont le résultat attendu n'a pas été lu (FinanceAI#1156, 16/10 : « je n'ai pas lu le `GET /hub/summary` déployé », [Probable], issue fermée). Quand le fil ne peut pas lire (jeton absent), la tâche reste en `preuve-attendue` avec `qui:marc` si un geste est nécessaire ;
+- un commentaire qui avoue un doute : `[Probable]`, `[Supposition]`, `[À vérifier]`, « pas lu », « non testé », « je n'ai pas pu vérifier » ;
+- une CI verte ou un test seuls, quand le « Fini quand » est en production ;
+- une preuve écrite par un robot ou par Jules (seule exception : l'acceptation automatique marquée du §10 ter), ou datée d'avant la fusion de la PR ;
+- une fusion : Mergify, `Fixes #n` ou un fil pressé ne ferment jamais la tâche.
+
+Le Gantt marque une tâche **acceptée** seulement si l'issue est fermée avec ce commentaire. Sans commentaire, la pastille la signale.
+
+## 10 bis. Garde-fou de preuve : une tâche ne se ferme pas sans preuve
+
+Décision de Marc, 16/10/2026 : « je veux toujours qu'une tâche soit prouvée ». Jusque-là la règle n'était qu'écrite : rien n'empêchait de fermer l'issue sans preuve, et la fermeture libère le dépôt (§6). Constat au relevé du Gantt du 16/10 à 10 h 45 (heure du Québec) : sur 124 tâches fermées `completed`, 17 n'avaient aucun commentaire de preuve reconnu, dont des fermetures à la fusion (`Fixes #n`), des commentaires « Acceptée. » dans un format que personne ne lit, et des tâches sans PR fermées sur parole.
+
+**Mécanisme.** Le workflow commun `.github/workflows/preuve.yml` (script `scripts/preuve.mjs`, testé) est appelé par le `reacteur.yml` de chacun des dix dépôts quand une issue `niveau:tâche` est fermée, par n'importe qui ou n'importe quoi (fil, Jules, Mergify, ménage, Marc). Il lit l'issue, ses commentaires, la PR citée et les déploiements, par l'API GitHub, et décide.
+
+**Contrôle à l'écriture** (tâche #713, 28/10/2026 : 87 tâches sur 660, soit 13 %, avaient été rouvertes, souvent pour une preuve de bon fond au mauvais format). Dès qu'une personne du dépôt écrit un commentaire qui commence par « **Acceptée** » sur une tâche OUVERTE, `preuve-commentaire.yml` (`scripts/preuve-commentaire.mjs`, événement `issue_comment`, aucun minuteur) rend le jugement de `traiter` comme si l'issue se fermait maintenant, et répond UNE fois (`<!-- controle-preuve:<id> -->`) : « **Contrôle de la preuve** : serait acceptée », ou « serait refusée » avec les motifs du garde-fou. Il ne ferme, n'édite, ne rouvre ni n'étiquette rien (toute écriture de `traiter` est jetée), ne recopie jamais le texte du commentaire, et ne juge ni un robot ni Jules. Le garde-fou de fermeture reste le seul juge. Les autres dépôts l'appellent par un petit workflow à eux (modèle en tête du fichier).
+
+**Une fermeture `completed` est valide seulement si TOUT est vrai :**
+1. un commentaire commence par `**Acceptée**`, écrit par une personne ou par Claude (pas un robot, pas Jules) ; le dernier de ces commentaires fait foi ;
+2. il n'avoue aucun doute (§10, « Ce qui n'est PAS une preuve ») ;
+3. sa ligne `preuve : …` fait 40 caractères au moins (60 pour une tâche `sans PR`) ;
+4. il cite `PR #p` (ou `PR <dépôt>#p`, ou `PR MoKarade/<dépôt>#p`), cette PR est fusionnée, l'empreinte citée (7 à 40 caractères hexadécimaux, chiffres seuls compris) est le début de celle du commit fusionné, et le commentaire est postérieur à la fusion ; ou il dit `sans PR` ;
+5. si la PR change autre chose que docs, tests, CI et qualité (et que le dépôt se déploie) : un déploiement de production réussi existe, après la fusion, sur le commit fusionné ou sur un commit qui le contient. Vercel : l'état de déploiement GitHub. Hors Vercel (moteur DriveAI, serveur MCP de FinanceAI) : une exécution réussie du workflow de déploiement dont un JOB de déploiement a réussi (un job ignoré ne compte pas : le serveur MCP est resté 27 jours sans déploiement sous une coche verte).
+
+Une fermeture `not_planned` ou doublon est valide avec un commentaire `**Abandonnée** — <raison>` (20 caractères au moins), pour que l'abandon ne soit jamais silencieux.
+
+**Sinon** : l'issue est rouverte tout de suite, l'étiquette `preuve-manquante` est posée et un commentaire dit chaque défaut et le format attendu. La tâche passe en tête de l'ordre (§5, point 1). Quand la fermeture est valide, `preuve-manquante` et `preuve-attendue` sont retirées.
+
+**Le Réacteur ne part que sur une fermeture validée** (`acceptee` ou `abandon`) : un dépôt n'est jamais libéré par une tâche fermée sans preuve. Si le garde-fou lui-même échoue (API indisponible), le Réacteur ne part pas non plus et le filet de 6 h reprend la main.
+
+**Réglage par dépôt**, dans le `reacteur.yml` de chacun : `deploiement: vercel`, sauf `.github`, `app-template` et `hub-contract` (`aucun`, ils ne se déploient pas) ; `workflows-deploiement: deploy.yml` chez DriveAI et `deploy-mcp.yml` chez FinanceAI. Dépôt privé : le job tourne sur le robot du PC, comme tout le reste ; PC éteint, la vérification attend son retour.
+
+**Ce que le garde-fou ne fait pas.** Il ne lit pas la production (c'est le fil, §10) et ne juge pas le texte : il vérifie la forme et ce que GitHub sait (PR, empreinte, déploiement). Un faux commentaire bien formé passe. Deux filets restent : la pastille du Gantt (§13) et le ménage de la routine (§6), qui rouvrent ce que le garde-fou a manqué. Limite connue : chez DriveAI, `deploy.yml` réussit sans rien déployer quand ses secrets manquent.
+
+**Sécurité.** Le script vient de `main` de ce dépôt, jamais du code de l'appelant ; le jeton du job (`github.token`) suffit, aucun secret ; le texte des commentaires est traité comme donnée, jamais exécuté.
+
+## 10 ter. Acceptation automatique (décision de Marc, 21/10/2026)
+
+Constat (relevé du 14 au 21/10/2026, 544 PR fusionnées, rapport `commun/rapports/2026-10-21_fusion-rapide.md`) : Mergify fusionne en moyenne une minute après la CI verte et la PR prête (p90 : 11 min) ; l'attente est après la fusion, jusqu'au « **Acceptée** » posé par un fil (médiane 11 min, 35 % des tâches au-delà d'une heure, dont une tâche sur dix sans aucune attente légitime). Marc (21/10, option B) : une tâche dont la preuve est entièrement lisible par une machine s'accepte toute seule, et le signal « fusionné, accepté » arrive tout de suite.
+
+**Qui.** Le Réacteur (`scripts/reveil-reacteur.mjs`), à la fusion d'une PR, avant de lancer la routine pour la suivante : `scripts/acceptation-auto.mjs`, sans IA, sans quota. Il pose le commentaire « **Acceptée** » et ferme la tâche `completed` SEULEMENT si TOUT est vrai :
+1. la tâche porte la ligne `**Acceptation automatique** : oui — <pourquoi>`, **ou ne porte aucune ligne « Acceptation automatique » (ni oui ni non) ni sonde et la règle prudente du filet la juge éligible À LA FUSION** (tâche #699, mission #698, demande de Marc du 28/10/2026 : « fais le A » ; relevé du 21 au 28/10 : 28 tâches sur 461 éligibles mais 11 seulement portaient la ligne, parce que le filet l'écrit sur un tour du PC alors que 61 % des tâches sont prises en moins de 10 min). La règle prudente est celle de l'alinéa « Qui écrit la ligne » ci-dessous, évaluée sur le corps de la tâche au moment de la fusion ; une ligne « non » s'y respecte toujours, une tâche `jules` n'y entre pas, et le commentaire dit « règle prudente appliquée à la fusion ». Le reste de cet alinéa vaut pour la ligne « oui ». Celui qui écrit la tâche affirme que son « Fini quand » est un contrôle CI ou un déploiement ; une donnée ou un écran ne se prouve pas par cette ligne. Une réponse HTTP s'écrit autrement (décision de Marc, 26/10/2026, refonte du workflow, décision 1 : « oui pour recos », tâche #621), par la ligne `**Fini quand exécutable** : GET https://<hôte>.hubperso.com/<chemin> → <statut>[, contient « <texte> »]` ; elle remplace la ligne « oui » : la machine lit alors la production elle-même, après le déploiement, et copie dans le commentaire ce qu'elle a lu. Limites de la sonde : `GET` seulement, https seulement, hôte `hubperso.com` ou un sous-domaine, ni port ni identifiant dans l'adresse, 300 caractères au plus, aucune redirection suivie (une 302 est lue comme 302), 10 s par essai, 64 Ko lus au plus, 3 essais espacés pour laisser arriver la nouvelle version, jamais de jeton ni de cookie. Une ligne qui sort de ces limites est dite dans les motifs et un fil prouve comme avant ; une sonde qui ne lit pas ce qui était attendu n'écrit rien non plus ;
+2. la PR est fusionnée et cite exactement UNE tâche, ouverte, de son dépôt ; aucune autre PR ouverte ne la cite ;
+3. la tâche n'attend rien : ni `preuve-attendue`, `qui:marc`, `bloqué`, `essai`, `preuve-manquante` ;
+4. aucun écran n'est touché (jsx, tsx, css, html, images, `public/`) : un écran se prouve en le regardant, par un fil, avec les captures du §8 ;
+5. aucun contrôle de la tête de la PR n'est rouge ;
+6. si la PR change du code servi (hors docs, tests, CI, qualité) dans un dépôt qui se déploie : un déploiement de production réussi existe sur le commit fusionné (4 essais, 45 s entre) ; sinon rien ne s'écrit et un fil prouve comme avant ;
+7. le commentaire passe le garde-fou de preuve (§10 bis) AVANT d'être posé : une acceptation automatique n'est jamais rouverte après coup.
+
+**Qui écrit la ligne** (tâche #421, déplacée vers le Réacteur par la tâche #715) : le Réacteur (`scripts/acceptation-marquage.mjs`, 8 tâches par passage au plus, comme les fichiers touchés du §6), jamais un fil par réflexe. Il l'ajoute à la fin du corps, sans toucher au texte, sur une tâche `niveau:tâche` ouverte quand TOUT est vrai : son « Fini quand » cite un contrôle de machine (test, CI, build, lint, typecheck, déploiement) et ne cite ni réponse HTTP, URL, écran, capture, donnée, production, PC, Drive, page, durée, relevé ni « preuve ensuite » ; son « Avant » et son « Après » ne parlent pas d'écran ; « Fichiers touchés » est connu (au plus 10) et sans écran ; elle n'attend rien (mêmes étiquettes que la condition 3, plus `jules`, qui a sa propre acceptation) ; elle ne porte aucune ligne « Acceptation automatique », oui ou non (la décision de quelqu'un ne se défait pas). Au moindre doute, rien. Le bloc commence par `<!-- acceptation-auto-marquee -->` ; le Réacteur le retire au passage suivant quand le CORPS ne le justifie plus (jamais à cause d'une étiquette : une tâche qui vient de livrer passe `preuve-attendue`, et c'est `acceptation-auto.mjs` qui la refuse). La ligne n'est qu'une autorisation : les sept conditions se jugent sur la PR à la fusion. Sa trace : la ligne `Réacteur : pilotage (tache_ouverte) : acceptation automatique marquée (…)` du journal du run. Mesure du 21/10/2026 sur les 82 tâches ouvertes : 0 éligible (42 sans contrôle de machine dans le « Fini quand », 21 qui citent un PC, une page, une donnée, la production ou un écran, 11 sans fichiers connus) : la plupart des tâches d'aujourd'hui se prouvent en regardant quelque chose, pas par la CI.
+
+**Ce que dit le commentaire** : la PR, le commit fusionné, le déploiement (ou « sans déploiement : <raison> »), le nombre de contrôles réussis sur la tête de la PR, le nombre de fichiers, et noir sur blanc « la production n'a pas été lue par une personne » ; avec une sonde, cette phrase est remplacée par « production lue par la sonde : GET <adresse> → <statut>[, contient « … » : oui], lu le <date> ». Il est écrit par `github-actions[bot]` et porte `<!-- acceptation-auto -->` ; c'est la seule exception à « jamais un robot » du §10 bis, et seulement pour « Acceptée », jamais pour un abandon. La PR reçoit une ligne « Fusionnée et acceptée automatiquement » : c'est le signal pour Marc, sur son téléphone, sans ouvrir de fil. Le réveil du Coordinateur dit « tâche D#n acceptée seule » au lieu de « preuve à poser ».
+
+**Écran (classe B).** La règle 4 s’efface quand la tâche est de classe B et que `preuve-page.yml` a lu ses pages en mode fictif (§2 bis) : l’acceptation dit alors que l’écran a été lu en données fictives.
+
+**Ce que ça ne change pas.** Toute autre tâche suit le §10 : un fil prouve, au plus 1 h après le déploiement. Un refus de l'acceptation automatique ne coûte rien : rien n'est écrit, la tâche reste ouverte et son fil prouve. Un échec de l'API est un avertissement, jamais un job rouge. Pour retirer la règle : enlever l'appel dans `decider` (`reveil-reacteur.mjs`).
+
+**Réglage par dépôt** : le `reacteur.yml` de chacun donne à son job `reveiller` les droits `issues: write`, `pull-requests: write` (le commentaire de la PR ; sans lui l'acceptation reste valable, l'échec se lit dans le journal du job) et `deployments: read` et passe `deploiement` et `workflows-deploiement` (les mêmes valeurs que son job `preuve`). Sans ces droits : avertissement, et un fil prouve.
+
+**État au 21/10/2026** : les droits sont posés dans les dix dépôts (neuf PR de la phase 2 et MoKarade/.github#399 pour ce dépôt et pour `reveil-reacteur.yml`). Premier essai réel : MoKarade/.github#402, accepté seul le 21/10/2026 à la fusion de #415 (deux défauts corrigés avant : #412, #415). `pull-requests: write` (oui de Marc, 21/10/2026, carte du fil « Fusion rapide ») : MoKarade/.github#418, un appelant par dépôt (neuf PR fusionnées) puis `reveil-reacteur.yml` et le `reacteur.yml` de ce dépôt. DriveAI, qui épingle le workflow commun, est re-pinnée sur la version qui demande ce droit (DriveAI#637, fusionnée le 21/10/2026). Limite constatée à cette occasion : une PR n'est acceptée automatiquement que si la tâche qu'elle cite est dans le MÊME dépôt (`la PR ne cite pas exactement une tâche de ce dépôt`) ; DriveAI#637 citait MoKarade/.github#418 et n'a donc rien accepté, la preuve du commentaire de PR se fait sur une PR de ce dépôt.
+
+## 10 quinquies. Preuve de classe C (le relevé PC par boîte est retiré, « go reco » de Marc, 29/10/2026)
+
+Une preuve de classe C passe en `preuve-attendue` (§10 étape 5) et un fil la lit ; la boîte « relevé PC » (écoute `ecoute-boite-pc.mjs`, commentaires `**Relevé PC demandé**` / `**Relevé PC**`, app-template#211) n'existe plus.
+
+**Attente du déploiement (MoKarade/.github#823, 29/10/2026).** GitHub n'enregistre le statut `success` d'un déploiement de production qu'une à deux minutes après la fusion : le garde-fou de preuve relit donc jusqu'à 6 fois à 20 s d'écart (2 minutes) avant de conclure qu'il manque, seulement si la PR est fusionnée depuis moins de 10 minutes. Il faut toujours un déploiement de production réussi sur le commit ; on lit seulement un peu plus tard (Hubperso#743 et batchchef-#366 avaient été rouvertes à tort).
+
+## 11. Retour en arrière (automatique)
+
+Le workflow commun `fumee` tourne après chaque déploiement de production. Il contrôle `/api/sante`, le summary du hub et la page de connexion.
+
+- **Fumée verte** : rien.
+- **Fumée rouge**, dans cet ordre :
+  1. le workflow remet en ligne le déploiement de production précédent (retour en arrière Vercel) ;
+  2. il refait la fumée sur la version remise, et le dit ;
+  3. il ouvre une issue `incident` dans ce dépôt, avec le commit fautif et sa tâche d'origine, qui repasse « à faire » ;
+  4. le fil lancé par la routine sur cet incident ouvre la PR d'annulation (revert) du commit fautif, hors brouillon, que Mergify fusionne quand elle est verte (décision de Marc du 16/10/2026, #85 : pas de jeton d'écriture de plus).
+- La routine voit l'incident (priorité 1 du §5) et lance un fil, qui trouve la cause et refait la tâche proprement.
+- Marc est prévenu par une ligne dans le chat du projet, envoyée par le Coordinateur au passage suivant de la routine.
+
+**Comment c'est branché (état au 16/10/2026, tâche #30).** Le jeton Vercel est rangé UNE fois, dans le secret `VERCEL_TOKEN` de MoKarade/.github (pas dans les dix dépôts). Le retour en arrière tourne donc dans la surveillance de ce dépôt (`scripts/retour-arriere.mjs`, un passage par jour et à chaque événement `fumee-rouge` envoyé par la fumée de production, depuis la tâche .github#617 ; avant, toutes les 15 minutes), pas dans l'appel du workflow de fumée : quand la sonde de santé d'une app est rouge et que son déploiement de production en ligne a moins de 2 h, la version précédente est remise en ligne, la sonde est refaite, et une issue `incident` est ouverte dans ce dépôt (commit fautif, tâche d'origine, résultat de la sonde). Un seul retour par déploiement fautif. Sans le secret, tout est inactif et le résumé du job le dit. La PR d'annulation (point 4) n'est pas ouverte par ce pas : le jeton d'un job de ce dépôt n'écrit pas chez les apps et une PR ouverte ainsi ne déclenche aucun contrôle ; c'est le fil lancé sur l'issue `incident` qui l'ouvre.
+
+## 12. Audit régulier
+
+Le rapport hebdomadaire (workflow `rapport-hebdo`, issue « Rapport de la semaine du AAAA-MM-JJ ») est retiré depuis le 29/10/2026 sur décision de Marc (nettoyage du workflow, « go reco »). Les chiffres de vitesse et de qualité se lisent à la demande sur GitHub ; l'historique des anciens rapports reste dans les issues `rapport`.
+
+## 13. Gantt
+
+Le Gantt montre l'état réel du travail. Il ne contient **rien de tapé à la main**. Il relit GitHub toutes les heures, et la page relit ses données toutes les 5 minutes.
+
+**Ce qu'il montre** :
+- Les trois niveaux, repliables : chantier › mission › tâche. Une tâche dont le parent vit dans un autre dépôt s'affiche sous ce parent, précédée du nom de son app.
+- Pour chaque tâche, une barre colorée selon son état (§7), de l'heure de début à l'heure d'acceptation.
+- **La fiche d'une tâche**, au clic, toujours dans ce format :
+  - titre, dépôt et numéro ;
+  - état et exécutant (fil, Jules, Marc) ;
+  - Avant / Après / Fini quand ;
+  - début, fin et durée ;
+  - liens vers l'issue, la PR et le commentaire de preuve ;
+  - dépendances.
+- Le filtre « Toi », qui montre les seules issues `qui:marc`, avec le geste exact.
+- L'heure du relevé (heure du Québec, §17) et son âge, en rouge au-delà de 2 h.
+
+**Ce qu'il vérifie** (la pastille, qui signale sans rien corriger) :
+- **Format et structure** :
+  - une issue sans niveau, ou avec `niveau:plan` ;
+  - une tâche orpheline ;
+  - un corps qui ne suit pas le gabarit de son niveau (§2) ;
+  - une dépendance inconnue ou un cycle.
+- **Liens et preuves** :
+  - une PR de tâche sans `Tâche : #n` ;
+  - une tâche fermée `completed` sans commentaire de preuve, ou rouverte par le garde-fou (`preuve-manquante`) ;
+  - une tâche `preuve-attendue` dont l'heure est passée ;
+  - une tâche fusionnée mais non prouvée depuis plus de 2 h (hors preuve programmée dont l'heure n'est pas passée) ;
+  - une preuve programmée dont l'heure est passée depuis plus d'une heure.
+- **Délais** :
+  - une tâche `en-cours` sans PR depuis 24 h ;
+  - une `jules` sans PR depuis 24 h ;
+  - une tâche bloquée depuis plus de 7 jours ;
+  - une PR de tâche de plus de 400 lignes (hors tests).
+- **Autres** :
+  - un incident ouvert ;
+  - des « fichiers touchés » qui n'en sont pas (`fichiers illisibles` : une ligne en gras prise pour une puce, un libellé à deux-points ; un motif comme `docs/*.md` reste permis).
+
+Le fil « Vue personnalisée du projet » possède les outils du Gantt. Cette section est leur cahier des charges.
+
+**Source de vérité** (mission MoKarade/.github#116, 16/10/2026) : GitHub est la source, le Gantt en est la vue. Chaque relevé écrit trois fichiers dans `commun/outils/gantt/` : `backlog.json` (le relevé), `prochaines.json` (la file, §5) et `fiabilite.json` (`scripts/verif-fidelite.mjs`). Ce dernier relit GitHub directement et mesure :
+- **I1 cohérence** : les défauts de la pastille ;
+- **I2 fidélité** : les écarts entre le relevé et GitHub (état, étiquettes, PR liée, **dates** de création et de fermeture des tâches et d'ouverture et de fusion de leur PR, **journal des fusions** `prlog` : dates, fusions fantômes ou oubliées), hors ce qui change après le relevé ; les délais de la page (ouvert → fermé, ouvert → fusionné) ne valent que si ces dates le sont (essai du 21/10/2026 sur un relevé plein : 563 fusions du journal et 139 tâches, aucun écart); un écart se corrige seul : `tour.py` fait un relevé plein au tour qui suit une mesure à écarts (une fois par mesure, jamais au tour économe), car un relevé léger peut perdre le lien d'une PR ancienne ;
+- **I3 prise tracée** : `en-cours` posé au plus 10 minutes après l'ouverture de la PR (le balayage le pose, §8) ; aucune PR fusionnée sans tâche (robots exclus) ; aucune branche `claude/*` sans tâche ; aucun `en-cours` sans PR depuis plus de 3 h ;
+- **I4 accord file/agents** : la tâche lancée était la `suivante` du dernier calcul ; la `suivante` de chaque calcul de `prochaines.json` (toutes les 10 minutes) est gardée par `verif-fidelite.mjs --snapshot-seulement`, et un lancement sur une file de plus de 40 minutes est listé (`perimes`).
+  Dépôt `occupe` au calcul : `prochaines.json` garde aussi `si_libre` (la tête de file) et le snapshot les occupants (`occupe_par`) ; la tête de file prise dès que chaque occupant est fermé est un accord, compté à part dans `accords_apres_liberation`. Un occupant encore ouvert, un fil actif sans référence ou une autre tâche que la tête de file restent des écarts (deux travaux à la fois).
+  Une tâche **née après** le dernier calcul, quand ce calcul n'annonçait aucune `suivante`, n'a écarté aucune annonce : elle va dans `hors_file` (liste visible, historique `i4_hors_file`), ni accord ni écart. Avec une `suivante` annoncée, lancer autre chose reste un écart. La mesure I4 ne remonte pas avant `DEPUIS_I4_PLANCHER` (21/10/2026 18:00Z) : l'avant (une place par dépôt, `.github` gelé 26 h par une alerte du PC, soit 71 écarts sur 77 lancements) n'est pas jugé à nouveau, il reste dans `historique`.
+On ne dit « fiable » que quand I1 = I2 = 0 sur 20 relevés de suite et que les lancements de la période sont à 100 % ; l'historique n'est jamais remis à zéro.
+
+**Gestes de Marc à jour** (tâche #478, choix « Signaler et retirer » de Marc dans le fil Gestes, 22/10/2026 ; `outils/gantt-pc/gestes.py`). Constat : des issues `qui:marc` traînaient après un geste fait ou devenu sans objet (DriveAI, 22/10), et deux listes s'écrivaient à la main. Le relevé fait cinq contrôles à partir de ce qu'il a déjà lu, sans appel d'API de plus ni coût IA (`fetch.py` garde les trois derniers commentaires de Marc d'une tâche `qui:marc` ouverte dans `marc_com`) : (1) le DERNIER commentaire de Marc, s'il est plus récent que la dernière pose de `qui:marc`, est un « fait » **clair** (tous ses mots sont dans une liste : `fait`, `ok`, `c'est fait`, `j'ai fait`, `done`, `terminé`… ; une question, une négation ou un mot hors liste suffit à le rendre ambigu) : `tour.py` retire alors l'étiquette avec le commentaire du bouton « Fait » (`**Fait** — Marc, depuis son commentaire du … : <lien>`, `reponses.py`), cinq retraits au plus par tour ; un « fait » **ambigu** (« pas encore fait », « fait ? », « ok mais… ») est signalé, jamais retiré. Un commentaire est « de Marc » s'il vient de son compte sans le pied de page de Claude, sans être le bouton « Fait » ni un « Geste : » (limite : un commentaire de Claude écrit sans pied de page passerait pour le sien) ; (2) une ligne `Attend` vers une issue fermée (`attend-ferme`) ou introuvable (`attend-introuvable`) ; (3) `qui:marc` avec `preuve-attendue` ou `bloqué` (`etiquettes-contradictoires`) ; (4) sept jours sans activité (`sans-activite`) ; (5) `gestes-de-marc.md` (tous les gestes ouverts, faisables, en attente, à vérifier) et `a-faire-maintenant.md` (ceux que Marc peut faire tout de suite : aucune attente ouverte, aucune étiquette contradictoire) sont générés par `build.py`, déposés dans le dossier `_Gantt` du Drive, et ne se modifient plus à la main. Les signalements sont dans `donnees.json` (clé `gestes`, que la page lit) et dans `etat.json` (clé `gestes` : ouverts, signalés, codes, retirés, refus, signalements par tâche, et la ligne « gestes : … » du résultat du tour). Un échec du contrôle se dit (« gestes : ÉCHEC… »), il ne fait pas échouer le tour. Tests : `python -X utf8 -m unittest test_gestes.py` (depuis `outils/gantt-pc`).
+
+**Issue d'essai** : un essai qui a besoin d'une vraie issue porte l'étiquette `essai`, est fermé `not_planned` par l'essai lui-même, et le Gantt l'ignore (il ne s'affiche pas, ne compte dans aucune mesure). Le garde-fou de preuve ne rouvre pas une issue `essai` fermée `not_planned`. À la fermeture validée d'une tâche, `en-cours` et `qui:marc` sont retirés par le garde-fou de preuve.
+
+## 14. Cartes de décision (questions à Marc)
+
+Une question à Marc prend toujours la forme d'une **carte**, jamais d'une question perdue dans un long message.
+
+- **Une décision par carte.** La question tient en une douzaine de mots, verbe d'abord, avec les mots de Marc.
+- **2 à 4 options**, chacune en un ou deux mots, avec sa conséquence en une phrase.
+- **Une recommandation**, avec sa raison et un label de confiance.
+- **Le travail continue** sur l'option recommandée pendant l'attente, sauf si le pas est irréversible : suppression, bascule en public, migration destructive, secret, dépense. Dans ce cas, la carte le dit et on attend.
+- **Plusieurs questions de cadrage** : un seul lot numéroté (« 1a 2b 3c… »), une recommandation par question, déposé en fichier quand il dépasse 15 lignes.
+- **La réponse est consignée** dans l'issue concernée, en commentaire : « Décision de Marc (AAAA-MM-JJ HH:MM, heure du Québec) : … ». Pour le chantier, elle va dans le plan.
+- **Un geste de Marc** n'est pas une carte : c'est une issue `qui:marc` avec les étapes exactes. Le fil le dit une fois, et le Gantt le montre dans « Toi ».
+
+**Répondre depuis l'onglet « À toi » (19/10/2026, `outils/gantt-pc/reponses.py`).** Marc n'écrit pas dans GitHub : il touche un bouton de la page, qui dépose un fichier dans le dossier Drive `_Gantt` ; le PC l'applique au tour suivant avec le jeton `gh` de Marc, puis réveille le Coordinateur par la boîte du Réacteur. Trois gestes :
+- **Fait** : commentaire `**Fait** — Marc, depuis la page de suivi (…)` puis retrait de `qui:marc`, dans cet ordre. Jamais « Acceptée » : la preuve reste à Claude (§5 ter). Une issue « Garde-fou : la PR #n… » refuse « Fait » : le seul geste attendu est la fusion.
+- **Réponse** : commentaire `**Réponse de Marc** : <option>` puis retrait de `qui:marc`. L'option DOIT être une puce de la section `**Réponses**` du corps de l'issue (un fichier ne peut pas faire écrire un texte libre). Pour offrir des réponses préfaites, l'issue de la question porte une ligne `**Réponses** :` suivie d'**une puce par option**, courte (200 caractères au plus), sans autre texte entre les puces.
+- **Fusionner** : fusion squash d'une PR ouverte, hors brouillon.
+Un fichier est traité une seule fois (journal par id), puis supprimé ; un échec se lit dans le journal que la page affiche.
+
+## 15. Qui applique ce document
+
+| Mécanisme | Applique |
+|---|---|
+| Compétence `livrer-une-tache` | §8 à §10, pour chaque fil |
+| Garde-fou de preuve (`preuve.yml` commun, appelé par `reacteur.yml` des dix dépôts) | §10 bis : aucune tâche fermée sans preuve valide |
+| Routine continue | §5, §6 |
+| Gantt et sa pastille | §7, §13 |
+| Workflows communs de ce dépôt (`captures`, `fumee`) | §8, §11, §12 |
+| Réacteur : `reveil-reacteur.yml` (commun), `reacteur.yml` (chaque dépôt) et `boite-reacteur.yml` (`app-template`, réveils du PC et du pilotage seulement) | §6 : le Réacteur par événement |
+| Instructions du projet (résumé du §0) | tout, pour chaque session |
+
+Ce qui n'est pas encore branché est suivi en tâches sous le chantier « Standardiser les tâches », dans ce dépôt.
+
+## 16. Économie de jetons
+
+Source : `commun/plans/2026-10-15_proposition-economie-tokens.md`. Chaque appel relit tout le contexte du fil : le coût vient de la longueur du fil, du modèle et du nombre de réveils.
+
+- **Une tâche = un fil neuf.** Un fil fini est fermé, pas réutilisé.
+- **Passer la main.** Un fil qui dépasse environ 150 k jetons écrit son état dans un fichier de `commun/` et un fil neuf reprend depuis ce fichier.
+- **Modèle.** Sonnet 5.5 par défaut, Haiku 5.5 pour le mécanique (tri, relais), Opus sur demande ou pour les tâches floues. Dernière génération seulement, jamais une plus ancienne.
+- **Routines.** Toute routine tourne en session neuve. Ce qui est mécanique ne passe pas par Claude (script, CI, workflow).
+- **CLAUDE.md.** 60 lignes au plus, sans import de `docs/COMPTE-RENDU.md` ; le détail vit dans `docs/`.
+- **Mesure.** Une mesure par semaine avec la même méthode ; le résultat va dans le rapport hebdomadaire (§12).
+
+## 17. Heures
+
+Décision de Marc, 15/10/2026 : **toute heure donnée à Marc est en heure du Québec** (fuseau `America/Toronto`, été et hiver gérés), jamais en UTC.
+
+- Ça vaut partout où il lit : réponses dans le chat et les fils, cartes, commentaires et corps d'issues et de PR, fichiers de `commun/`, rapports, Gantt et pastilles. Format : `HH:MM`, avec la date en `AAAA-MM-JJ` quand elle compte, et la mention « heure du Québec » quand le contexte ne la donne pas.
+- L'UTC reste permis là où seule une machine lit : expressions cron (une routine porte `CRON_TZ=America/Toronto` quand c'est possible), horodatages ISO des fichiers de données, journaux des workflows. Dès qu'une de ces heures est dite à Marc, on la convertit.
+- Une preuve programmée (§10) est écrite en heure du Québec ; la routine à usage unique qui la porte est créée avec l'équivalent UTC ou `CRON_TZ=America/Toronto`.

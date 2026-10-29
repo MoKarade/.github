@@ -2,7 +2,7 @@ import json, os, re, sys, datetime, subprocess, shutil
 import defauts_preuve      # preuves en retard pour le filet du PC (tâche .github#513)
 import couts_manuels      # registre des dépenses lu dans un fichier privé du PC (.github#636)
 # v5 gardée dans fetch_v5.py / build_v5.py + page5.html
-# v6 (15/10/2026) : cahier des charges du §13 de MoKarade/.github docs/cycle-de-vie-tache.md.
+# v6 (15/10/2026) : cahier des charges du §13 de MoKarade/.github docs/archive/cycle-de-vie-tache-2026-10-29.md.
 # v7 (16/10/2026) : la file « tâche suivante » n'est plus calculée par la page : build.py fait tourner le script de MoKarade/.github
 #   (scripts/prochaine-tache.mjs, copié par fetch.py dans scripts-github/), écrit prochaines.json et l'embarque dans donnees.json.
 #   RETIRÉE le 29/10/2026 (chaîne de lancement, voie courte : une étiquette `go` lance claude-code-action dans la CI de l'app) : plus de prochaines.json ; `donnees.json` garde la clé
