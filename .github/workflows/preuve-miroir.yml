@@ -1,0 +1,61 @@
+name: Preuve miroir (workflow commun)
+
+# Option C de Marc (29/10/2026), étape 3, MODE MIROIR : après un déploiement de production réussi, lit l'adresse du « Fini quand » de la tâche livrée et écrit
+# UN commentaire « Lecture miroir » (lu : ok / lu : écart) sur la tâche. Il ne ferme rien, n'accepte rien : la preuve actuelle reste seule juge. L'étape 6 ne
+# bascule qu'après 3 déploiements où le miroir et la preuve actuelle disent la même chose. La logique est dans scripts/preuve-miroir.mjs (testée, sans
+# dépendance) ; le script vient de ce dépôt, jamais du code de l'appelant. Aucun secret : le jeton du job suffit. Aucun minuteur.
+#
+# Appel depuis un dépôt :
+#
+#   on:
+#     deployment_status:
+#   jobs:
+#     preuve-miroir:
+#       if: github.event.deployment_status.state == 'success' && github.event.deployment_status.environment == 'Production'
+#       permissions: { contents: read, issues: write, pull-requests: read }
+#       uses: MoKarade/.github/.github/workflows/preuve-miroir.yml@main
+#       with:
+#         sha: ${{ github.event.deployment.sha }}
+#         runner: ${{ github.event.repository.visibility == 'public' && '"ubuntu-latest"' || '["self-hosted","pc-marc"]' }}
+on:
+  workflow_call:
+    inputs:
+      sha:
+        description: 'Empreinte du commit déployé (github.event.deployment.sha), 40 hexadécimaux.'
+        type: string
+        required: true
+      runner:
+        description: 'Machine, en JSON : "ubuntu-latest" (dépôt public) ou ["self-hosted","pc-marc"] (dépôt privé).'
+        type: string
+        default: '"ubuntu-latest"'
+
+permissions: {}
+
+jobs:
+  miroir:
+    name: Preuve miroir
+    timeout-minutes: 5
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Récupérer le script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: MoKarade/.github
+          ref: main
+          path: .miroir
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Lire le « Fini quand » et commenter
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DEPLOY_SHA: ${{ inputs.sha }}
+        run: node .miroir/scripts/preuve-miroir.mjs
