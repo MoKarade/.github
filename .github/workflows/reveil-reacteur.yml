@@ -101,6 +101,12 @@ on:
       REVEIL_TOKEN:
         description: 'Jeton fin limité à app-template (Actions : lecture et écriture).'
         required: false
+      ROUTINE_PRENDRE_URL:
+        description: 'Adresse /fire de la routine « Prendre une tâche » (dépôts sans fil à l’écoute de leur boîte : app-template, hub-contract). Absente : rien ne se lance.'
+        required: false
+      ROUTINE_PRENDRE_TOKEN:
+        description: 'Jeton du déclencheur d’API de cette routine. Absent : rien ne se lance.'
+        required: false
 
 permissions: {}
 
@@ -136,6 +142,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVEIL_TOKEN: ${{ secrets.REVEIL_TOKEN }}
+          ROUTINE_PRENDRE_URL: ${{ secrets.ROUTINE_PRENDRE_URL }}
+          ROUTINE_PRENDRE_TOKEN: ${{ secrets.ROUTINE_PRENDRE_TOKEN }}
           REVEIL_TYPE: ${{ inputs.type }}
           REVEIL_DEPOT: ${{ inputs.depot }}
           REVEIL_PR: ${{ inputs.pr }}
