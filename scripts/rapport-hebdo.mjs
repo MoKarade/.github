@@ -325,6 +325,23 @@ export async function lire(gh, chemin, cle) {
   return pages.flatMap((p) => (cle ? p[cle] ?? [] : p));
 }
 
+export const LECTURES_PARALLELES = 8;
+
+/** `fn` sur chaque élément, `n` à la fois au plus ; résultats dans l'ordre des éléments ; la première erreur est relancée. */
+export async function enParallele(elements, n, fn) {
+  const sortie = new Array(elements.length);
+  let suivant = 0;
+  const travailleur = async () => {
+    while (suivant < elements.length) {
+      const i = suivant;
+      suivant += 1;
+      sortie[i] = await fn(elements[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(n, elements.length) }, travailleur));
+  return sortie;
+}
+
 /** GET page par page (100 par page), chaque page = un appel compté dans `compteur.taches` : le chiffre dit les vraies requêtes. */
 export async function lirePages(gh, chemin, compteur) {
   const tout = [];
@@ -400,14 +417,14 @@ export async function collecterDepot(gh, depot, maintenant, conformiteDe, cumulD
   }
 
   const prsBrutes = toutesPrs.filter((p) => temps(p.updated_at) >= maintenant - 30 * JOUR);
-  const prs = [];
-  for (const p of prsBrutes) {
+  // Les runs de chaque PR se lisent par huit à la fois (le job passait 20 min à attendre 1 300 réponses l'une après l'autre) ; l'ordre des PR est gardé.
+  const prs = await enParallele(prsBrutes, LECTURES_PARALLELES, async (p) => {
     let runs = [];
     if (temps(p.updated_at) >= debut || (p.merged_at && temps(p.merged_at) >= debut)) {
       runs = (await lire(gh, `${R}/actions/runs?branch=${encodeURIComponent(p.head.ref)}&per_page=100`, 'workflow_runs')).map((r) => ({ nom: r.name, conclusion: r.conclusion, creeLe: r.created_at, finLe: r.updated_at }));
     }
-    prs.push({ numero: p.number, majLe: p.updated_at, fusionLe: p.merged_at, corps: p.body ?? '', runs });
-  }
+    return { numero: p.number, majLe: p.updated_at, fusionLe: p.merged_at, corps: p.body ?? '', runs };
+  });
 
   let couverture = null;
   try {
