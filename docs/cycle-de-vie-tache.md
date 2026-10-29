@@ -437,6 +437,17 @@ Constat (relevé du 14 au 21/10/2026, 544 PR fusionnées, rapport `commun/rappor
 
 **État au 21/10/2026** : les droits sont posés dans les dix dépôts (neuf PR de la phase 2 et MoKarade/.github#399 pour ce dépôt et pour `reveil-reacteur.yml`). Premier essai réel : MoKarade/.github#402, accepté seul le 21/10/2026 à la fusion de #415 (deux défauts corrigés avant : #412, #415). `pull-requests: write` (oui de Marc, 21/10/2026, carte du fil « Fusion rapide ») : MoKarade/.github#418, un appelant par dépôt (neuf PR fusionnées) puis `reveil-reacteur.yml` et le `reacteur.yml` de ce dépôt. DriveAI, qui épingle le workflow commun, est re-pinnée sur la version qui demande ce droit (DriveAI#637, fusionnée le 21/10/2026). Limite constatée à cette occasion : une PR n'est acceptée automatiquement que si la tâche qu'elle cite est dans le MÊME dépôt (`la PR ne cite pas exactement une tâche de ce dépôt`) ; DriveAI#637 citait MoKarade/.github#418 et n'a donc rien accepté, la preuve du commentaire de PR se fait sur une PR de ce dépôt.
 
+## 10 quinquies. Relevé PC (classe C) : le PC est réveillé par une boîte (choix « A » de Marc, 29/10/2026, MoKarade/.github#807 et #808)
+
+Constat du 28/10/2026 : toute preuve d'écran qui exige la session de Marc passait par fil → Coordinateur → fil PC → Coordinateur → fil. Désormais le Coordinateur n'est plus sur le chemin.
+
+1. **Demande** : le fil propriétaire passe sa tâche en `preuve-attendue` (§10 étape 5) puis écrit sur l'issue UN commentaire `**Relevé PC demandé** — <pages ou adresses publiques à lire, valeur attendue>`. Aucune donnée perso dans une issue publique, aucun secret.
+2. **Réveil du PC** : le Réacteur lit le dernier commentaire de l'issue (humain, en-tête exact) et commente la PR boîte PC (app-template#211, brouillon permanente, ne jamais fusionner ni fermer) : `RÉACTEUR : relevé PC demandé sur <dépôt>#<n>`, identifiants seulement. La session PC n'a pas d'abonnement aux PR : elle lance `scripts/ecoute-boite-pc.mjs` sous l'outil Monitor (lecture de la boîte toutes les 30 s avec ETag, une réponse 304 ne compte pas dans le quota) qui imprime une ligne par nouvelle demande et la réveille.
+3. **Relevé** : le PC lit l'issue (une lecture), fait le relevé dans Chrome, puis écrit sur l'issue UN commentaire `**Relevé PC** — lu le AAAA-MM-JJ HH:MM (Québec) : <ce qui a été LU>` (40 caractères au moins après le tiret). Le PC ne pose jamais « Acceptée ».
+4. **Acceptation** : le Réacteur voit le relevé (dernier commentaire, humain, assez long) et réveille la boîte du dépôt propriétaire ; son fil pose « **Acceptée** » en citant le relevé, au format du §10. Le relevé n'est pas une preuve par lui-même (§10 bis : une preuve écrite par un robot ne vaut pas).
+
+**Rien ne se perd** : PC éteint ou script arrêté, la demande reste dans la boîte et le filet de 6 h existant reprend ; un relevé trop court ou un commentaire neuf après le relevé ne réveille personne. **Durées visées** (chacune 10 min au plus, à mesurer sur la page du chantier) : demande → réveil du PC, réveil → relevé, relevé → « Acceptée ». Sans `REVEIL_TOKEN` dans le dépôt de l'app, la demande ne peut pas atteindre la boîte d'app-template : elle ne réveille personne et le fil prouve comme avant.
+
 ## 11. Retour en arrière (automatique)
 
 Le workflow commun `fumee` tourne après chaque déploiement de production. Il contrôle `/api/sante`, le summary du hub et la page de connexion.

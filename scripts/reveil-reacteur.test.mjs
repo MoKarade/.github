@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { LABEL_ATTEND_MARC, TITRE_ATTEND_MARC, prAttendantMarc } from './attend-marc.mjs';
-import { DEPOT_BOITE, DEPOT_GITHUB, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, TYPES_BALAYAGE, WORKFLOWS_BALAYAGE, WORKFLOWS_GARDE_FOU_ROUGE, WORKFLOWS_PR_OUVERTE, construireMotif, decider, lireCommentairePc, estPanneRunner, heureQuebec, occupations, travaux, signeLibre, preuveAPoser, rougeDepuis, traiter } from './reveil-reacteur.mjs';
+import { DEPOT_BOITE, DEPOT_GITHUB, LONGUEUR_MAX, PREFIXE, WORKFLOW_BOITE, TYPES_BALAYAGE, WORKFLOWS_BALAYAGE, WORKFLOWS_GARDE_FOU_ROUGE, WORKFLOWS_PR_OUVERTE, BOITE_PC, construireMotif, decider, lireCommentairePc, estPanneRunner, heureQuebec, occupations, travaux, signeLibre, preuveAPoser, rougeDepuis, traiter } from './reveil-reacteur.mjs';
 
 // Fausse API GitHub en mémoire : les lectures viennent de `donnees`, les écritures sont gardées.
 function faux(donnees = {}) {
@@ -1136,9 +1136,9 @@ test('relevé PC : la demande réveille la boîte PC avec « dépôt#n » seulem
   assert.equal(d.motif, `RÉACTEUR : relevé PC demandé sur ${DEPOT}#31`);
 });
 
-test('relevé PC : tant que la boîte PC n’existe pas, la demande ne réveille personne', async () => {
+test('relevé PC : boîte PC désactivée (0), la demande ne réveille personne', async () => {
   const demande = commentairePc('**Relevé PC demandé** — lire /totaux');
-  const d = await decider({ api: faux(COMMENTAIRES(demande)).api, evt: { type: 'commentaire', depot: DEPOT, issue: '31' }, accepterDifferees: async () => ({ acceptees: [], ignorees: [] }) });
+  const d = await decider({ api: faux(COMMENTAIRES(demande)).api, evt: { type: 'commentaire', depot: DEPOT, issue: '31' }, accepterDifferees: async () => ({ acceptees: [], ignorees: [] }), boitePc: 0 });
   assert.equal(d.action, 'rien');
   assert.match(d.raison, /boîte PC pas encore créée/);
 });
@@ -1164,4 +1164,9 @@ test('relevé PC : traiter réveille la boîte demandée par la décision, pas c
   assert.equal(envois.length, 1);
   assert.equal(envois[0].corps.inputs.boite, '211');
   assert.equal(envois[0].corps.inputs.texte, `RÉACTEUR : relevé PC demandé sur ${DEPOT}#31`);
+});
+
+test('relevé PC : la boîte PC est la PR brouillon permanente d’app-template, distincte de toutes les autres', () => {
+  assert.equal(BOITE_PC, 211);
+  assert.ok(![...Object.values(BOITES), NUMERO_BOITE].includes(BOITE_PC));
 });
