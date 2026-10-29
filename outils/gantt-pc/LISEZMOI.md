@@ -1,6 +1,6 @@
 # Relevé du Gantt sur le PC de Marc
 
-La page « Chantier Apps » (artifact du projet Apps) affiche le backlog, la file du script et les quotas. Ces données viennent d'un
+La page « Chantier Apps » (artifact du projet Apps) affiche le backlog et les quotas (la file du script est retirée depuis le 29/10/2026). Ces données viennent d'un
 **relevé** qui interroge GitHub toutes les 10 minutes.
 
 **Pourquoi ici (16/10/2026).** Le relevé tournait dans la machine d'une session Claude. Cette machine est recyclée sans prévenir,
@@ -12,12 +12,11 @@ le PC, le relevé tourne sans Claude.
 1. La tâche Windows `Gantt-releve` lance `lancer.ps1` toutes les 10 min, dans une console cachée.
 2. `lancer.ps1` met à jour ce dépôt (clone dédié dans `C:\dev\_pc-local\gantt-releve\depot`), copie les `.py` dans `C:\dev\_pc-local\gantt-releve`
    et lance `tour.py`.
-3. `tour.py` fait un tour : `fetch.py` (GitHub), `quota.py`, `build.py` (file du script `scripts/prochaine-tache.mjs`), mesure de
-   fiabilité (`scripts/verif-fidelite.mjs`, au plus 1×/h, sinon instantané de file seul).
-4. Filet (`scripts/filet-pc.mjs`, tâche #196) : si un dépôt reste libre avec une tâche prenable plus de 30 min sans lancement, le tour lance
-   `boite-reacteur.yml` d'`app-template` pour réveiller le Coordinateur (le `gh` du PC doit pouvoir lancer ce workflow). Son état est dans
-   `filet-pc-etat.json`, sa ligne dans `etat.json`.
-   Même script, passage quotidien du Réacteur (tâche #143) : dès 6 h 00 heure du Québec, une fois par jour, il lance `reacteur.yml` dans les dix dépôts
+3. `tour.py` fait un tour : `fetch.py` (GitHub), `quota.py`, `build.py` (données de la page ; plus de file `scripts/prochaine-tache.mjs` ni de `prochaines.json`, retirés le 29/10/2026 avec la chaîne de lancement : la page lit une clé `prochaines` réduite à `erreur`), mesure de
+   fiabilité (`scripts/verif-fidelite.mjs`, au plus 1×/h ; la mesure d'attente I4 de la file n'est plus faisable).
+4. Filet (`scripts/filet-pc.mjs`) : le réveil « dépôt libre depuis 30 min », les tâches oubliées, le quota Claude non mesuré et les liens « Bloquée par » (tous lus dans
+   `prochaines.json`) sont RETIRÉS (29/10/2026). Restent la file Mergify, les preuves en retard (`boite-reacteur.yml` d'`app-template`, le `gh` du PC doit pouvoir lancer ce workflow) et,
+   dans le même script, passage quotidien du Réacteur (tâche #143) : dès 6 h 00 heure du Québec, une fois par jour, il lance `reacteur.yml` dans les dix dépôts
    (`gh workflow run`, le `gh` du PC doit pouvoir lancer des workflows sur les dix dépôts) parce que les `schedule` de GitHub ne sont pas garantis. État :
    `filet-pc-etat-quotidien.json`, ligne « filet quotidien : … » dans `etat.json`.
 5. Réponses de Marc (`reponses.py`, 19/10) : dans l'onglet « À toi » de la page, un clic « Fait », une réponse préfaite ou « Fusionner »
@@ -34,7 +33,7 @@ le PC, le relevé tourne sans Claude.
    seulement ré-accusé. Drive reste lu en secours ; une panne du hub (503 secret absent, 401 secret faux, réseau) se dit sur la ligne du tour
    (`hub : …`) sans arrêter Drive.
 6. Les sorties sont déposées dans le Drive, dossier `_Gantt` : `donnees.json.gz` (lu par la page avec le connecteur Google Drive),
-   `prochaines.json`, `fiabilite.json`, `quota.json`, `etat.json` (résultat du dernier tour).
+   `fiabilite.json`, `quota.json`, `etat.json` (résultat du dernier tour).
 
 ## Installer
 

@@ -3,8 +3,8 @@ name: Réacteur (workflow commun)
 # Remplace la routine « Réacteur » (session Claude lancée à chaque événement, donc du quota). Écrit UNE fois ici ;
 # le `reacteur.yml` de chaque dépôt l'appelle quand une PR est fusionnée, quand la CI devient rouge, quand une
 # tâche est fermée ET prouvée, etc. (docs/cycle-de-vie-tache.md §6). Depuis le nettoyage du 29/10/2026 il ne réveille plus le Coordinateur ni
-# les fils d'app : il accepte seul ce qui se prouve par une machine, confie à Jules, lance la routine « Prendre une tâche » pour la suivante
-# et les balayages de `.github`, relance un échec de charge du robot, et réveille le PC (relevé demandé) ou le Coordinateur (signaux du pilotage).
+# les fils d'app : il accepte seul ce qui se prouve par une machine, lance les balayages de `.github`, relance un échec de charge du robot
+# et réveille le Coordinateur (signaux du pilotage). La routine « Prendre une tâche » et la file des tâches sont retirées (voie courte, 29/10/2026).
 # Tâches : MoKarade/.github#139 (événements) et #143 (filet).
 #
 #   reveiller:
@@ -31,8 +31,8 @@ name: Réacteur (workflow commun)
 # commentaire tâche liée, qui marque la tâche citée `en-cours` (MoKarade/.github#157).
 #
 # La logique est dans scripts/reveil-reacteur.mjs (testée, sans dépendance, sans IA) ; ce fichier ne fait que
-# l'appeler. Le script vient de ce dépôt, jamais du code de l'appelant. Pour la demande de relevé PC et les signaux du pilotage il lance
-# `boite-reacteur.yml` d'app-template, qui commente une boîte en bot.
+# l'appeler. Le script vient de ce dépôt, jamais du code de l'appelant. Pour les signaux du pilotage il lance
+# `boite-reacteur.yml` d'app-template, qui commente la boîte du Coordinateur en bot.
 # Jeton : `REVEIL_TOKEN`, jeton fin de Marc (Actions : lecture et écriture), posé comme secret dans les dix dépôts : il lance aussi les balayages
 # de `.github`. Sans lui le job le dit par un avertissement.
 # Le jeton du job (`github.token`) lit le dépôt appelant et relance ses jobs en échec ; il ne sort jamais du script.
@@ -103,12 +103,6 @@ on:
       REVEIL_TOKEN:
         description: 'Jeton fin limité à app-template (Actions : lecture et écriture).'
         required: false
-      ROUTINE_PRENDRE_URL:
-        description: 'Adresse /fire de la routine « Prendre une tâche » (dépôts sans fil à l’écoute de leur boîte : app-template, hub-contract). Absente : rien ne se lance.'
-        required: false
-      ROUTINE_PRENDRE_TOKEN:
-        description: 'Jeton du déclencheur d’API de cette routine. Absent : rien ne se lance.'
-        required: false
 
 permissions: {}
 
@@ -144,8 +138,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVEIL_TOKEN: ${{ secrets.REVEIL_TOKEN }}
-          ROUTINE_PRENDRE_URL: ${{ secrets.ROUTINE_PRENDRE_URL }}
-          ROUTINE_PRENDRE_TOKEN: ${{ secrets.ROUTINE_PRENDRE_TOKEN }}
           REVEIL_TYPE: ${{ inputs.type }}
           REVEIL_DEPOT: ${{ inputs.depot }}
           REVEIL_PR: ${{ inputs.pr }}
