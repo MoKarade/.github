@@ -489,25 +489,7 @@ Le workflow commun `fumee` tourne après chaque déploiement de production. Il c
 
 ## 12. Audit régulier
 
-**Chaque lundi**, le workflow `rapport-hebdo` ouvre une issue dans `MoKarade/.github`, intitulée « Rapport de la semaine du AAAA-MM-JJ ». Tous les chiffres sont lus sur GitHub et Vercel, aucun n'est tapé à la main. Il mesure :
-- **la vitesse** :
-  - le délai entre la création d'une tâche et son acceptation (médiane et maximum) ;
-  - les tâches acceptées, par dépôt et par exécutant (fil, Jules) ;
-  - le cumul par exécutant depuis la première livraison de la mission .github#703 : chaque rapport porte une ligne cachée `<!-- cumul-par-auteur : {...} -->` (date de fin et effectifs), le suivant la lit et ne relit que les tâches acceptées après cette date ; sans ligne lisible, il relit tout (42 jours au plus) et le dit ; le rapport écrit le nombre d'appels API de sa lecture ;
-  - le délai entre la mise en ligne (ou la fusion) et « Acceptée » (médiane et maximum), avec la part des tâches prouvées dans l'heure ;
-- **la qualité** :
-  - les PR passées au rouge et le temps pour revenir au vert ;
-  - les retours en arrière et les incidents ;
-  - les tests instables ;
-  - la couverture, par dépôt ;
-  - la grille de conformité, en lignes vertes par dépôt ;
-- **la santé du backlog** :
-  - les tâches bloquées depuis plus de 7 jours ;
-  - les gestes de Marc en attente, avec leur âge ;
-  - les orphelines ;
-  - les tâches fusionnées mais pas encore prouvées, et les preuves programmées avec leur date.
-
-**Le premier lundi du mois**, la même issue porte aussi la revue de la grille de conformité. Ce que les incidents du mois ont appris devient des lignes neuves, proposées en tâches.
+Le rapport hebdomadaire (workflow `rapport-hebdo`, issue « Rapport de la semaine du AAAA-MM-JJ ») est retiré depuis le 29/10/2026 sur décision de Marc (nettoyage du workflow, « go reco »). Les chiffres de vitesse et de qualité se lisent à la demande sur GitHub ; l'historique des anciens rapports reste dans les issues `rapport`.
 
 ## 13. Gantt
 
@@ -589,7 +571,7 @@ Un fichier est traité une seule fois (journal par id), puis supprimé ; un éch
 | Garde-fou de preuve (`preuve.yml` commun, appelé par `reacteur.yml` des dix dépôts) | §10 bis : aucune tâche fermée sans preuve valide |
 | Routine continue | §5, §6 |
 | Gantt et sa pastille | §7, §13 |
-| Workflows communs de ce dépôt (`captures`, `fumee`, `rapport-hebdo`) | §8, §11, §12 |
+| Workflows communs de ce dépôt (`captures`, `fumee`) | §8, §11, §12 |
 | Réacteur : `reveil-reacteur.yml` (commun), `reacteur.yml` (chaque dépôt) et `boite-reacteur.yml` (`app-template`) | §6 : réveils par événement |
 | Instructions du projet (résumé du §0) | tout, pour chaque session |
 
