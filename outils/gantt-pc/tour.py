@@ -4,13 +4,12 @@
 # du quota Claude (Marc, 16/10 : « je veux pas une routine qui tourne et qui demande des quotas »). Même logique que refresh.sh,
 # sans bash ni find ni timeout, pour tourner sous Windows comme sous Linux.
 #   1. relevé GitHub (fetch.py) : léger si un relevé plein a moins d'1 h, sinon plein ; quotas (quota.py) à chaque tour, complets 1×/h
-#   2. build.py : prochaines.json, donnees.json
+#   2. build.py : donnees.json (la file calculée prochaines.json est RETIRÉE depuis le 29/10/2026, voie courte)
 #   3. fiabilité (verif-fidelite.mjs de MoKarade/.github) : mesure complète si la précédente a plus de 55 min, sinon instantané de file seul
-#   4. filet (filet-pc.mjs de MoKarade/.github, tâche #196) : un dépôt libre avec une tâche prenable et sans lancement depuis plus de
-#      30 min réveille le Coordinateur (boite-reacteur.yml d'app-template, avec le jeton gh du PC) ; aucun appel Claude
+#   4. filet (filet-pc.mjs de MoKarade/.github) : passage quotidien du Réacteur, file Mergify, preuves en retard (boite-reacteur.yml d'app-template, avec le jeton gh du PC) ; aucun appel Claude
 #   0. réponses de Marc (reponses.py) : ce qu'il a coché dans l'onglet « À toi », déposé par la page au hub (Hubperso#556) ou dans le dossier Drive, appliqué sur
 #      GitHub avec le jeton gh du PC, puis réveil du Coordinateur ; avant le relevé, pour qu'il en voie déjà l'effet
-#   5. dépôt dans le dossier Google Drive synchronisé (--drive DOSSIER) : donnees.json.gz (lu par la page), prochaines.json,
+#   5. dépôt dans le dossier Google Drive synchronisé (--drive DOSSIER) : donnees.json.gz (lu par la page),
 #      fiabilite.json, quota.json, etat.json. Les fichiers sont RÉÉCRITS SUR PLACE : Drive garde alors le même identifiant.
 #   5 bis. envoi au hub (pousser_hub.py, .github#544) : POST https://www.hubperso.com/api/gantt, secret lu dans C:\dev\_pc-local\gantt-secret.txt, jamais bloquant
 # Freins : le jeton du PC est celui de Marc, partagé avec tout le reste de son compte (5 000 appels/h). Sous 1 500 appels restants, tour
@@ -146,10 +145,7 @@ def releve(econome=False, quota_complet=True, drive=None):
     # 2. file du script + données de la page
     if lancer([PY, 'build.py'], '.refresh-build.log', 600) != 0: return 1, f'ÉCHEC {maintenant()} build.py : {queue(".refresh-build.log")}'
     asof = lire('backlog.json')['asof']
-    try: p = lire('prochaines.json')
-    except (OSError, ValueError): p = {}
-    if p.get('source_asof') != asof: return 1, f'ÉCHEC {maintenant()} prochaines.json non écrit pour le relevé {asof}'
-    # 3. fiabilité : mesure complète au plus 1×/h (≈ 800 appels), sinon instantané de file (aucun appel GitHub, date du fichier gardée)
+    # 3. fiabilité : mesure complète au plus 1×/h (≈ 800 appels), sinon la mesure précédente est reprise (aucun appel GitHub, date du fichier gardée)
     fid = 'non mesurée'
     script = D + 'scripts-github/verif-fidelite.mjs'
     texte = open(script, encoding='utf-8').read() if os.path.exists(script) else ''
@@ -157,18 +153,17 @@ def releve(econome=False, quota_complet=True, drive=None):
     if texte and not econome and (a is None or a >= 55):
         n = str(lire('donnees.json')['sante']['n'])
         i4 = ['--depuis-i4', '2026-10-16T19:48:00Z'] if '--depuis-i4' in texte else []
-        if lancer([NODE, script, 'backlog.json', 'prochaines.json', '--sortie', 'fiabilite.json', '--defauts', n] + i4, '.refresh-fiab.log', 600) == 0:
+        if lancer([NODE, script, 'backlog.json', '--sortie', 'fiabilite.json', '--defauts', n] + i4, '.refresh-fiab.log', 600) == 0:
             fid = ([l for l in open(D + '.refresh-fiab.log', encoding='utf-8', errors='replace').read().splitlines() if l.strip()] or ['mesurée'])[-1]
             if lancer([PY, 'build.py'], '.refresh-build.log', 600) != 0: return 1, f'ÉCHEC {maintenant()} build.py (2e passe) : {queue(".refresh-build.log")}'
         else: fid = 'ÉCHEC de la mesure : ' + queue('.refresh-fiab.log', 200)
-    elif texte and '--snapshot-seulement' in texte:
-        fid = f'mesure précédente reprise ({lire("fiabilite.json")["calcule_le"][11:16]}Z)'
-        lancer([NODE, script, '--snapshot-seulement', 'prochaines.json', '--sortie', 'fiabilite.json'], '.refresh-fiab.log', 120, ajout=True)
+    elif texte:
+        fid = f'mesure précédente reprise ({lire("fiabilite.json")["calcule_le"][11:16]}Z)'      # plus d'instantané de file : prochaines.json n'existe plus
     # 4. filet du PC : n'écrit rien sur la page ni sur le Drive ; sa ligne se lit dans etat.json. Un échec ne fait pas échouer le tour.
     filet = ''
     script_filet = D + 'scripts-github/filet-pc.mjs'
     if os.path.exists(script_filet):
-        lancer([NODE, script_filet, 'prochaines.json', '--etat', 'filet-pc-etat.json', '--executer'], '.refresh-filet.log', 120)
+        lancer([NODE, script_filet, '--etat', 'filet-pc-etat.json', '--executer'], '.refresh-filet.log', 120)
         filet = ' · ' + (queue('.refresh-filet.log', 520) or 'filet PC : sans sortie')
     # 3 bis. gestes de Marc à jour (gestes.py, .github#478) : un « fait » clair de Marc retire `qui:marc` (même commentaire que le bouton « Fait »),
     # le reste est signalé dans etat.json et dans les deux listes. Un échec se DIT, il ne fait pas échouer le tour.
@@ -190,20 +185,13 @@ def releve(econome=False, quota_complet=True, drive=None):
             fermees, refus = missions.fermer(m['a_fermer'], lire('backlog.json')['asof'], reponses.gh)
             rep += f' · missions fermées : {", ".join(fermees) or "aucune"}' + (f' ; refus : {" ; ".join(refus)}' if refus else '')
     except Exception as e: rep += f' · missions : ÉCHEC {type(e).__name__} : {str(e)[:160]}'
-    p = lire('prochaines.json')
-    file = ' '.join(d['depot'] + '=' + (d['suivante']['ref'] if d.get('suivante') else d['statut']) for d in p['depots'])
-    # La mesure du quota Claude écrite par la tâche « Quota-Claude » : trop vieille, elle ne dit plus rien (le frein garde alors son palier ou,
-    # après la remise à zéro, l'ignore : .github#319). Se DIT dans etat.json, sinon une tâche arrêtée ne se voit nulle part.
-    fd = p.get('frein_detail') or {}
-    if fd.get('apres_reset'): quota += ' · quota Claude : remise à zéro passée, mesure de la semaine précédente ignorée (frein normal)'
-    elif (fd.get('age_heures') or 0) > 3: quota += f' · quota Claude : mesure vieille de {fd["age_heures"]} h (tâche Quota-Claude arrêtée ?)'
     rv = lire('backlog.json').get('relectures_vide')      # pages vides de GitHub relues pendant ce relevé (.github#494) : se DIT, une panne de lecture ne se devine pas
     relectures = '' if rv is None else f' · relectures de pages vides : {rv}'
     # .github#741 : le coût en appels REST du relevé se lit dans la ligne OK. Relevé sauté : le journal date d'un tour précédent, on n'y lit rien.
     try: appels = '' if sauter else economie.ligne_appels(open(D + '.refresh-fetch.log', encoding='utf-8', errors='replace').read())
     except OSError: appels = ''
     appels = f' · lecture GitHub : {appels}' if appels else ''
-    return 0, f'OK {maintenant()} relevé {mode} {asof}{appels} · prochaines.json {p["calcule_le"]} {file} · fiabilité : {fid}{relectures}{quota}{filet}{rep}'
+    return 0, f'OK {maintenant()} relevé {mode} {asof}{appels} · fiabilité : {fid}{relectures}{quota}{filet}{rep}'
 
 # Drive absent (22/10/2026, .github#529) : le lecteur G: n'était plus monté de 18:31Z à 19:20Z ; le tour écrivait « OK » dans son état local puis
 # plantait au dépôt (FileNotFoundError), et la page est restée 56 min sur le relevé de 18:25Z sans que rien ne le dise.
@@ -241,7 +229,7 @@ def deposer_drive(drive, code):
         os.makedirs(drive, exist_ok=True)
         if code == 0:
             sur_place(D + 'donnees.json', os.path.join(drive, 'donnees.json.gz'), gz=True)
-            for f in ('prochaines.json', 'fiabilite.json', 'quota.json', 'boucle-etat.json', 'gestes-de-marc.md', 'a-faire-maintenant.md'):
+            for f in ('fiabilite.json', 'quota.json', 'boucle-etat.json', 'gestes-de-marc.md', 'a-faire-maintenant.md'):
                 if os.path.exists(D + f): sur_place(D + f, os.path.join(drive, 'etat.json' if f == 'boucle-etat.json' else f))
         else:
             sur_place(ETAT, os.path.join(drive, 'etat.json'))   # un échec se voit aussi depuis la page
