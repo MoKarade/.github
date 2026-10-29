@@ -55,6 +55,7 @@ import { accepterPreuvesAttendues, LUES_EVENEMENT, LUES_FILET } from './preuve-a
 import { fileDuDepot } from './file-depot.mjs';
 import { confierJulesDuDepot } from './jules-auto.mjs';
 import { ghSynchrone, lignesDesSignaux, piloteDuJob } from './pilotage-evenement.mjs';
+import { estDeConfiance } from './auteur-de-confiance.mjs';
 
 export const DEPOT_BOITE = 'MoKarade/app-template';
 export const WORKFLOW_BOITE = 'boite-reacteur.yml';
@@ -106,6 +107,7 @@ const ENTETE_RELEVE_PC = /^\s*\*\*Relevé PC\*\*\s*[—:-]\s*(.*)$/is;
  */
 export function lireCommentairePc(commentaire) {
   if (!commentaire || commentaire.user?.type !== 'User') return { sorte: null, erreur: 'commentaire absent ou posé par un robot' };
+  if (!estDeConfiance(commentaire)) return { sorte: null, erreur: 'commentaire d’un compte tiers (dépôt public) : ignoré' };
   const corps = String(commentaire.body ?? '');
   if (ENTETE_DEMANDE_PC.test(corps)) return { sorte: 'demande', erreur: null };
   const m = ENTETE_RELEVE_PC.exec(corps);
@@ -259,7 +261,7 @@ export function preuveAPoser({ issue, commentaires }) {
   if (!issue || issue.state !== 'open') return false;
   const labels = (issue.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
   if (!labels.includes(LABEL_TACHE) || labels.includes(LABEL_ATTENDUE)) return false;
-  return !commentaires.some((c) => c.user?.type === 'User' && ENTETE_ACCEPTEE.test(c.body ?? ''));
+  return !commentaires.some((c) => c.user?.type === 'User' && estDeConfiance(c) && ENTETE_ACCEPTEE.test(c.body ?? ''));
 }
 
 /** Jour et heure au Québec pour une date : { heure: 0..23, jour: 'Mon'..'Sun' }. */

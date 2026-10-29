@@ -15,6 +15,7 @@
 // (`traiter`, avec `api` injecté : les tests n'ont besoin ni de réseau ni de jeton). Le jeton n'est lu que dans `main`.
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { estDeConfiance } from './auteur-de-confiance.mjs';
 
 export const LABEL_TACHE = 'niveau:tâche';
 export const LABEL_MANQUE = 'preuve-manquante';
@@ -38,7 +39,7 @@ const SANS_SERVICE =
 
 export const servi = (fichiers) => fichiers.some((f) => !SANS_SERVICE.test(f));
 
-const humain = (c) => c.user?.type === 'User' && !/jules/i.test(c.user.login ?? '');
+const humain = (c) => c.user?.type === 'User' && !/jules/i.test(c.user.login ?? '') && estDeConfiance(c);
 // Seule exception à « jamais un robot » (docs/cycle-de-vie-tache.md §10 ter) : l'acceptation automatique de scripts/acceptation-auto.mjs,
 // écrite par le robot des workflows et qui porte ce marqueur. Elle n'est reconnue que pour « Acceptée », jamais pour un abandon.
 export const MARQUEUR_AUTO = '<!-- acceptation-auto -->';
