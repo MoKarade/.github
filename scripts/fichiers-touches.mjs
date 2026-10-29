@@ -8,19 +8,51 @@
 // de fichier seul (`fetch.py`) quand il désigne un à trois fichiers du dépôt, plus le fichier de test voisin de chaque fichier de code cité s'il existe. Pas d'élargissement au dossier : il fermerait la deuxième place dans tout dépôt plat
 // (`scripts/`, `lib/`). Si l'estimation est trop étroite, la PR le montre (ses fichiers réels s'ajoutent, tâche #359) et un conflit de texte se
 // règle en fusionnant la base. Aucun chemin existant cité (ou plus de `CITES_MAX`) : le bloc dit « non déterminés » et la tâche reste inconnue,
-// donc seule (règle du doute). Un « Fichiers permis » exact (gabarit Jules) l'emporte sur ce bloc quand les deux existent.
+// donc seule (règle du doute). Un « Fichiers permis » exact l'emporte sur ce bloc quand les deux existent.
 //
 // Fonctions pures (`composerBloc`, `entete`) d'un côté ; I/O injecté (`gh`) de l'autre : les tests n'ont besoin ni de réseau ni de fichier.
 
-import { jetonsChemins, existe } from './jules-gabarit.mjs';
-import { tachesCitees } from './jules-suivi.mjs';
-import { section } from './jules-auto.mjs';
+import { tachesCitees, section } from './jules-suivi.mjs';
 
 const ORG = 'MoKarade';
+// Les autres dépôts de l'organisation (`.github` est exclu : `.github/workflows/…` est un vrai dossier de chaque dépôt).
+const AUTRES_DEPOTS = new Set(['app-template', 'batchchef-', 'carai', 'driveai', 'financeai', 'hub-contract', 'hubperso', 'jobai', 'lia-ui', 'memoryai', 'mokarade']);
+const enAutreDepot = (jeton) => AUTRES_DEPOTS.has(jeton.split('/')[0].toLowerCase());
+
+
+/**
+ * Les chemins de fichiers cités entre `backticks` dans un texte, et les motifs (`*`) à part.
+ * Un jeton sans `/` (un nom de fonction, `BACKLOG.md:L381`) ou qui commence par `/` (une URL de l'app) n'est pas un chemin de fichier.
+ */
+export function jetonsChemins(texte) {
+  const chemins = [];
+  const motifs = [];
+  for (const m of String(texte ?? '').matchAll(/`([^`\n]+)`/g)) {
+    const jeton = m[1].trim().replace(/:L?\d+(?:-L?\d+)?$/, '');
+    if (!jeton.includes('/') || jeton.startsWith('/') || /^https?:/.test(jeton) || /\s/.test(jeton)) continue;
+    if (jeton.includes('*')) { motifs.push(jeton); continue; }
+    if (!/^[\w@.\-/[\]()]+\.\w{1,6}$/.test(jeton)) continue;
+    if (enAutreDepot(jeton)) continue; // `Hubperso/lib/sources.ts` : un fichier d'un autre dépôt, cité pour référence
+    if (!chemins.includes(jeton)) chemins.push(jeton);
+  }
+  return { chemins, motifs };
+}
+
+/** Le chemin existe-t-il comme FICHIER à la racine par défaut du dépôt ? Une erreur autre que « introuvable » remonte (rien n'est deviné). */
+export function existe(gh, depot, chemin, { dossier = false } = {}) {
+  try {
+    const r = gh('GET', `repos/${depot}/contents/${chemin.split('/').map(encodeURIComponent).join('/')}`);
+    return dossier ? Array.isArray(r) : !Array.isArray(r);
+  } catch (e) {
+    if (/404|Not Found/i.test(`${e.message} ${e.stderr ?? ''}`)) return false;
+    throw e;
+  }
+}
+
 export const MARQUEUR = '<!-- fichiers-auto -->';
 export const PAR_TOUR_MAX = 8; // tâches écrites par tour, tous dépôts confondus : les lectures et les écritures restent bornées
 export const CITES_MAX = 10; // au-delà, la tâche est trop large pour une estimation honnête
-// La ligne existe déjà (écrite par un fil, par le gabarit Jules ou par ce script) : rien à faire.
+// La ligne existe déjà (écrite par un fil ou par ce script) : rien à faire.
 // Au début d'une ligne, comme la grammaire de capacite.mjs : une phrase qui parle de la ligne (« la ligne **Fichiers touchés** ») n'est pas la ligne.
 export const ENTETE = /^\s*\*\*\s*Fichiers (?:permis|touchés)\s*\*\*/im;
 const BLOC_AUTO = /(?:^|\n)<!-- fichiers-auto -->\n\*\*Fichiers touchés\*\*/;
@@ -42,7 +74,7 @@ export const aLaLigne = (corps) => ENTETE.test(String(corps ?? '')) || BLOC_AUTO
 
 /**
  * Les tests voisins d'un fichier de code : à côté (`a/b.test.ts`) ou sous `tests/` (à la racine, ou sous le préfixe d'app `web/`, `app/`). Pour
- * `page`, `route`, `index`, `layout`, le test porte le nom du dossier (`tests/tendances.test.ts`), comme `deriverTest` de jules-gabarit.mjs.
+ * `page`, `route`, `index`, `layout`, le test porte le nom du dossier (`tests/tendances.test.ts`), comme le faisait l'ancien gabarit Jules.
  */
 export function testsCandidats(chemin) {
   const morceaux = chemin.split('/');

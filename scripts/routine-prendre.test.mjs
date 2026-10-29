@@ -50,7 +50,7 @@ test('tacheLancable : ouverte, niveau tâche, sans étiquette qui l’écarte', 
   assert.equal(tacheLancable(null).ok, false);
   assert.equal(tacheLancable({ ...prete, state: 'closed' }).ok, false);
   assert.equal(tacheLancable({ state: 'open', labels: [{ name: 'niveau:mission' }] }).ok, false);
-  for (const l of ['en-cours', 'jules', 'faisable-jules', 'qui:marc', 'bloqué', 'preuve-attendue']) {
+  for (const l of ['en-cours', 'jules', 'qui:marc', 'bloqué', 'preuve-attendue']) {
     assert.equal(tacheLancable({ ...prete, labels: [...prete.labels, { name: l }] }).ok, false, l);
   }
 });
@@ -96,7 +96,7 @@ test('file occupée, en incident ou illisible : aucun appel', async () => {
 });
 
 test('tâche prise par Jules, en cours, qui:marc, bloquée ou preuve-attendue : aucun appel', async () => {
-  for (const l of ['jules', 'faisable-jules', 'en-cours', 'qui:marc', 'bloqué', 'preuve-attendue']) {
+  for (const l of ['jules', 'en-cours', 'qui:marc', 'bloqué', 'preuve-attendue']) {
     const { api, ecritures } = faux({ issue: { ...prete, labels: [...prete.labels, { name: l }] } });
     const { appeler, appels } = fauxFetch();
     const res = await lancer({ api, appeler });

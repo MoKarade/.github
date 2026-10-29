@@ -25,23 +25,21 @@
 // `prochaine-tache.mjs` liste dans `oubliees` (personne ne peut lever l'obstacle, geste de Marc qui dort, fil silencieux), une fois par racine
 // et par 24 h tant que ça dure. Sans cela une tâche retenue par un geste de Marc, un « bloqué » sans raison ou une dépendance illisible ne
 // revient jamais dans la file et rien ne le dit. Message à part (`RÉACTEUR : oubli : …`) : il nomme les tâches, puisque c'est son objet.
-// Quatrième rôle (demande de Marc du 19/10/2026, « Jules full auto ») : confier à Jules la première tâche réservée (`faisable-jules`). RETIRÉ du tour le
-// 28/10/2026 (tâche MoKarade/.github#704, « rien ne dépend du PC ») : le Réacteur le fait à l'événement (`confierJulesDuDepot`, `scripts/jules-auto.mjs`, docs §5 quater).
+// Quatrième rôle (« Jules full auto ») : confier à Jules les tâches réservées. SUPPRIMÉ (nettoyage du 29/10/2026, « go reco » de Marc) : un fil pose lui-même l'étiquette `jules`.
 // Cinquième rôle (demande du Coordinateur du 19/10/2026, tâche MoKarade/.github#285, après la fusion à la main de #270) : remettre en file toute PR
 // verte sortie de la file Mergify (étiquette `dequeued`) en mettant sa branche à jour (`update-branch`, que Mergify requeue seul), sans jamais
 // taper de commande `@mergifyio` (seul Marc le peut). Branche déjà à jour ou en conflit : réveil du Coordinateur, une fois par 2 h, avec la raison.
 // Sixième rôle (demande de Marc du 19/10/2026 18:31Z, « go full auto », tâche MoKarade/.github#289) : suivre les PR de Jules sans fil (`tourJulesSuivi`,
 // `scripts/jules-suivi.mjs`) : nettoyer le corps des PR ouvertes, poser `hold` et réveiller si un fichier sort de « Fichiers permis », et accepter seul
 // (« **Acceptée** » au format du garde-fou, étiquettes retirées, tâche fermée) la PR de TESTS SEULS fusionnée.
-// Septième ajout au même tour (tâche MoKarade/.github#296) : poser seul `faisable-jules` sur les tâches que `evaluerJules` accepte (`scripts/jules-marquage.mjs`, au plus deux réservées par dépôt).
-// Huitième ajout (tâche MoKarade/.github#303) : compléter seul le corps des tâches pour Jules (`scripts/jules-gabarit.mjs`), 20 par 24 h au plus.
+// Septième et huitième ajouts (pose de `faisable-jules`, gabarit de tâche pour Jules) : SUPPRIMÉS le 29/10/2026 (nettoyage « Jules repéré seul », « go reco » de Marc).
 // Neuvième ajout (tâche MoKarade/.github#358) : écrire seul la ligne « Fichiers touchés » des tâches qui n'en ont pas (`scripts/fichiers-touches.mjs`), 8 par tour au plus :
 // sans fichiers connus, la deuxième place d'un dépôt ne sert jamais.
 // Dixième ajout (tâche MoKarade/.github#421) : écrire seul la ligne « Acceptation automatique » des tâches dont le « Fini quand » se lit par une machine
 // (`scripts/acceptation-marquage.mjs`, 8 par tour au plus) : sans elle, `acceptation-auto.mjs` n'accepte jamais rien (§10 ter).
 // Onzième ajout (tâche MoKarade/.github#513) : redire au Coordinateur, toutes les 4 h, chaque preuve en retard (`scripts/preuves-retard.mjs`, `defauts-preuve.json` du relevé) :
 // une tâche fusionnée sans « Acceptée » valide ou dont la preuve programmée est dépassée ne dépend plus du seul fil qui devait la poser.
-// Du sixième au dixième rôle (suivi des PR de Jules, `faisable-jules`, gabarit, « Fichiers touchés », « Acceptation automatique ») : DÉPLACÉS vers le Réacteur le 29/10/2026
+// Du sixième au dixième rôle (suivi des PR de Jules, « Fichiers touchés », « Acceptation automatique ») : DÉPLACÉS vers le Réacteur le 29/10/2026
 // (tâche MoKarade/.github#715, « rien ne dépend du PC »). Les fonctions `tour*` restent ici, testées, mais `main` ne les lance plus ; le Réacteur appelle les fonctions des
 // modules (`scripts/pilotage-evenement.mjs`) sur l'événement qui les rend utiles.
 // Un échec du réveil ne fait JAMAIS échouer le tour (il se dit sur la ligne imprimée) et n'enregistre pas le signalement :
@@ -53,13 +51,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DEPOT_BOITE, WORKFLOW_BOITE, construireMotif } from './reveil-reacteur.mjs';
 import { lierTout, ghCli, compteursGh } from './lier-taches.mjs';
 import { suivreDepot, menageFermees, marquerParJules } from './jules-suivi.mjs';
-import { marquerFaisables, retirerPerimees } from './jules-marquage.mjs';
-import { completerDepot } from './jules-gabarit.mjs';
 import { completerDepot as estimerFichiers, PAR_TOUR_MAX as ESTIMATIONS_PAR_TOUR } from './fichiers-touches.mjs';
 import { completerDepot as marquerAcceptation, PAR_TOUR_MAX as MARQUAGES_PAR_TOUR } from './acceptation-marquage.mjs';
 import { annulerPreuves, evaluerPreuvesRetard, motifDesPreuves } from './preuves-retard.mjs';
 
-export const MODULES_VERSION = ['filet-pc', 'jules-suivi', 'jules-marquage', 'jules-gabarit', 'jules-auto', 'fichiers-touches', 'acceptation-marquage', 'preuves-retard'];
+export const MODULES_VERSION = ['filet-pc', 'jules-suivi', 'fichiers-touches', 'acceptation-marquage', 'preuves-retard'];
 
 /**
  * La version du code que ce tour exécute : le sha git (7 caractères) de chaque fichier, calculé comme `git hash-object` (le PC n'a pas de dépôt,
@@ -522,7 +518,7 @@ export function tourJulesSuivi({ fichierEtat, executer = false, aBlanc = false, 
   try {
     const appel = gh ?? ghCli;
     const etat = lireJson(fichierEtat, {});
-    const total = { acceptees: [], nettoyees: [], holds: [], signaux: [], menage: [], completees: [], refus: [], perimees: [], marquees: [], parJules: [], vu: 0 };
+    const total = { acceptees: [], nettoyees: [], holds: [], signaux: [], menage: [], parJules: [], vu: 0 };
     const echecs = [];
     for (const depot of depots) {
       try {
@@ -531,11 +527,6 @@ export function tourJulesSuivi({ fichierEtat, executer = false, aBlanc = false, 
         total.vu += r.vu;
         try { total.parJules.push(...marquerParJules({ depot, gh: appel, aBlanc: aBlanc || !executer, etat, maintenant }).marquees); } catch (e) { echecs.push(`${depot.replace('MoKarade/', '')} par-jules (${String(e.message).replace(/\s+/g, ' ').slice(0, 60)})`); } // un échec ici ne coupe pas le reste du dépôt
         total.menage.push(...menageFermees({ depot, gh: appel, aBlanc: aBlanc || !executer }));
-        total.perimees.push(...retirerPerimees({ depot, gh: appel, aBlanc: aBlanc || !executer })); // une étiquette périmée libère la tâche avant qu'on la complète
-        const c = completerDepot({ depot, gh: appel, etat, maintenant, aBlanc: aBlanc || !executer }); // avant le marquage : une tâche complétée est réservée dans le même tour
-        total.completees.push(...c.completees);
-        total.refus.push(...c.refusees);
-        total.marquees.push(...marquerFaisables({ depot, gh: appel, aBlanc: aBlanc || !executer }).marquees);
       } catch (e) {
         echecs.push(`${depot.replace('MoKarade/', '')} (${String(e.message).replace(/\s+/g, ' ').slice(0, 60)})`);
       }
@@ -552,7 +543,7 @@ export function tourJulesSuivi({ fichierEtat, executer = false, aBlanc = false, 
     }
     if (executer && !aBlanc) ecrireJson(fichierEtat, etat);
     const seul = !executer || aBlanc ? ' (non appliqué)' : '';
-    return `jules-suivi : ${total.vu} tâche(s) jules, ${total.acceptees.length} acceptée(s)${total.acceptees.length ? ` (${total.acceptees.join(', ')})` : ''}, ${total.nettoyees.length} PR nettoyée(s), ${total.holds.length} hold${total.menage.length ? `, ${total.menage.length} étiquette(s) retirée(s) sur tâches fermées` : ''}${total.perimees.length ? `, ${total.perimees.length} faisable-jules périmée(s) retirée(s) (${total.perimees.join(', ')})` : ''}${total.completees.length ? `, ${total.completees.length} complétée(s) au gabarit (${total.completees.join(', ')})` : ''}${total.refus.length ? `, refus : ${total.refus.slice(0, 3).map((x) => `${x.ref} ${x.raison.slice(0, 70)}`).join(' ; ')}${total.refus.length > 3 ? ` (+${total.refus.length - 3})` : ''}` : ''}${total.marquees.length ? `, ${total.marquees.length} marquée(s) faisable-jules (${total.marquees.join(', ')})` : ''}${total.parJules.length ? `, ${total.parJules.length} PR marquée(s) par-jules (${total.parJules.slice(0, 6).join(', ')}${total.parJules.length > 6 ? ', …' : ''})` : ''}${seul}${envoi}${echecs.length ? `, ÉCHEC ${echecs.join(' ; ')}` : ''}`;
+    return `jules-suivi : ${total.vu} tâche(s) jules, ${total.acceptees.length} acceptée(s)${total.acceptees.length ? ` (${total.acceptees.join(', ')})` : ''}, ${total.nettoyees.length} PR nettoyée(s), ${total.holds.length} hold${total.menage.length ? `, ${total.menage.length} étiquette(s) retirée(s) sur tâches fermées` : ''}${total.parJules.length ? `, ${total.parJules.length} PR marquée(s) par-jules (${total.parJules.slice(0, 6).join(', ')}${total.parJules.length > 6 ? ', …' : ''})` : ''}${seul}${envoi}${echecs.length ? `, ÉCHEC ${echecs.join(' ; ')}` : ''}`;
   } catch (e) {
     return `jules-suivi : ÉCHEC (${String(e.message).slice(0, 160)})`;
   }
@@ -637,7 +628,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const quota = mesure('quota', () => tourQuota({ fichierProchaines, fichierEtat: fichierEtat.replace(/(\.json)?$/, '-quota.json'), ...options }));
     const liens = mesure('liens', () => tourLiens({ fichierProchaines, ...options }));
     const file = mesure('file', () => tourFile({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-file.json'), ...options }));
-    // .github#715 : le suivi des PR de Jules, la réservation `faisable-jules`, le gabarit, « Fichiers touchés » et « Acceptation automatique » partent à l'événement
+    // .github#715 : le suivi des PR de Jules, « Fichiers touchés » et « Acceptation automatique » partent à l'événement
     // (`scripts/pilotage-evenement.mjs`, appelé par le Réacteur) ; le tour du PC n'en lance plus aucun. Il garde la file Mergify (`tourFile`) : mettre une branche à
     // jour AVEC un jeton qui relance la CI est le seul geste que le jeton du job ne sait pas faire (GitHub ne lance aucun workflow sur un push du jeton du job).
     const preuves = mesure('preuves', () => tourPreuvesRetard({ fichierDefauts: fichierProchaines.replace(/[^/\\]*$/, '') + 'defauts-preuve.json', fichierEtat: fichierEtat.replace(/(\.json)?$/, '-preuves.json'), ...options }));

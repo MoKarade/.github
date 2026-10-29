@@ -17,7 +17,7 @@
 // Frein de quota (palier `frein` en tête du fichier) : retient les tâches non permises, état `frein` si c'est tout ce qui reste.
 // Capacité : DEUX travaux par dépôt au plus (décision de Marc, 21/10/2026), sur des fichiers disjoints (`capacite.mjs`). Un travail est une
 // tâche `en-cours` ouverte, une PR de tâche ouverte, ou un fil actif passé en option. Une tâche `jules` n'en est PAS un (décision de Marc,
-// 23/10/2026 22:45Z) : elle sort de `occupe_par` et de `places`, et se lit dans `jules_en_cours`. Une tâche `preuve-attendue` n'occupe pas
+// 23/10/2026 22:45Z) : elle sort de `occupe_par` et de `places`. Une tâche `preuve-attendue` n'occupe pas
 // le dépôt, ni une tâche dont la PR ouverte n'attend plus qu'un geste de Marc (`pr_attend_marc` du dépôt dans le relevé, tâche #197) : elle
 // sort de `occupe_par`, reste dans `attend_marc`. Statut : `libre` (aucun travail), `partiel` (un travail et une tâche à fichiers disjoints
 // à lui associer), `occupe` (deux travaux, ou un seul sans tâche compatible : fichiers non déclarés ou communs = un seul). `suivantes` : les
@@ -318,8 +318,6 @@ function ecart(n, depot, idx, maintenant = new Date()) {
   // Les fichiers aussi s'écrivent (#360) : sans eux, la deuxième place du dépôt ne peut jamais servir à cette tâche.
   if (fichiersAbsents(n, maintenant)) return { code: 'fichiers-absents', detail: '' };
   if (n.pr?.state === 'open') return { code: 'pr-ouverte', detail: `PR ${n.pr.repo ?? depot.repo}#${n.pr.n}` };
-  // Réservée à Jules par celui qui l'a rangée : Claude ne la prend pas (sinon les deux la prendraient), le filet du PC la confie quand le dépôt est libre.
-  if (n.labels.includes('faisable-jules')) return { code: 'jules-reservee', detail: 'faisable-jules' };
   if (!String(n.fq ?? '').trim()) return { code: 'fini-quand-absent', detail: '' };
   return null;
 }
@@ -329,7 +327,7 @@ function ecart(n, depot, idx, maintenant = new Date()) {
 export const ATTENTE = { marcHeures: 48, marcIsoleHeures: 168, filHeures: 24 };
 
 // Qui peut lever l'obstacle d'après son code. Un code absent de la table n'a PERSONNE pour le lever.
-const PROPRIETAIRE = { 'geste-marc': 'marc', 'preuve-attendue': 'preuve', 'en-cours': 'fil', jules: 'fil', 'pr-ouverte': 'fil', 'frein-quota': 'frein', 'jules-reservee': 'fil', prenable: 'file', mission: 'mission' };
+const PROPRIETAIRE = { 'geste-marc': 'marc', 'preuve-attendue': 'preuve', 'en-cours': 'fil', jules: 'fil', 'pr-ouverte': 'fil', 'frein-quota': 'frein', prenable: 'file', mission: 'mission' };
 const CAUSE_SANS_PROPRIETAIRE = { 'attend-absent': 'attend-absent', 'fichiers-absents': 'fichiers-absents', 'preuve-chez-marc': 'preuve-chez-marc', bloquee: 'bloquee-sans-reprise', 'attend-inconnue': 'dependance-illisible', 'fini-quand-absent': 'fini-quand-absent', cycle: 'dependance-circulaire' };
 
 const heuresDepuis = (t, maintenant) => (t ? (maintenant.getTime() - Date.parse(t)) / 3_600_000 : null);
@@ -494,15 +492,11 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
     const taches = Object.values(depot.nodes).filter((n) => n.lvl === 'tâche' && n.state === 'open');
     const exclues = {};
     const prenables = [];
-    const reserveesJules = [];
     for (const n of taches) {
       const e = ecart(n, depot, idx, maintenant);
       if (e) exclues[ref(depot.repo, n.n)] = e;
       else prenables.push(n);
-      // Réservée à Jules (`faisable-jules`) : hors de la file de Claude, matière du filet du PC (docs §5 quater).
-      if (e?.code === 'jules-reservee') reserveesJules.push({ ref: ref(depot.repo, n.n), n: n.n, titre: n.title, url: n.url, prio: prioDe(n.labels) });
     }
-    reserveesJules.sort((a, b) => a.prio - b.prio || a.n - b.n);
     // Une PR dont le seul obstacle est un geste de Marc (le Garde-fou a ouvert « la PR #n attend un geste de Marc », `qui:marc`) n'occupe
     // plus le dépôt : le fil qui l'a ouverte n'a plus rien à faire dessus (tâche #197). La PR garde son état, le geste reste chez Marc.
     const attendMarc = new Set(depot.pr_attend_marc ?? []);
@@ -514,9 +508,7 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
       ...taches.filter((n) => !attend.has(n) && n.pr?.state === 'open' && !n.labels.includes('en-cours') && !n.labels.includes('jules')).map((n) => ({ ref: ref(depot.repo, n.n), motif: 'pr-ouverte', fichiers: fichiersDuTravail(n.fpl, n.pr.ff) })),
       ...(actifs.has(minuscule(depot.repo)) || actifs.has(minuscule(depot.name)) || actifs.has(minuscule(depot.key)) ? [{ ref: null, motif: 'fil-actif', fichiers: null }] : []),
     ];
-    // Jules ne tient pas de place (décision de Marc, 23/10/2026 22:45Z : « il prend quand même ») : ses tâches sortent de `occupe_par`, mais restent
-    // lisibles ici pour le filet de Jules (`jules-auto.mjs` : au plus trois à la fois, jamais deux dans un même dépôt).
-    const julesEnCours = taches.filter((n) => !attend.has(n) && n.labels.includes('jules')).map((n) => ({ ref: ref(depot.repo, n.n), motif: 'jules', fichiers: fichiersDuTravail(n.fpl, n.pr?.state === 'open' ? n.pr.ff : null) }));
+    // Jules ne tient pas de place (décision de Marc, 23/10/2026 22:45Z : « il prend quand même ») : ses tâches sortent de `occupe_par`.
 
     const derniereTache = derniere(depot);
     const refDerniere = derniereTache ? ref(depot.repo, derniereTache.n) : null;
@@ -574,11 +566,9 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
       incidents: incidents.map((i) => ({ n: i.n, titre: i.t, url: i.url })),
       incidents_pc: incidentsPc.map((i) => ({ n: i.n, titre: i.t, url: i.url })),
       occupe_par: occupePar,
-      jules_en_cours: julesEnCours,
       attend_marc: enAttenteMarc.map((n) => ({ ref: ref(depot.repo, n.n), pr: n.pr.n })),
       derniere: refDerniere,
       file,
-      reservees_jules: reserveesJules,
       exclues,
     };
   });

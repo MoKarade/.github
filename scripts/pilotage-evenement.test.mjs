@@ -19,7 +19,6 @@ function github({ issues = [], fermees = [], ouvertes = [], fermeesPr = [], fich
     appels.push({ methode, chemin, corps });
     const issue = (n) => [...issues, ...fermees].find((i) => i.number === Number(n));
     if (methode === 'GET' && /\/issues\?labels=jules/.test(chemin)) return issues.filter((i) => i.labels.some((l) => l.name === 'jules'));
-    if (methode === 'GET' && /\/issues\?state=open&labels=faisable-jules/.test(chemin)) return issues.filter((i) => i.labels.some((l) => l.name === 'faisable-jules'));
     if (methode === 'GET' && /\/issues\?state=closed/.test(chemin)) return fermees;
     if (methode === 'GET' && /\/issues\?state=open/.test(chemin)) return issues;
     if (methode === 'GET' && /\/pulls\?state=open/.test(chemin)) return ouvertes;
@@ -49,7 +48,7 @@ function github({ issues = [], fermees = [], ouvertes = [], fermeesPr = [], fich
 }
 
 test('chaque événement du Réacteur a ses étapes, et un type inconnu n’en a aucune', () => {
-  assert.deepEqual(etapesPour('tache_ouverte'), ['perimees', 'completer', 'fichiers', 'acceptation', 'marquer', 'immobiles']);
+  assert.deepEqual(etapesPour('tache_ouverte'), ['fichiers', 'acceptation', 'immobiles']);
   assert.deepEqual(etapesPour('tache_fermee'), ['menage', 'immobiles']);
   assert.deepEqual(etapesPour('pr_ouverte'), ['suivi', 'parJules']);
   assert.deepEqual(etapesPour('pr_fusionnee'), ['suivi', 'parJules', 'immobiles']);
@@ -69,19 +68,6 @@ test('tâche ouverte sans « Fichiers touchés » : la ligne s’écrit dans le 
   assert.ok(patch.corps.body.startsWith(CORPS_LIBRE.replace(/\s+$/, '')), 'le texte existant n’est pas touché');
   assert.match(patch.corps.body, /\*\*Fichiers touchés\*\*/);
   assert.ok(r.lignes.some((l) => /fichiers touchés écrits \(JobAI#10\)/.test(l)));
-});
-
-test('tâche ouverte au gabarit complet : corps complété, puis réservée à Jules (faisable-jules + commentaire)', () => {
-  const complete = `**Avant** : \`tests/navigation.test.ts\` n'a aucun test.\n\n**Après** : un test couvre la navigation.\n\n**Fini quand** : \`npm run test -- navigation\` affiche 3 tests verts.\n\n**Fichiers permis** (aucun autre) :\n- \`tests/navigation.test.ts\`\n\n**À faire** :\n1. Écrire trois cas.\n\n**À ne pas faire** : ne pas modifier le code.\n\n**Vérifier** : \`npm run test -- navigation\`\n\n**À citer dans la PR** : \`Tâche : #20\` ; sujet de commit : \`test: navigation\`\n**Attend** : aucune\n`;
-  const g = github({ issues: [tache(20, { body: complete })], fichiers: ['tests/navigation.test.ts'] });
-  const r = pilotage({ evt: { type: 'tache_ouverte', depot: DEPOT, issue: '20' }, gh: g.gh, maintenant: MAINTENANT });
-  assert.deepEqual(r.erreurs, []);
-  const pose = g.ecritures().find((a) => a.chemin.endsWith('/issues/20/labels') && a.corps?.['labels[]'] === 'faisable-jules');
-  assert.ok(pose, 'faisable-jules posé');
-  const note = g.ecritures().find((a) => a.chemin.endsWith('/issues/20/comments'));
-  assert.match(note.corps.body, /par le Réacteur/);
-  assert.doesNotMatch(note.corps.body, /filet du PC/);
-  assert.ok(r.lignes.some((l) => /faisable-jules posé \(JobAI#20\)/.test(l)));
 });
 
 test('tâche fermée : ses étiquettes de travail sont retirées', () => {
@@ -138,12 +124,12 @@ test('PR de tests de Jules fusionnée : « Acceptée » posée au format du gard
 test('une étape qui échoue est dite, les autres passent', () => {
   const g = github({ issues: [tache(10)] });
   const gh = (m, c, b) => {
-    if (/\/issues\?state=open&labels=faisable-jules/.test(c)) throw new Error('HTTP 502');
+    if (/\/issues\?state=open&labels=en-cours/.test(c)) throw new Error('HTTP 502');
     return g.gh(m, c, b);
   };
   const r = pilotage({ evt: { type: 'tache_ouverte', depot: DEPOT, issue: '10' }, gh, maintenant: MAINTENANT });
   assert.equal(r.erreurs.length, 1);
-  assert.match(r.erreurs[0], /^perimees \(HTTP 502\)/);
+  assert.match(r.erreurs[0], /^immobiles \(HTTP 502\)/);
   assert.ok(g.ecritures().some((a) => a.methode === 'PATCH'), 'la ligne « Fichiers touchés » est écrite malgré tout');
 });
 

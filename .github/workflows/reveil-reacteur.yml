@@ -44,7 +44,7 @@ on:
         type: string
         default: '"ubuntu-latest"'
       type:
-        description: 'pr_fusionnee | pr_ouverte | tache_fermee | tache_ouverte | tache_reservee | deploiement | preuve_page | commentaire | fin_de_cron | note_lia | ci_rouge | garde_fou_rouge | filet'
+        description: 'pr_fusionnee | pr_ouverte | tache_fermee | tache_ouverte | deploiement | preuve_page | commentaire | fin_de_cron | note_lia | ci_rouge | garde_fou_rouge | filet'
         type: string
         required: true
       depot:
