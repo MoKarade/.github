@@ -446,9 +446,9 @@ try: ancien_taux = json.load(open(SORTIE)).get('taux_usd_cad')
 except Exception: ancien_taux = None
 out['taux_usd_cad'] = taux_change.mesure(ancien_taux, iso(NOW))
 c = ghcache.compteurs()
-out['appels'] = {'comptes': c['comptees'], 'gratuits_304': c['n304']}
+out['appels'] = {'comptes': c['comptees'], 'gratuits_304': c['n304'], 'par_chemin': dict(ghcache.detail_comptees())}
 
 if json.dumps(cache, sort_keys=True, ensure_ascii=False) != cache_avant:
     json.dump(cache, open(cache_f + '.tmp', 'w'), ensure_ascii=False); os.replace(cache_f + '.tmp', cache_f)
 json.dump(out, open(SORTIE + '.tmp', 'w'), ensure_ascii=False); os.replace(SORTIE + '.tmp', SORTIE)
-print(f"quota : {c['comptees']} appels comptés, {c['n304']} en 304 gratuits", file=sys.stderr)
+print(f"quota : {c['comptees']} appels comptés, {c['n304']} en 304 gratuits ; par chemin : " + (', '.join(f'{k} {n}' for k, n in ghcache.detail_comptees()) or 'aucun'), file=sys.stderr)
