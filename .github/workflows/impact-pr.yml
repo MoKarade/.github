@@ -1,0 +1,103 @@
+name: Impact du graphe sur la PR (workflow commun)
+
+# Pose UN commentaire sur chaque PR (mis à jour sur place, marqueur `<!-- impact-graphe -->`) : pour chaque fichier de code modifié (12 au plus),
+# combien de fichiers en dépendent (`scripts/graphe.sh affected --depth 2`), les 8 premiers et le nombre de tests concernés. Rien à dire = aucun
+# commentaire. Aucun jeton de LLM, aucun coût : le graphe est construit sans IA (`GRAPHIFY_BACKEND=none` dans graphe.sh). Tâche : MoKarade/.github#842
+# (mission #839, demande de Marc 29/10/2026 : le graphe doit servir sans que personne ait à y penser).
+#
+# Appel depuis un dépôt (job séparé, jamais un check requis) :
+#
+#   impact:
+#     permissions: { contents: read, pull-requests: write }
+#     uses: MoKarade/.github/.github/workflows/impact-pr.yml@main
+#     with:
+#       runner: ${{ github.event.repository.visibility == 'public' && '"ubuntu-latest"' || '["self-hosted","pc-marc"]' }}
+#
+# Ignoré pour une PR venue d'un fork (jeton en lecture seule) et pour les robots (Dependabot, Mergify). Le dépôt appelant doit avoir `scripts/graphe.sh`.
+# Le script de commentaire vient de CE dépôt (`ref_outils`), jamais du code de l'appelant ; le jeton n'est donné qu'à la dernière étape.
+# Un échec n'ajoute jamais de rouge : chaque étape se rattrape par un avertissement.
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: 'Machine, en JSON : "ubuntu-latest" (dépôt public) ou ["self-hosted","pc-marc"] (dépôt privé).'
+        type: string
+        default: '"ubuntu-latest"'
+      ref_outils:
+        description: 'Version de MoKarade/.github d’où vient scripts/impact-pr.mjs (main, sauf pour l’essai sur .github lui-même).'
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  impact:
+    name: Impact du graphe
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository && !endsWith(github.actor, '[bot]') }}
+    timeout-minutes: 15
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Lister les fichiers de code modifiés
+        id: liste
+        run: |
+          set +e
+          git diff --name-only --diff-filter=ACMR HEAD^1 HEAD > "$RUNNER_TEMP/modifies.txt" 2>/dev/null
+          if grep -Eq '\.([cm]?[jt]sx?|py|gs|sh|sql)$' "$RUNNER_TEMP/modifies.txt"; then
+            echo "code=oui" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=non" >> "$GITHUB_OUTPUT"
+            echo "Aucun fichier de code modifié : pas d'impact à calculer."
+          fi
+          exit 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        if: steps.liste.outputs.code == 'oui'
+        with:
+          python-version: "3.12"
+      - name: Construire le graphe de la PR
+        id: graphe
+        if: steps.liste.outputs.code == 'oui'
+        run: |
+          if test -f scripts/graphe.sh && bash scripts/graphe.sh update; then
+            echo "pret=oui" >> "$GITHUB_OUTPUT"
+          else
+            echo "pret=non" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Impact du graphe::graphe non construit (scripts/graphe.sh absent ou en échec) : pas de commentaire d'impact."
+          fi
+      # Le script vient de ce dépôt, récupéré APRÈS la construction du graphe pour que ses fichiers n'y entrent pas.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.graphe.outputs.pret == 'oui'
+        with:
+          repository: MoKarade/.github
+          ref: ${{ inputs.ref_outils }}
+          path: .outils-impact
+          sparse-checkout: scripts
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.graphe.outputs.pret == 'oui'
+        with:
+          node-version: 24
+      - name: Interroger le graphe (affected, profondeur 2)
+        if: steps.graphe.outputs.pret == 'oui'
+        run: |
+          mkdir -p "$RUNNER_TEMP/affected"
+          n=0
+          while IFS= read -r fichier; do
+            [ -n "$fichier" ] || continue
+            n=$((n + 1))
+            bash scripts/graphe.sh affected "$fichier" --depth 2 > "$RUNNER_TEMP/affected/$n.txt" 2>/dev/null || echo "::warning title=Impact du graphe::affected a échoué pour un fichier (ignoré)."
+          done < <(node .outils-impact/scripts/impact-pr.mjs choisir "$RUNNER_TEMP/modifies.txt" || true)
+          echo "Fichiers interrogés : $n"
+      - name: Poser, mettre à jour ou retirer le commentaire
+        if: steps.graphe.outputs.pret == 'oui'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node .outils-impact/scripts/impact-pr.mjs commenter "$RUNNER_TEMP/modifies.txt" "$RUNNER_TEMP/affected" || echo "::warning title=Impact du graphe::commentaire non posé."
