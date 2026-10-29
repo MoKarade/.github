@@ -864,24 +864,6 @@ test('un geste de Marc qui dépend d’une tâche ouverte attend cette tâche, p
   assert.equal(calculer(fermee, { maintenant: NOW }).oubliees.filter(pasLien)[0].cause, 'geste-marc-en-retard');
 });
 
-test('`faisable-jules` réserve la tâche à Jules : hors de la file de Claude, listée dans `reservees_jules`, « en attente » de lui', () => {
-  const r = calculer(releve(depot('a', [
-    mission(90, [1, 2, 3, 4]),
-    tache(1), avec(tache(2, { labels: ['faisable-jules', 'prio:2'] }), { upd: il_y_a(1) }), avec(tache(3, { labels: ['faisable-jules'] }), { upd: il_y_a(30) }),
-    tache(4, { labels: ['faisable-jules'], deps: ['a#1'] }),
-  ])), { maintenant: NOW });
-  const d = etat(r);
-  assert.deepEqual(d.file.map((f) => f.ref), ['a#1']);
-  assert.equal(d.exclues['a#2'].code, 'jules-reservee');
-  assert.equal(d.exclues['a#4'].code, 'attend-ouverte', 'une dépendance ouverte passe avant la réserve');
-  assert.deepEqual(d.reservees_jules.map((t) => t.ref), ['a#2', 'a#3'], 'prio puis numéro');
-  assert.equal(r.etats['a#2'].etat, 'en-attente');
-  assert.equal(r.attentes['a#2'].proprietaire, 'fil');
-  assert.equal(r.etats['a#3'].etat, 'invalide', 'réservée mais sans nouvelles depuis plus de 24 h : le silence réveille le Coordinateur');
-  assert.equal(r.etats['a#3'].cause, 'fil-silencieux');
-  assert.equal(etat(calculer(releve(depot('a', [tache(1)])), { maintenant: NOW })).reservees_jules.length, 0);
-});
-
 // --- Ligne « **Attend** » obligatoire (décision de Marc, 19/10/2026) ---
 const AVANT = new Date('2026-10-19T20:00:00Z');
 const APRES = new Date(ATTEND_OBLIGATOIRE.DES_TOUTES);
@@ -992,13 +974,12 @@ test('capacité : la PR ouverte d’une tâche en-cours ne compte qu’une fois'
   assert.equal(d.statut, 'partiel');
 });
 
-test('capacité : une tâche jules ne tient aucune place (23/10/2026) : le dépôt reste libre, elle se lit dans jules_en_cours', () => {
+test('capacité : une tâche jules ne tient aucune place (23/10/2026) : le dépôt reste libre', () => {
   const d = etat(calculer(releve(depot('a', [tache(1, { labels: ['jules'], fpl: ['src/a.ts'], pr: prOuverte(10) }), tache(2, { fpl: ['src/b.ts'] })]))));
   assert.equal(d.statut, 'libre');
   assert.deepEqual(d.occupe_par, [], 'ni la tâche jules, ni sa PR ouverte ne comptent');
   assert.deepEqual(d.places, { total: 2, prises: 0, libres: 2 });
   assert.equal(d.suivante.ref, 'a#2');
-  assert.deepEqual(d.jules_en_cours.map((j) => [j.ref, j.motif, j.fichiers]), [['a#1', 'jules', ['src/a.ts']]]);
   const avecFil = etat(calculer(releve(depot('a', [tache(1, { labels: ['jules'] }), tache(3, { labels: ['en-cours'], fpl: ['src/c.ts'] }), tache(2, { fpl: ['src/b.ts'] })]))));
   assert.deepEqual(avecFil.occupe_par.map((o) => o.ref), ['a#3'], 'seul le travail du fil occupe une place');
   assert.equal(avecFil.statut, 'partiel');
