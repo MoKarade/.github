@@ -52,6 +52,11 @@
 - **Journal** : chaque appel `query`, `affected`, `path`, `explain`, `god-nodes` écrit une ligne dans `graphify-out/usage.jsonl` (heure, commande, durée, caractères rendus, branche ; jamais les arguments) et les hooks y comptent leurs passages. `scripts/graphe.sh usage` résume ; un journal vide ou sans ligne valide rend « aucun usage valide » et le code 0 (tâche #503, test `scripts/graphe-usage.test.mjs`). Il mesure l'usage, pas l'économie de jetons : un hook ne voit pas la sortie des outils et deux sessions ne font pas la même tâche. Local, ignoré par git.
 - **Lecture ciblée** : `affected`, `explain` et le MCP donnent des `fichier:Lnn`. Lire alors la zone utile (`Read` avec `offset` et `limit`) plutôt que le fichier entier. Le gain en jetons n'est pas mesuré chez nous. [À vérifier]
 
+## Le graphe doit rester en place : contrôle de conformité (tâche MoKarade/.github#841, 29/10/2026)
+- `scripts/graphe-en-place.mjs` (fonction pure `controlerGrapheEnPlace`, aucun réseau ni jeton) est exécuté par le workflow commun `conformite.yml` sur le dépôt appelant, dans l'étape « Graphe de code en place ». Il nomme chaque manque : `scripts/graphe.sh` absent ou de moins de 2 Ko ; `.claude/settings.json` absent, illisible ou sans hook `SessionStart` ou `PreToolUse` vers `scripts/graphe.sh` ; `.mcp.json` absent, illisible ou sans serveur `graphify` qui lance `scripts/graphe.sh serve`. Un JSON invalide compte comme un manque, jamais comme une exception.
+- Rouge si l'appel de conformité est `bloquant: true`, sinon annotation `::warning`. La lecture se fait à la racine du dépôt (pas sous `racine` : `web/` chez batchchef-). Test : `scripts/graphe-en-place.test.mjs` (workflow `tests-conformite.yml`).
+- Ce que le contrôle ne vérifie pas encore : le hook `garde-lecture` (#840) et l'identité de la copie de `graphe.sh` entre dépôts. Il le fera quand les 9 autres dépôts auront reçu la copie à jour. [Certain : les 10 clones locaux passent le contrôle actuel le 29/10/2026]
+
 ## Retour arrière
 Supprimer `.claude/settings.json` (ou ses trois blocs), `.mcp.json`, `scripts/graphe.sh`, `.graphifyignore`, les deux lignes de `.gitignore` et la ligne de `CLAUDE.md`. Rien d'autre n'a été modifié.
 
