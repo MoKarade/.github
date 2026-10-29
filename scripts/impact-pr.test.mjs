@@ -70,7 +70,7 @@ test('plus de 12 fichiers de code modifiés : coupé avec « et N autres »', ()
   const modifies = chemins(15, 'src/m');
   const sorties = modifies.slice(0, 12).map(() => AFFECTED(dep('src/lecteur.mjs')));
   const corps = construireCommentaire({ modifies, sorties });
-  assert.equal((corps.match(/en dépendent?,/g) ?? []).length, 12);
+  assert.equal((corps.match(/en dépend(?:ent)?,/g) ?? []).length, 12);
   assert.match(corps, /et 3 autres fichiers de code modifiés/);
 });
 
