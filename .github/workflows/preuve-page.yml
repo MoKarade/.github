@@ -3,9 +3,8 @@ name: Preuve de page, classe B (workflow commun)
 # Une tâche dont le « Fini quand » est de classe B (docs/cycle-de-vie-tache.md §2 bis) se prouve ICI, sans le PC et sans secret : l'app du commit
 # fusionné est lancée avec les DONNÉES FICTIVES des tests (comme `captures.yml`), un navigateur sans tête lit les pages demandées par les lignes
 # « Lecture de page » de la tâche, puis `accepterApresFusion` (scripts/acceptation-auto.mjs) pose « **Acceptée** » et ferme la tâche APRÈS le déploiement
-# READY. Le commentaire dit que la lecture est fictive. Si rien n'est accepté, le Réacteur réveille le fil de l'app (type `preuve_page`) : rien ne se perd.
-# Tâche MoKarade/.github#781 ; aucun minuteur, aucun secret : le jeton du job suffit. Le réveil du fil passe donc par la boîte LOCALE du dépôt
-# (`reveilLocal` de scripts/reveil-reacteur.mjs : une PR brouillon permanente `claude/boite-reacteur`, comme FinanceAI#38 et MemoryAI#442), jamais par un jeton.
+# READY. Le commentaire dit que la lecture est fictive. Si rien n'est accepté, la tâche reste ouverte et personne n'est réveillé (type `preuve_page`) : le fil qui l'a livrée prouve (nettoyage du 29/10/2026).
+# Tâche MoKarade/.github#781 ; aucun minuteur, aucun secret : le jeton du job suffit.
 #
 # Appel depuis une app (PR fusionnée du dépôt lui-même ; jamais une PR de fork) :
 #
