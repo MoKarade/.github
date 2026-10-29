@@ -120,7 +120,7 @@ test('tâche prête : un seul appel, texte limité à dépôt#n, en-têtes de la
   // marqueur réservé (POST) puis complété avec le lien de la session (PATCH)
   assert.deepEqual(ecritures.map((e) => e.methode), ['POST', 'PATCH']);
   assert.ok(ecritures[0].corps.body.startsWith(MARQUE_ROUTINE));
-  assert.ok(ecritures[1].corps.body.includes('https://claude.ai/code/session_01X'));
+  assert.deepEqual(ecritures[1].corps.body.split('\n').filter((l) => l.includes('session_01X')).map((l) => l.split(' : ').at(-1)), ['https://claude.ai/code/session_01X']);
 });
 
 test('marqueur de moins de 6 h : aucun second appel', async () => {
