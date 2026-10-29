@@ -58,6 +58,12 @@
 - Contournement honnête : relire avec `offset` et `limit` (la zone utile), jamais en désactivant le hook. Les seuils (400 lignes, 40 Ko) sont en tête du script, à ajuster d'après les refus journalisés. [Probable : seuils choisis sans mesure]
 - Test : `scripts/graphe-garde-lecture.test.mjs` (workflow `tests-graphe-page.yml`). Le hook ne se charge que dans une session ouverte DANS le dépôt (limite connue de `.claude/settings.json`).
 
+## Commentaire d'impact sur chaque PR (tâche MoKarade/.github#842, 29/10/2026, demande de Marc : le graphe doit servir sans que personne y pense)
+- Le workflow commun `impact-pr.yml` (appelé par chaque dépôt sur `pull_request`, job séparé, jamais un check requis) construit le graphe de la tête de la PR, lance `scripts/graphe.sh affected <fichier> --depth 2` pour chaque fichier de CODE modifié (12 au plus, tests en dernier) et pose UN commentaire mis à jour sur place (marqueur `<!-- impact-graphe -->`) : par fichier, le nombre de fichiers qui en dépendent, dont les tests, et les 8 premiers. Rien à dire (aucun fichier de code, aucun dépendant) = aucun commentaire, et l'ancien est retiré.
+- Garde-fous : ignoré pour une PR de fork (jeton en lecture seule) et pour les robots (Dependabot, Mergify) ; aucun jeton de LLM ; le jeton GitHub n'est donné qu'à la dernière étape ; le script (`scripts/impact-pr.mjs`) vient de ce dépôt, jamais de l'appelant ; les chemins sont des données, écrits dans un segment de code sans retour à la ligne ni accent grave ; chaque étape se rattrape par un avertissement (jamais de rouge ajouté).
+- Dépôt public = `ubuntu-latest`, privé = robot du PC. Appel : voir l'en-tête de `.github/workflows/impact-pr.yml` ; pour .github lui-même, `.github/workflows/impact.yml`. Test : `scripts/impact-pr.test.mjs`.
+- Limite : `affected` suit les imports et appels statiques ; un appel dynamique peut manquer (rappel mesuré à 71 % en médiane, 22/10/2026). Le commentaire est un point de départ, pas une preuve d'absence d'impact. [Certain pour la mesure ; l'usefulness du commentaire sur de vraies PR reste à observer]
+
 ## Retour arrière
 Supprimer `.claude/settings.json` (ou ses trois blocs), `.mcp.json`, `scripts/graphe.sh`, `.graphifyignore`, les deux lignes de `.gitignore` et la ligne de `CLAUDE.md`. Rien d'autre n'a été modifié.
 
