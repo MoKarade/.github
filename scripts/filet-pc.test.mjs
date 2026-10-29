@@ -10,7 +10,6 @@ const apres = (min, base = T0) => new Date(base.getTime() + min * 60_000);
 const iso = (d) => d.toISOString();
 
 const depotLibre = (repo, ref = `${repo.split('/')[1]}#7`) => ({ repo, statut: 'libre', suivante: { ref } });
-const depotPartiel = (repo, ref = `${repo.split('/')[1]}#7`) => ({ repo, statut: 'partiel', suivante: { ref }, suivantes: [{ ref }] });
 const depotOccupe = (repo) => ({ repo, statut: 'occupe', suivante: null });
 const prochaines = (depots, extra = {}, maintenant = T0) => ({ calcule_le: iso(maintenant), frein: 'normal', depots, ...extra });
 
@@ -538,18 +537,10 @@ test('tourFile : à blanc ne touche à rien ; une erreur GitHub se dit sans fair
 
 test('versionDuCode : le sha git de chaque fichier, comme git hash-object ; un fichier absent est dit « absent »', () => {
   const ligne = versionDuCode((nom) => { if (nom === 'jules-auto') throw new Error('absent'); return Buffer.from('abc'); });
-  assert.match(ligne, /^code : filet-pc f2ba8f8, jules-suivi f2ba8f8, jules-marquage f2ba8f8, jules-gabarit f2ba8f8, jules-auto absent, fichiers-touches f2ba8f8, acceptation-marquage f2ba8f8, preuves-retard f2ba8f8$/);
-  assert.equal(MODULES_VERSION.length, 8);
+  assert.match(ligne, /^code : filet-pc f2ba8f8, jules-suivi f2ba8f8, jules-marquage f2ba8f8, jules-gabarit f2ba8f8, jules-auto absent, acceptation-marquage f2ba8f8, preuves-retard f2ba8f8$/);
+  assert.equal(MODULES_VERSION.length, 7);
   // les vrais fichiers de ce dépôt sont tous lisibles
   assert.doesNotMatch(versionDuCode(), /absent/);
-});
-
-test('deux places par dépôt : un dépôt partiel (une place libre, une tâche compatible) réveille après 30 min ; occupé ou sans suivante, jamais', () => {
-  const r = rejouer([depotPartiel('MoKarade/JobAI')], 40);
-  assert.deepEqual(r.tous, [{ depot: 'MoKarade/JobAI', ref: 'JobAI#7', minutes: 40 }].map((x) => ({ ...x, minutes: r.tous[0].minutes })));
-  assert.equal(r.tous.length, 1);
-  assert.deepEqual(rejouer([depotPartiel('MoKarade/JobAI', undefined)].map((d) => ({ ...d, suivante: null })), 60).tous, []);
-  assert.deepEqual(rejouer([depotOccupe('MoKarade/JobAI')], 60).tous, []);
 });
 
 test('tourAcceptationMarquee : écrit la ligne sur la tâche éligible, dit « non appliqué » à blanc, et une erreur GitHub se dit sans lever', () => {

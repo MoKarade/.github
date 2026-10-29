@@ -21,7 +21,7 @@
 
 import { evaluerJules, section, fichiersPermis, SECTIONS_REQUISES, FICHIERS_MAX, FICHIER_ECRAN, CHEMINS_INTERDITS, DOCS_DE_SUITE, estDocDeSuite, exclueParDecision } from './jules-auto.mjs';
 import { tachesCitees } from './jules-suivi.mjs';
-import { fichiersDeclares } from './capacite.mjs';
+import { fichiersDeclares } from './fichiers-communs.mjs';
 import { ETIQUETTE, MENTION_MCP, dependanceOuverte, aLigneAttend } from './jules-marquage.mjs';
 
 const ORG = 'MoKarade';
@@ -106,7 +106,7 @@ export function deriverTest(chemin, prefixe = '') {
 
 /**
  * Les fichiers que le fil de la tâche a écrits dans « **Fichiers touchés** » (puces `chemin`), ou null s'il n'y en a pas de lisible. L'estimation automatique
- * (`<!-- fichiers-auto -->`, `fichiers-touches.mjs`) n'est qu'un repli : elle ne fait pas foi.
+ * (`<!-- fichiers-auto -->`, écrite jadis par `fichiers-touches.mjs`, supprimé le 29/10/2026) n'est qu'un repli : elle ne fait pas foi.
  */
 export function fichiersEcrits(corps) {
   const sansEstimation = String(corps ?? '').replace(/<!-- fichiers-auto -->[\s\S]*?(?=<!-- |$)/g, '');

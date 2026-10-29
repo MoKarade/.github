@@ -3,7 +3,7 @@
 //
 // Remplace la routine « Réacteur » (session Claude lancée à chaque événement). Tout ce qu'elle faisait de mécanique
 // est ici, en code testé :
-//   - pr_fusionnee : « D libre » (aucun travail) ou « D : une place libre » (un seul sur deux places), et « preuve à poser sur D#n » si la tâche citée n'a ni « Acceptée » ni `preuve-attendue` ;
+//   - pr_fusionnee : « D libre » (aucun travail) ou « D : une place libre » (des travaux en cours, sans limite de places), et « preuve à poser sur D#n » si la tâche citée n'a ni « Acceptée » ni `preuve-attendue` ;
 //   - tache_fermee : « D libre » ou « D : une place libre » (le garde-fou de preuve a déjà validé la fermeture, voir reacteur.yml) ;
 //   - ci_rouge : PR encore ouverte, hors brouillon, au même commit, sinon rien ; un échec de charge du robot (job mort
 //     sans étape en échec) est relancé UNE fois et ne réveille personne ; le reste réveille.
@@ -33,9 +33,8 @@
 // Sur une PR fusionnée, une tâche fermée, une tâche réservée (`tache_reservee` : étiquette `faisable-jules` posée) et le filet, il confie aussi à Jules la première tâche
 // réservée du dépôt (`confierJulesDuDepot`, scripts/jules-auto.mjs, tâche MoKarade/.github#704) : le tour du PC ne confie plus rien. La ligne « jules : #n confiée » entre dans le réveil.
 //
-// « D libre » n'est écrit que si D est VRAIMENT libre (`travaux`) : sans cela, chaque fusion dans un dépôt encore occupé
-// réveillait le Coordinateur pour rien, une quarantaine de fois par heure (tâche MoKarade/.github#164). Deux places par dépôt (décision de
-// Marc, 21/10/2026, tâche #341) : à un seul travail restant, le message dit « D : une place libre » ; à deux, rien. Ce qui demande un
+// « D libre » est écrit sans travail en cours (`travaux`), « D : une place libre » avec des travaux en cours : depuis le 29/10/2026 (« go reco » de Marc) il n'y a plus de
+// limite de places, un dépôt peut toujours recevoir sa suivante. Ce qui demande un
 // geste (« preuve à poser », abandon d'une tâche) réveille quand même, sans la ligne « libre ».
 //
 // Jamais de nom de tâche suivante dans le message (règle MoKarade/.github#136) : l'ordre vient de prochaines.json.
@@ -48,7 +47,6 @@
 import { pathToFileURL } from 'node:url';
 import { prAttendantMarc } from './attend-marc.mjs';
 import { dispense, extraireTachesCompletes } from './tache-liee.mjs';
-import { PLACES_PAR_DEPOT } from './capacite.mjs';
 import { accepterApresFusion } from './acceptation-auto.mjs';
 import { controleFiniQuand } from './fini-quand.mjs';
 import { accepterPreuvesAttendues, LUES_EVENEMENT, LUES_FILET } from './preuve-attendue-auto.mjs';
@@ -370,7 +368,7 @@ export async function occupations({ api, depot, tachesExclues = [] }) {
 }
 
 /**
- * Le nombre de TRAVAUX du dépôt (deux places par dépôt, décision de Marc du 21/10/2026) : une tâche `en-cours` et sa PR ouverte
+ * Le nombre de TRAVAUX du dépôt (il ne limite plus rien depuis le 29/10/2026, il choisit seulement entre « D libre » et « D : une place libre ») : une tâche `en-cours` et sa PR ouverte
  * comptent pour un, une PR qui ne cite aucune tâche occupée compte pour un. Même lecture que `occupations`, même repli (lecture ratée : 0).
  */
 export async function travaux({ api, depot, tachesExclues = [] }) {
@@ -408,7 +406,7 @@ async function lireOccupations({ api, depot, tachesExclues }) {
  * (une lecture qui échoue ne devine rien : le réveil part sans suivante, le Coordinateur lit le Gantt comme avant).
  */
 async function suivanteDe({ api, depot, maintenant, exclure = [] }) {
-  const file = await fileDuDepot({ api, depot, maintenant, exclure, libereA: maintenant.toISOString() }).catch(() => null);
+  const file = await fileDuDepot({ api, depot, maintenant, exclure }).catch(() => null);
   return file?.suivante ? { ligne: `suivante : #${file.suivante}`, file, brut: file } : { ligne: '', file: null, brut: file };
 }
 
@@ -419,7 +417,7 @@ async function suivanteDe({ api, depot, maintenant, exclure = [] }) {
  */
 async function julesDe({ api, depot, maintenant, file = null, exclure = [] }) {
   try {
-    const brut = file ?? (await fileDuDepot({ api, depot, maintenant, exclure, libereA: maintenant.toISOString() }).catch(() => null));
+    const brut = file ?? (await fileDuDepot({ api, depot, maintenant, exclure }).catch(() => null));
     const jules = await confierJulesDuDepot({ api, depot, file: brut });
     if (jules.statut === 'confiee') return { jules };
     // Une réservée qui reste là a sa raison dans le journal (ne réveille personne) ; « aucune tâche réservée » est le cas ordinaire, il ne se dit pas.
@@ -432,11 +430,9 @@ async function julesDe({ api, depot, maintenant, file = null, exclure = [] }) {
 /** La ligne du réveil pour une tâche confiée à Jules : le numéro seulement (règle MoKarade/.github#136). */
 const ligneJules = (dit) => (dit.jules ? `jules : #${dit.jules.n} confiée` : '');
 
-/** « D libre » sans travail, « D : une place libre » avec un seul ; rien quand les deux places sont prises. */
+/** « D libre » sans travail, « D : une place libre » avec des travaux en cours (plus de limite de places depuis le 29/10/2026 : le dépôt peut toujours recevoir une tâche). */
 export function signeLibre(depot, travauxEnCours) {
-  if (travauxEnCours <= 0) return `${depot} libre`;
-  if (travauxEnCours < PLACES_PAR_DEPOT) return `${depot} : une place libre`;
-  return '';
+  return travauxEnCours <= 0 ? `${depot} libre` : `${depot} : une place libre`;
 }
 
 // Les événements qui passent par le Réacteur et pendant lesquels une preuve différée DUE peut se lire (tâche MoKarade/.github#700, §10 quater) :
@@ -578,13 +574,12 @@ async function parLaClasseB({ api, depot, issue }) {
 
 /**
  * Le réveil d'une tâche que le Réacteur vient d'accepter seul hors d'une PR fusionnée (déploiement READY, preuve différée due) : « D libre ; suivante : #n ;
- * tâche D#n acceptée seule », et Jules reçoit sa tâche. Dépôt dont les deux places sont prises : rien (même règle qu'à la fusion). Rend null si rien à dire.
+ * tâche D#n acceptée seule », et Jules reçoit sa tâche. Rend null si rien à dire.
  */
 async function reveilApresAcceptation({ api, depot, maintenant, taches }) {
   const en = await travaux({ api, depot });
   const suite = await suivanteDe({ api, depot, maintenant });
   const dit = await julesDe({ api, depot, maintenant, file: suite.brut });
-  if (en >= PLACES_PAR_DEPOT) return Object.keys(dit).length ? { raison: 'dépôt encore occupé', ...dit } : null;
   const lignes = taches.map((n) => `tâche ${depot}#${n} acceptée seule`);
   return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), suite.ligne, ligneJules(dit), ...lignes]), ...(suite.file ? { file: suite.file } : {}), ...dit };
 }
@@ -607,7 +602,6 @@ async function deciderEvenement({ api, evt, maintenant, accepter, boitePc = BOIT
     const en = await travaux({ api, depot });
     const suite = await suivanteDe({ api, depot, maintenant });
     const dit = await julesDe({ api, depot, maintenant, file: suite.brut });
-    if (en >= PLACES_PAR_DEPOT) return { action: 'rien', raison: 'dépôt encore occupé', ...dit };
     if (suite.brut?.suivante !== n) return { action: 'rien', raison: 'cette tâche n’est pas la suivante', ...dit };
     const motif = construireMotif([signeLibre(depot, en), suite.ligne, ligneJules(dit), `tâche ${depot}#${n} prête`]);
     // Une modification de plus du même corps ne repose pas le même réveil.
@@ -687,8 +681,6 @@ async function deciderEvenement({ api, evt, maintenant, accepter, boitePc = BOIT
     // Jules part même dans un dépôt occupé : la file est lue avant l'éventuel « rien ».
     const suite = await suivanteDe({ api, depot, maintenant });
     const dit = await julesDe({ api, depot, maintenant, file: suite.brut });
-    // Un dépôt dont les deux places sont prises n'a rien de neuf à dire, sauf une tâche abandonnée dont il faut vérifier la raison.
-    if (en >= PLACES_PAR_DEPOT && !abandon) return { action: 'rien', raison: 'dépôt encore occupé', ...dit };
     return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), suite.ligne, ligneJules(dit), `tâche ${depot}#${evt.issue} fermée${abandon}`]), sujets: [Number(evt.issue), suite.brut?.suivante].filter(Boolean), ...(suite.file ? { file: suite.file } : {}), ...dit };
   }
 
@@ -718,8 +710,6 @@ async function deciderEvenement({ api, evt, maintenant, accepter, boitePc = BOIT
     const en = await travaux({ api, depot, tachesExclues });
     const suite = await suivanteDe({ api, depot, maintenant, exclure: tachesExclues });
     const jules = await julesDe({ api, depot, maintenant, file: suite.brut });
-    // Dépôt dont les deux places sont prises et rien à prouver : la fusion n'apprend rien au Coordinateur.
-    if (en >= PLACES_PAR_DEPOT && preuves.length === 0) return { action: 'rien', raison: 'dépôt encore occupé', ...dit, ...jules };
     const acceptee = acceptation.statut === 'acceptee' ? `tâche ${depot}#${acceptation.tache} acceptée seule` : '';
     return { action: 'reveiller', motif: construireMotif([signeLibre(depot, en), suite.ligne, ligneJules(jules), `PR #${evt.pr} fusionnée`, acceptee, ...classeB, ...preuves]), sujets: [...tachesExclues, suite.brut?.suivante].filter(Boolean), ...dit, ...jules, ...(suite.file ? { file: suite.file } : {}) };
   }
@@ -791,8 +781,8 @@ async function reveillerDependants({ options, maintenant }) {
         const en = await travaux({ api, depot: dep.depot });
         const suite = await suivanteDe({ api, depot: dep.depot, maintenant });
         const pretes = dep.taches.filter((n) => suite.brut?.suivante === n || suite.brut?.suivantes?.includes(n));
-        if (pretes.length === 0 || en >= PLACES_PAR_DEPOT) {
-          journal(`Réacteur : ${dep.depot} attendait ${evt.depot}#${evt.issue}, rien de prenable pour l'instant (${pretes.length === 0 ? 'pas dans la file' : 'places prises'}).`);
+        if (pretes.length === 0) {
+          journal(`Réacteur : ${dep.depot} attendait ${evt.depot}#${evt.issue}, rien de prenable pour l'instant (pas dans la file).`);
           continue;
         }
         const motif = construireMotif([signeLibre(dep.depot, en), suite.ligne, `tâche ${evt.depot}#${evt.issue} fermée`, `${pretes.map((n) => `${dep.depot}#${n}`).join(', ')} peut partir`]);

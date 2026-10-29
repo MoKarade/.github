@@ -49,7 +49,7 @@ function github({ issues = [], fermees = [], ouvertes = [], fermeesPr = [], fich
 }
 
 test('chaque événement du Réacteur a ses étapes, et un type inconnu n’en a aucune', () => {
-  assert.deepEqual(etapesPour('tache_ouverte'), ['perimees', 'completer', 'fichiers', 'acceptation', 'marquer', 'immobiles']);
+  assert.deepEqual(etapesPour('tache_ouverte'), ['perimees', 'completer', 'acceptation', 'marquer', 'immobiles']);
   assert.deepEqual(etapesPour('tache_fermee'), ['menage', 'immobiles']);
   assert.deepEqual(etapesPour('pr_ouverte'), ['suivi', 'parJules']);
   assert.deepEqual(etapesPour('pr_fusionnee'), ['suivi', 'parJules', 'immobiles']);
@@ -58,17 +58,6 @@ test('chaque événement du Réacteur a ses étapes, et un type inconnu n’en a
   assert.deepEqual(etapesPour('ci_rouge'), []);
   assert.deepEqual(etapesPour('inconnu'), []);
   for (const etapes of Object.values(PAR_EVENEMENT)) for (const e of etapes) assert.ok(ETAPES.includes(e), e);
-});
-
-test('tâche ouverte sans « Fichiers touchés » : la ligne s’écrit dans le passage, sans le PC', () => {
-  const g = github({ issues: [tache(10)] });
-  const r = pilotage({ evt: { type: 'tache_ouverte', depot: DEPOT, issue: '10' }, gh: g.gh, maintenant: MAINTENANT });
-  assert.deepEqual(r.erreurs, []);
-  const patch = g.ecritures().find((a) => a.methode === 'PATCH' && a.chemin.endsWith('/issues/10'));
-  assert.ok(patch, 'le corps de la tâche est réécrit');
-  assert.ok(patch.corps.body.startsWith(CORPS_LIBRE.replace(/\s+$/, '')), 'le texte existant n’est pas touché');
-  assert.match(patch.corps.body, /\*\*Fichiers touchés\*\*/);
-  assert.ok(r.lignes.some((l) => /fichiers touchés écrits \(JobAI#10\)/.test(l)));
 });
 
 test('tâche ouverte au gabarit complet : corps complété, puis réservée à Jules (faisable-jules + commentaire)', () => {
@@ -144,7 +133,7 @@ test('une étape qui échoue est dite, les autres passent', () => {
   const r = pilotage({ evt: { type: 'tache_ouverte', depot: DEPOT, issue: '10' }, gh, maintenant: MAINTENANT });
   assert.equal(r.erreurs.length, 1);
   assert.match(r.erreurs[0], /^perimees \(HTTP 502\)/);
-  assert.ok(g.ecritures().some((a) => a.methode === 'PATCH'), 'la ligne « Fichiers touchés » est écrite malgré tout');
+  assert.deepEqual(r.etapes, ['perimees', 'completer', 'acceptation', 'marquer', 'immobiles'], 'les autres étapes ont passé malgré l’échec');
 });
 
 test('un type sans étape ne lit rien', () => {

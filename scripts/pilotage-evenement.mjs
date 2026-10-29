@@ -18,12 +18,11 @@ import { spawnSync } from 'node:child_process';
 import { suivreDepot, menageFermees, marquerParJules } from './jules-suivi.mjs';
 import { marquerFaisables, retirerPerimees } from './jules-marquage.mjs';
 import { completerDepot as completerGabarit } from './jules-gabarit.mjs';
-import { completerDepot as estimerFichiers, PAR_TOUR_MAX as ESTIMATIONS_PAR_TOUR } from './fichiers-touches.mjs';
 import { completerDepot as marquerAcceptation, PAR_TOUR_MAX as MARQUAGES_PAR_TOUR } from './acceptation-marquage.mjs';
 import { libererPlacesImmobiles } from './place-immobile.mjs';
 
 /** Les étapes, dans l'ordre où le tour du PC les faisait : une étiquette périmée libère la tâche avant qu'on la complète, la complétion précède la réservation. */
-export const ETAPES = ['suivi', 'parJules', 'menage', 'perimees', 'completer', 'fichiers', 'acceptation', 'marquer', 'immobiles'];
+export const ETAPES = ['suivi', 'parJules', 'menage', 'perimees', 'completer', 'acceptation', 'marquer', 'immobiles'];
 
 /**
  * Quelle étape pour quel événement du Réacteur.
@@ -36,7 +35,7 @@ export const ETAPES = ['suivi', 'parJules', 'menage', 'perimees', 'completer', '
  *   filet : tout, en rattrapage d'un événement manqué.
  */
 export const PAR_EVENEMENT = {
-  tache_ouverte: ['perimees', 'completer', 'fichiers', 'acceptation', 'marquer', 'immobiles'],
+  tache_ouverte: ['perimees', 'completer', 'acceptation', 'marquer', 'immobiles'],
   tache_fermee: ['menage', 'immobiles'],
   pr_ouverte: ['suivi', 'parJules'],
   pr_fusionnee: ['suivi', 'parJules', 'immobiles'],
@@ -107,7 +106,6 @@ export function pilotage({ evt, gh = ghSynchrone(), maintenant = new Date(), aBl
   const sortie = { etapes: etapesPour(evt.type), lignes: [], signaux: [], erreurs: [] };
   if (!depot || sortie.etapes.length === 0) return sortie;
   const etat = {}; // un job ne garde rien (voir l'en-tête) : la mémoire du gabarit et le « pas de Jules » ne durent que ce passage
-  const budgetFichiers = { restant: ESTIMATIONS_PAR_TOUR };
   const budgetAcceptation = { restant: MARQUAGES_PAR_TOUR };
   const dire = (texte) => sortie.lignes.push(texte);
   const essayer = (nom, f) => {
@@ -138,11 +136,6 @@ export function pilotage({ evt, gh = ghSynchrone(), maintenant = new Date(), aBl
       const r = completerGabarit({ depot, gh, etat, maintenant, aBlanc });
       if (r.completees.length) dire(`corps complété(s) au gabarit (${r.completees.join(', ')})`);
       if (r.refusees.length) dire(`gabarit refusé : ${r.refusees.slice(0, 3).map((x) => `${x.ref} ${x.raison.slice(0, 70)}`).join(' ; ')}`);
-    },
-    fichiers: () => {
-      const r = estimerFichiers({ depot, gh, budget: budgetFichiers, aBlanc });
-      if (r.ecrites.length) dire(`fichiers touchés écrits (${r.ecrites.map((x) => x.ref).slice(0, 6).join(', ')})`);
-      if (r.recalculees.length) dire(`fichiers touchés recalculés (${r.recalculees.map((x) => x.ref).slice(0, 4).join(', ')})`);
     },
     acceptation: () => {
       const r = marquerAcceptation({ depot, gh, budget: budgetAcceptation, aBlanc });

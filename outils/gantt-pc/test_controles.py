@@ -23,7 +23,7 @@ class TestCheminIllisible(unittest.TestCase):
         self.assertTrue(chemin_illisible(''))
 
     def test_chemins_et_motifs_permis(self):
-        for c in ('scripts/capacite.mjs', 'docs/claude/*.md', '.github/workflows/graphe.yml', 'package.json'):
+        for c in ('scripts/fichiers-communs.mjs', 'docs/claude/*.md', '.github/workflows/graphe.yml', 'package.json'):
             self.assertFalse(chemin_illisible(c), c)
 
 

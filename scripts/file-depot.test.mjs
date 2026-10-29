@@ -1,4 +1,3 @@
-import './places-trois.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { champ, construireReleve, eligibleDepuis, fileDuDepot, lireAttend } from './file-depot.mjs';
@@ -37,28 +36,26 @@ test('champ et lireAttend : la grammaire du relevé du PC', () => {
   assert.deepEqual(lireAttend('**Attend :** batchchef#7', 'appx'), ['batchchef-#7']);
 });
 
-test('dépôt libre : la tâche prenable est rendue par son NUMÉRO, avec ses places', async () => {
+test('dépôt libre : la tâche prenable est rendue par son NUMÉRO', async () => {
   const r = await fileDuDepot({ api: faux({ issues: [tache(12), tache(30, { labels: ['prio:1'] })] }), depot: DEPOT, maintenant: MAINTENANT });
   assert.equal(r.statut, 'libre');
   assert.equal(r.suivante, 30, 'prio:1 passe avant');
-  assert.deepEqual(r.places, { total: 3, prises: 0, libres: 3 });
+  assert.equal('places' in r, false, 'plus de limite de places');
   assert.equal(typeof r.suivante, 'number');
 });
 
-test('dépôt occupé : trois travaux en cours, aucune suivante', async () => {
+test('sans limite de places : trois travaux en cours, une tâche prête à fichiers disjoints part quand même', async () => {
   const issues = [1, 2, 3].map((n) => tache(n, { labels: ['en-cours'], body: corps({ fichiers: [`\`src/f${n}.mjs\``] }) })).concat(tache(9, { body: corps({ fichiers: ['`src/z.mjs`'] }) }));
   const r = await fileDuDepot({ api: faux({ issues }), depot: DEPOT, maintenant: MAINTENANT });
-  assert.equal(r.statut, 'occupe');
-  assert.equal(r.suivante, null);
+  assert.equal(r.statut, 'libre');
+  assert.equal(r.suivante, 9);
 });
 
-test('une place reste : la suivante doit avoir des fichiers disjoints (statut partiel)', async () => {
-  const enCours = [1, 2].map((n) => tache(n, { labels: ['en-cours'], body: corps({ fichiers: [`\`src/f${n}.mjs\``] }) }));
-  const commune = tache(8, { body: corps({ fichiers: ['`src/f1.mjs`'] }) });
-  const disjointe = tache(9, { body: corps({ fichiers: ['`src/z.mjs`'] }) });
-  const r = await fileDuDepot({ api: faux({ issues: [...enCours, commune, disjointe] }), depot: DEPOT, maintenant: MAINTENANT });
-  assert.equal(r.statut, 'partiel');
-  assert.equal(r.suivante, 9);
+test('un travail en cours sans PR ne bloque rien : seuls les fichiers RÉELS des PR ouvertes comptent', async () => {
+  const enCours = tache(1, { labels: ['en-cours'], body: corps({ fichiers: ['`src/f1.mjs`'] }) });
+  const memes = tache(8, { body: corps({ fichiers: ['`src/f1.mjs`'] }) });
+  const r = await fileDuDepot({ api: faux({ issues: [enCours, memes] }), depot: DEPOT, maintenant: MAINTENANT });
+  assert.equal(r.suivante, 8);
 });
 
 test('incident ouvert : le dépôt est en incident, rien n’est proposé', async () => {
@@ -98,13 +95,12 @@ test('dépendance ouverte dans un autre dépôt, ou dans le même dépôt : la t
   assert.equal(b.suivante, 13, 'la dépendance ouverte du même dépôt passe d’abord');
 });
 
-test('une PR ouverte qui cite la tâche la retire de la file et tient une place avec ses fichiers réels', async () => {
+test('une PR ouverte qui cite la tâche la retire de la file ; ses fichiers réels comptent', async () => {
   const pr = { number: 50, state: 'open', draft: true, body: 'Tâche : #12', user: { login: 'MoKarade', type: 'User' }, head: { ref: 'claude/x' } };
   const issues = [tache(12), tache(13, { body: corps({ fichiers: ['`src/b.mjs`'] }) })];
   const fichiers = { 50: [{ filename: 'src/a.mjs' }] };
   const r = await fileDuDepot({ api: faux({ issues, prs: [pr], fichiers }), depot: DEPOT, maintenant: MAINTENANT });
   assert.equal(r.suivante, 13);
-  assert.equal(r.places.prises, 1);
 });
 
 test('PR dont les fichiers réels recoupent la suivante : elle est sautée', async () => {
@@ -122,21 +118,18 @@ test('lecture qui échoue : « illisible », jamais une tâche inventée ni une 
   assert.equal(nul.statut, 'illisible');
 });
 
-test('« exclure » : la tâche que la PR fusionnée vient de livrer ne tient plus de place', async () => {
-  const issues = [1, 2, 3].map((n) => tache(n, { labels: ['en-cours'], body: corps({ fichiers: [`\`src/f${n}.mjs\``] }) })).concat(tache(9, { body: corps({ fichiers: ['`src/z.mjs`'] }) }));
-  const sans = await fileDuDepot({ api: faux({ issues }), depot: DEPOT, maintenant: MAINTENANT });
-  assert.equal(sans.suivante, null);
-  const avec = await fileDuDepot({ api: faux({ issues }), depot: DEPOT, maintenant: MAINTENANT, exclure: [3] });
-  assert.equal(avec.suivante, 9);
+test('« exclure » : la tâche que la PR fusionnée vient de livrer sort de la file', async () => {
+  const issues = [tache(3, { labels: ['en-cours'] }), tache(9, { body: corps({ fichiers: ['`src/z.mjs`'] }) })];
+  const avec = await fileDuDepot({ api: faux({ issues }), depot: DEPOT, maintenant: MAINTENANT, exclure: [9] });
+  assert.equal(avec.suivante, null);
+  assert.deepEqual(avec.occupePar.map((o) => o.ref), ['appx#3']);
 });
 
-test('eligibleDepuis : le plus tard entre création, dépendance fermée et place libérée (places pleines seulement)', () => {
+test('eligibleDepuis : le plus tard entre la création et la fermeture de la dernière dépendance', () => {
   const t = { created: '2026-10-28T10:00:00Z', deps: ['hubperso#311'] };
   const deps = new Map([['hubperso#311', { closed_at: '2026-10-28T12:00:00Z' }]]);
-  const pleines = { total: 3, prises: 2 };
-  assert.equal(eligibleDepuis({ tache: t, deps, places: pleines, libereA: '2026-10-28T20:59:00Z' }), '2026-10-28T20:59:00.000Z');
-  assert.equal(eligibleDepuis({ tache: t, deps, places: { total: 3, prises: 1 }, libereA: '2026-10-28T20:59:00Z' }), '2026-10-28T12:00:00.000Z');
-  assert.equal(eligibleDepuis({ tache: { created: '2026-10-28T10:00:00Z', deps: [] }, deps, places: pleines, libereA: null }), '2026-10-28T10:00:00.000Z');
+  assert.equal(eligibleDepuis({ tache: t, deps }), '2026-10-28T12:00:00.000Z');
+  assert.equal(eligibleDepuis({ tache: { created: '2026-10-28T10:00:00Z', deps: [] }, deps }), '2026-10-28T10:00:00.000Z');
 });
 
 test('construireReleve : la même forme que le relevé du PC pour une tâche ouverte', () => {
@@ -145,7 +138,6 @@ test('construireReleve : la même forme que le relevé du PC pour une tâche ouv
   assert.equal(n.lvl, 'tâche');
   assert.equal(n.fq, 'la route répond 200');
   assert.deepEqual(n.fpl, ['src/a.mjs']);
-  assert.equal(n.ft_ligne, true);
   assert.equal(n.attend_ligne, true);
   assert.deepEqual(n.deps, []);
 });

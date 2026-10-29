@@ -1,4 +1,3 @@
-import './places-deux.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -6,7 +5,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { calculer, choisirSuivantes, couloirsDe, fichiersAbsents, FICHIERS_OBLIGATOIRES, analyserAttentes, liensManquants, indexer, ATTENTE, ATTEND_OBLIGATOIRE, attendAbsent, calculerFrein, permiseParFrein, freinDepuisFichiers, FREIN, ECARTS_ETIQUETTE } from './prochaine-tache.mjs';
+import { calculer, choisirSuivantes, analyserAttentes, liensManquants, indexer, ATTENTE, ATTEND_OBLIGATOIRE, attendAbsent, calculerFrein, permiseParFrein, freinDepuisFichiers, FREIN, ECARTS_ETIQUETTE } from './prochaine-tache.mjs';
 
 test('une alerte du PC (« Entretien du PC », « sur le PC ») ne gèle pas la file : listée dans incidents_pc, la suivante reste proposée', () => {
   for (const titre of ['Entretien du PC : rouge le 21-10', 'Gemini en panne sur le PC']) {
@@ -73,12 +72,15 @@ test('une tâche qui attend une PR : fusionnée, l\u2019attente est levée ; sin
   assert.equal(suivante(calculer(fusionnee)), 'a#1');
 });
 
-test('une PR ouverte qui cite la tâche l’écarte et occupe le dépôt', () => {
-  const r = calculer(releve(depot('a', [tache(1, { pr: prOuverte(10) }), tache(2)])));
+test('une PR ouverte qui cite la tâche l’écarte ; elle ne bloque que si ses fichiers réels recoupent ceux d’une autre tâche', () => {
+  const r = calculer(releve(depot('a', [tache(1, { pr: { ...prOuverte(10), ff: ['x/a.ts'] } }), tache(2)])));
   assert.equal(etat(r).exclues['a#1'].code, 'pr-ouverte');
-  assert.equal(etat(r).statut, 'occupe');
-  assert.equal(etat(r).suivante, null);
-  assert.equal(etat(r).file[0].ref, 'a#2', 'la file existe quand même, pour l’affichage');
+  assert.equal(etat(r).statut, 'libre');
+  assert.equal(etat(r).suivante.ref, 'a#2');
+  const conflit = calculer(releve(depot('a', [tache(1, { pr: { ...prOuverte(10), ff: ['x/a.ts'] } }), tache(2, { fpl: ['x/a.ts'] })])));
+  assert.equal(etat(conflit).statut, 'occupe');
+  assert.equal(etat(conflit).suivante, null);
+  assert.equal(etat(conflit).file[0].ref, 'a#2', 'la file existe quand même, pour l’affichage');
 });
 
 test('une PR fermée ou fusionnée n’écarte pas la tâche', () => {
@@ -142,52 +144,58 @@ test('#197 valide : une tâche sans étiquette en-cours dont la PR attend Marc n
   assert.equal(suivante(r), 'a#2');
 });
 
-test('#197 rejeté : une PR rouge de CI ordinaire (pas de geste de Marc) garde le dépôt occupé', () => {
-  const r = calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], pr: prOuverte(10) }), tache(2)])));
+test('#197 rejeté : une PR rouge de CI ordinaire (pas de geste de Marc) garde ses fichiers pris', () => {
+  const r = calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], pr: { ...prOuverte(10), ff: ['x/a.ts'] } }), tache(2, { fpl: ['x/a.ts'] })])));
   assert.equal(etat(r).statut, 'occupe');
   assert.equal(suivante(r), null);
   assert.deepEqual(etat(r).attend_marc, []);
 });
 
-test('#197 rejeté : le geste porte sur une autre PR, la PR de la tâche en cours occupe toujours', () => {
-  const r = calculer(releve(avecAttenteMarc(depot('a', [tache(1, { labels: ['en-cours'], pr: prOuverte(10) }), tache(2)]), 99)));
+test('#197 rejeté : le geste porte sur une autre PR, la PR de la tâche en cours garde ses fichiers', () => {
+  const r = calculer(releve(avecAttenteMarc(depot('a', [tache(1, { labels: ['en-cours'], pr: { ...prOuverte(10), ff: ['x/a.ts'] } }), tache(2, { fpl: ['x/a.ts'] })]), 99)));
   assert.equal(etat(r).statut, 'occupe');
 });
 
-test('#197 : un autre travail en cours (sans PR en attente de Marc) occupe encore le dépôt', () => {
+test('#197 valide : la PR en attente de Marc libère ses fichiers', () => {
+  const r = calculer(releve(avecAttenteMarc(depot('a', [tache(1, { labels: ['en-cours'], pr: { ...prOuverte(10), ff: ['x/a.ts'] } }), tache(2, { fpl: ['x/a.ts'] })]), 10)));
+  assert.equal(etat(r).statut, 'libre');
+  assert.equal(suivante(r), 'a#2');
+});
+
+test('#197 : un autre travail en cours (sans PR en attente de Marc) reste dans occupe_par', () => {
   const r = calculer(releve(avecAttenteMarc(depot('a', [tache(1, { labels: ['en-cours'], pr: prOuverte(10) }), tache(2, { labels: ['en-cours'] }), tache(3)]), 10)));
-  assert.equal(etat(r).statut, 'occupe');
+  assert.equal(etat(r).statut, 'libre');
   assert.deepEqual(etat(r).occupe_par.map((o) => o.ref), ['a#2']);
 });
 
 test('#197 : la PR en attente de Marc fermée ou fusionnée ne compte plus (le relevé garde l’ancien numéro)', () => {
   const r = calculer(releve(avecAttenteMarc(depot('a', [tache(1, { labels: ['en-cours'], pr: { n: 10, state: 'closed', merged: null } }), tache(2)]), 10)));
-  assert.equal(etat(r).statut, 'occupe', 'la tâche reste en-cours sans PR ouverte : le fil n’a pas fini');
+  assert.deepEqual(etat(r).occupe_par.map((o) => o.ref), ['a#1'], 'la tâche reste en-cours sans PR ouverte : le fil n’a pas fini');
   assert.deepEqual(etat(r).attend_marc, []);
 });
 
-test('capacité : en-cours occupe le dépôt, preuve-attendue ne l’occupe pas', () => {
+test('capacité : en-cours est un travail (occupe_par), preuve-attendue n’en est pas un ; aucun des deux ne retient la file', () => {
   const r = calculer(releve(depot('a', [tache(1, { labels: ['en-cours'] }), tache(2)])));
-  assert.equal(etat(r).statut, 'occupe');
+  assert.equal(etat(r).statut, 'libre');
   assert.equal(etat(r).occupe_par[0].motif, 'en-cours');
-  assert.equal(etat(r).suivante, null);
+  assert.equal(etat(r).suivante.ref, 'a#2');
   const libre = calculer(releve(depot('a', [tache(1, { labels: ['preuve-attendue'] }), tache(2)])));
   assert.equal(etat(libre).statut, 'libre');
+  assert.deepEqual(etat(libre).occupe_par, []);
   assert.equal(suivante(libre), 'a#2');
 });
 
-test('dépôt occupé : `si_libre` garde la tête de file, `suivante` reste vide', () => {
+test('`si_libre` garde la tête de file, `suivante` en est la tête quand rien ne bloque', () => {
   const r = calculer(releve(depot('a', [tache(1, { labels: ['en-cours'] }), tache(2), tache(3, { labels: ['niveau:tâche', 'prio:1'] })])));
-  assert.equal(etat(r).statut, 'occupe');
-  assert.equal(etat(r).suivante, null);
+  assert.equal(etat(r).suivante.ref, 'a#3');
   assert.equal(etat(r).si_libre, 'a#3');
   assert.equal(etat(calculer(releve(depot('a', [])))).si_libre, null);
 });
 
-test('un fil actif passé en option occupe le dépôt (par nom, clé ou dépôt)', () => {
+test('un fil actif passé en option est un travail (par nom, clé ou dépôt), sans retenir la file', () => {
   for (const nom of ['a', 'Alpha', 'alp']) {
     const r = calculer(releve(depot('a', [tache(1)], { name: 'Alpha', key: 'alp' })), { filsActifs: [nom] });
-    assert.equal(etat(r).statut, 'occupe', nom);
+    assert.equal(etat(r).statut, 'libre', nom);
     assert.equal(etat(r).occupe_par[0].motif, 'fil-actif');
   }
 });
@@ -933,75 +941,70 @@ test('attend-absent : attend_absent ne liste ni les tâches fermées ni les miss
 
 // ---- Deux travaux par dépôt, sur des fichiers disjoints (décision de Marc, 21/10/2026) -------------------------------------------------
 
-test('capacité : un dépôt sans travail propose deux tâches à fichiers disjoints, couloirs prévus', () => {
+// Une PR ouverte avec ses fichiers RÉELS (`ff`, relevé du PC).
+const prFichiers = (n, ff) => ({ n, state: 'open', merged: null, kind: 'tache', ff });
+
+test('capacité : sans limite de places, toute tâche prête part (trois tâches, aucune place comptée)', () => {
   const r = calculer(releve(depot('a', [tache(1, { fpl: ['src/a.ts'] }), tache(2, { fpl: ['src/b.ts'] }), tache(3, { fpl: ['src/c.ts'] })])));
   const d = etat(r);
   assert.equal(d.statut, 'libre');
-  assert.deepEqual(d.suivantes.map((s) => s.ref), ['a#1', 'a#2']);
+  assert.deepEqual(d.suivantes.map((s) => s.ref), ['a#1', 'a#2', 'a#3']);
   assert.equal(d.suivante.ref, 'a#1');
-  assert.deepEqual(d.places, { total: 2, prises: 0, libres: 2 });
-  assert.deepEqual(d.couloirs.map((c) => [c.place, c.etat, c.ref]), [[1, 'prevue', 'a#1'], [2, 'prevue', 'a#2']]);
+  assert.equal('places' in d, false);
+  assert.equal('couloirs' in d, false);
 });
 
-test('capacité : sans fichiers déclarés, une seule tâche est proposée (dans le doute, un seul)', () => {
+test('capacité : sans fichiers déclarés, rien ne bloque (avant : « dans le doute, un seul »)', () => {
   const d = etat(calculer(releve(depot('a', [tache(1), tache(2)]))));
-  assert.deepEqual(d.suivantes.map((s) => s.ref), ['a#1']);
-  assert.deepEqual(d.sautees_conflit.map((s) => [s.ref, s.raison]), [['a#2', 'fichiers-inconnus']]);
+  assert.deepEqual(d.suivantes.map((s) => s.ref), ['a#1', 'a#2']);
+  assert.deepEqual(d.sautees_conflit, []);
 });
 
-test('capacité : un travail en cours et une tâche à fichiers disjoints donnent le statut partiel', () => {
-  const r = calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], fpl: ['src/a.ts'] }), tache(2, { fpl: ['src/b.ts'] })])));
-  const d = etat(r);
-  assert.equal(d.statut, 'partiel');
-  assert.equal(d.suivante.ref, 'a#2');
-  assert.deepEqual(d.suivantes.map((s) => s.ref), ['a#2']);
-  assert.deepEqual(d.places, { total: 2, prises: 1, libres: 1 });
-  assert.deepEqual(d.couloirs.map((c) => [c.place, c.etat, c.ref]), [[1, 'occupee', 'a#1'], [2, 'prevue', 'a#2']]);
-  assert.deepEqual(d.occupe_par.map((o) => o.fichiers), [['src/a.ts']]);
+test('capacité : un travail en cours sans PR ne bloque pas ; seuls les fichiers RÉELS des PR ouvertes comptent', () => {
+  const sansPr = etat(calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], fpl: ['src/a.ts'] }), tache(2, { fpl: ['src/a.ts'] })]))));
+  assert.equal(sansPr.statut, 'libre');
+  assert.equal(sansPr.suivante.ref, 'a#2');
+  assert.deepEqual(sansPr.occupe_par.map((o) => o.fichiers), [['src/a.ts']]);
+  const avecPr = etat(calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], fpl: ['src/other.ts'], pr: prFichiers(10, ['src/a.ts']) }), tache(2, { fpl: ['src/a.ts'] })]))));
+  assert.equal(avecPr.statut, 'occupe');
+  assert.equal(avecPr.suivante, null);
 });
 
-test('capacité : un chemin commun (fichier ou dossier) garde le dépôt occupé, la tâche sautée dit pourquoi', () => {
+test('capacité : un chemin commun (fichier ou dossier) avec une PR ouverte garde la tâche en file, la tâche sautée dit pourquoi', () => {
   for (const commun of [['src/a.ts'], ['src/']]) {
-    const d = etat(calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], fpl: ['src/a.ts'] }), tache(2, { fpl: commun })]))));
+    const d = etat(calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], pr: prFichiers(10, ['src/a.ts']) }), tache(2, { fpl: commun })]))));
     assert.equal(d.statut, 'occupe', commun.join());
     assert.equal(d.suivante, null);
     assert.equal(d.sautees_conflit[0].ref, 'a#2');
     assert.match(d.sautees_conflit[0].raison, /^fichier-commun:/);
     assert.equal(d.sautees_conflit[0].avec, 'a#1');
+    assert.equal(d.si_libre, 'a#2', 'la tête de file reste annoncée pour la mesure I4');
   }
 });
 
-test('capacité : le travail en cours sans fichiers déclarés, ou un fil actif, ne laisse aucune place', () => {
-  assert.equal(etat(calculer(releve(depot('a', [tache(1, { labels: ['en-cours'] }), tache(2, { fpl: ['src/b.ts'] })])))).statut, 'occupe');
-  assert.equal(etat(calculer(releve(depot('a', [tache(2, { fpl: ['src/b.ts'] })])), { filsActifs: ['a'] })).statut, 'occupe');
+test('capacité : PR dont la liste de fichiers est tronquée ou absente, ou tâche sans fichiers déclarés : aucun blocage', () => {
+  assert.equal(etat(calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], pr: prFichiers(10, null) }), tache(2, { fpl: ['src/b.ts'] })])))).suivante.ref, 'a#2');
+  assert.equal(etat(calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], pr: prFichiers(10, ['src/a.ts']) }), tache(2)])))).suivante.ref, 'a#2');
 });
 
-test('capacité : deux travaux en cours = occupé, aucune suivante, même avec des fichiers disjoints', () => {
-  const d = etat(calculer(releve(depot('a', [
-    tache(1, { labels: ['en-cours'], fpl: ['x/a.ts'] }), tache(2, { labels: ['en-cours'], fpl: ['x/b.ts'] }), tache(3, { fpl: ['x/c.ts'] }),
-  ]))));
-  assert.equal(d.statut, 'occupe');
-  assert.deepEqual(d.suivantes, []);
-  assert.deepEqual(d.places, { total: 2, prises: 2, libres: 0 });
-  assert.equal(d.si_libre, 'a#3', 'la tête de file reste annoncée pour la mesure I4');
+test('capacité : un fil actif passé en option ne bloque rien non plus', () => {
+  const d = etat(calculer(releve(depot('a', [tache(2, { fpl: ['src/b.ts'] })])), { filsActifs: ['a'] }));
+  assert.equal(d.statut, 'libre');
+  assert.equal(d.suivante.ref, 'a#2');
 });
 
 test('capacité : la PR ouverte d’une tâche en-cours ne compte qu’une fois', () => {
-  const d = etat(calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], pr: prOuverte(10), fpl: ['x/a.ts'] }), tache(2, { fpl: ['x/b.ts'] })]))));
+  const d = etat(calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], pr: prFichiers(10, ['x/a.ts']), fpl: ['x/a.ts'] }), tache(2, { fpl: ['x/b.ts'] })]))));
   assert.equal(d.occupe_par.length, 1);
-  assert.equal(d.statut, 'partiel');
+  assert.equal(d.statut, 'libre');
 });
 
-test('capacité : une tâche jules ne tient aucune place (23/10/2026) : le dépôt reste libre, elle se lit dans jules_en_cours', () => {
-  const d = etat(calculer(releve(depot('a', [tache(1, { labels: ['jules'], fpl: ['src/a.ts'], pr: prOuverte(10) }), tache(2, { fpl: ['src/b.ts'] })]))));
+test('capacité : une tâche jules n’est pas un travail : elle se lit dans jules_en_cours, et sa PR ne bloque rien', () => {
+  const d = etat(calculer(releve(depot('a', [tache(1, { labels: ['jules'], fpl: ['src/a.ts'], pr: prFichiers(10, ['src/a.ts']) }), tache(2, { fpl: ['src/a.ts'] })]))));
   assert.equal(d.statut, 'libre');
   assert.deepEqual(d.occupe_par, [], 'ni la tâche jules, ni sa PR ouverte ne comptent');
-  assert.deepEqual(d.places, { total: 2, prises: 0, libres: 2 });
   assert.equal(d.suivante.ref, 'a#2');
   assert.deepEqual(d.jules_en_cours.map((j) => [j.ref, j.motif, j.fichiers]), [['a#1', 'jules', ['src/a.ts']]]);
-  const avecFil = etat(calculer(releve(depot('a', [tache(1, { labels: ['jules'] }), tache(3, { labels: ['en-cours'], fpl: ['src/c.ts'] }), tache(2, { fpl: ['src/b.ts'] })]))));
-  assert.deepEqual(avecFil.occupe_par.map((o) => o.ref), ['a#3'], 'seul le travail du fil occupe une place');
-  assert.equal(avecFil.statut, 'partiel');
 });
 
 test('capacité : un incident garde l’état incident et ne propose rien', () => {
@@ -1010,29 +1013,29 @@ test('capacité : un incident garde l’état incident et ne propose rien', () =
   assert.deepEqual(d.suivantes, []);
 });
 
-test('capacité : choisirSuivantes saute une tâche incompatible et retient la suivante qui va', () => {
+test('capacité : choisirSuivantes saute une tâche en conflit avec une PR ouverte ou une tâche déjà retenue, et retient la suivante qui va', () => {
   const f = (ref, fichiers) => ({ ref, fichiers });
-  const { suivantes, sautees } = choisirSuivantes([f('a#1', ['m/x.ts']), f('a#2', ['m/x.ts']), f('a#3', ['m/z.ts'])], [], 2);
-  assert.deepEqual(suivantes.map((s) => s.ref), ['a#1', 'a#3']);
-  assert.deepEqual(sautees.map((s) => s.ref), ['a#2']);
-  assert.deepEqual(couloirsDe([{ ref: 'a#9', motif: 'en-cours', fichiers: null }], [f('a#1', ['m/x.ts'])]).map((c) => c.etat), ['occupee', 'prevue']);
+  const { suivantes, sautees } = choisirSuivantes([f('a#1', ['m/x.ts']), f('a#2', ['m/x.ts']), f('a#3', ['m/z.ts']), f('a#4', ['m/y.ts']), f('a#5', null)], [{ ref: 'a#9', motif: 'pr-ouverte', fichiers: null, reels: ['m/y.ts'] }]);
+  assert.deepEqual(suivantes.map((s) => s.ref), ['a#1', 'a#3', 'a#5']);
+  assert.deepEqual(sautees.map((s) => [s.ref, s.avec]), [['a#2', 'a#1'], ['a#4', 'a#9']]);
 });
 
-test('capacité : un journal commun (HANDOVER.md, CHANGELOG.md) n’empêche pas le parallèle', () => {
-  const d = etat(calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], fpl: ['src/a.ts', 'HANDOVER.md'] }), tache(2, { fpl: ['src/b.ts', 'HANDOVER.md'] })]))));
-  assert.equal(d.statut, 'partiel');
+test('capacité : un journal commun (HANDOVER.md, CHANGELOG.md) ne rend pas deux tâches en conflit', () => {
+  const d = etat(calculer(releve(depot('a', [tache(1, { labels: ['en-cours'], fpl: ['src/a.ts', 'HANDOVER.md'], pr: prAvecFichiers(10, ['src/a.ts', 'HANDOVER.md']) }), tache(2, { fpl: ['src/b.ts', 'HANDOVER.md'] })]))));
+  assert.equal(d.statut, 'libre');
+  assert.equal(d.suivante.ref, 'a#2');
 });
 
 // Les fichiers RÉELS de la PR ouverte (`pr.ff`, relevé du PC) s'ajoutent aux fichiers déclarés du travail (tâche #359).
 const prAvecFichiers = (n, ff) => ({ ...prOuverte(n), ff });
 
-test('capacité : un travail sans fichiers déclarés mais dont la PR ouverte a des fichiers connus laisse la deuxième place à une tâche disjointe', () => {
+test('capacité : un travail sans fichiers déclarés mais dont la PR ouverte a des fichiers connus laisse partir une tâche disjointe', () => {
   const d = etat(calculer(releve(depot('a', [
     tache(1, { labels: ['en-cours'], pr: prAvecFichiers(10, ['x/a.ts', 'tests/a.test.ts']) }),
     tache(2, { fpl: ['y/b.ts'] }),
   ]))));
   assert.deepEqual(d.occupe_par[0].fichiers, ['x/a.ts', 'tests/a.test.ts']);
-  assert.equal(d.statut, 'partiel');
+  assert.equal(d.statut, 'libre');
   assert.equal(d.suivante.ref, 'a#2');
 });
 
@@ -1047,15 +1050,16 @@ test('capacité : la PR qui déborde de la déclaration est comptée (déclarés
   assert.deepEqual(d.suivantes.map((s) => s.ref), ['a#3']);
 });
 
-test('capacité : une PR sans fichiers lisibles (liste tronquée, vide, journaux seuls, relevé d’avant) ne change rien : inconnu = un seul travail', () => {
+test('capacité : une PR sans fichiers lisibles (liste tronquée, vide, journaux seuls, relevé d’avant) ne bloque rien : inconnu = aucun blocage', () => {
   for (const ff of [null, [], ['HANDOVER.md', 'CHANGELOG.md'], undefined]) {
     const d = etat(calculer(releve(depot('a', [
       tache(1, { labels: ['en-cours'], pr: ff === undefined ? prOuverte(10) : prAvecFichiers(10, ff) }),
       tache(2, { fpl: ['y/b.ts'] }),
     ]))));
     assert.equal(d.occupe_par[0].fichiers, null, `ff = ${JSON.stringify(ff)}`);
-    assert.equal(d.statut, 'occupe');
-    assert.equal(d.sautees_conflit[0].raison, 'fichiers-inconnus');
+    assert.equal(d.statut, 'libre');
+    assert.equal(d.suivante.ref, 'a#2');
+    assert.deepEqual(d.sautees_conflit, []);
   }
 });
 
@@ -1075,61 +1079,4 @@ test('capacité : une PR fusionnée ou fermée ne fournit pas de fichiers au tra
     tache(2, { fpl: ['y/b.ts'] }),
   ]))));
   assert.equal(d.occupe_par[0].fichiers, null);
-});
-
-// --- Ligne « Fichiers touchés » obligatoire (tâche #360) ---
-const NEUVE = '2026-10-22T10:00:00Z';
-const apresGrace = (creee, h) => new Date(Date.parse(creee) + h * 3_600_000);
-const releveFichiers = (o) => releve(depot('a', [mission(1, [2]), tache(2, o)]));
-
-test('fichiers-absents : sans le champ ft_ligne (ancien relevé du PC), aucune règle', () => {
-  const r = calculer(releveFichiers({ created: NEUVE }), { maintenant: new Date('2026-10-22T20:00:00Z') });
-  assert.equal(suivante(r), 'a#2');
-  assert.deepEqual(r.fichiers_absents, []);
-});
-
-test('fichiers-absents : une tâche neuve a 3 h pour que le filet écrive sa ligne, puis elle est invalide et réveille comme un oubli', () => {
-  const o = { ft_ligne: false, attend_ligne: true, created: NEUVE };
-  const tot = calculer(releveFichiers(o), { maintenant: apresGrace(NEUVE, 2) });
-  assert.equal(suivante(tot), 'a#2', 'pendant la grâce la tâche reste prenable');
-  assert.deepEqual(tot.fichiers_absents, [{ ref: 'a#2', applique: false }]);
-  const tard = calculer(releveFichiers(o), { maintenant: apresGrace(NEUVE, 3) });
-  assert.equal(suivante(tard), null);
-  assert.equal(etat(tard).exclues['a#2'].code, 'fichiers-absents');
-  assert.equal(tard.etats['a#2'].etat, 'invalide');
-  assert.equal(tard.etats['a#2'].cause, 'fichiers-absents');
-  assert.deepEqual(tard.oubliees.map((x) => [x.ref, x.cause]), [['a#2', 'fichiers-absents']]);
-  assert.deepEqual(tard.fichiers_absents, [{ ref: 'a#2', applique: true }]);
-});
-
-test('fichiers-absents : une tâche plus ancienne que l’activation a 48 h, quel que soit son âge', () => {
-  const o = { ft_ligne: false, attend_ligne: true, created: '2026-10-10T12:00:00Z' };
-  const avant = calculer(releveFichiers(o), { maintenant: new Date(Date.parse(FICHIERS_OBLIGATOIRES.DES_TOUTES) - 60_000) });
-  assert.equal(suivante(avant), 'a#2');
-  assert.deepEqual(avant.fichiers_absents, [{ ref: 'a#2', applique: false }]);
-  const apres = calculer(releveFichiers(o), { maintenant: new Date(FICHIERS_OBLIGATOIRES.DES_TOUTES) });
-  assert.equal(suivante(apres), null);
-  assert.equal(apres.etats['a#2'].cause, 'fichiers-absents');
-});
-
-test('fichiers-absents : la ligne écrite (estimée, déclarée ou « non déterminés ») suffit', () => {
-  const tard = new Date(FICHIERS_OBLIGATOIRES.DES_TOUTES);
-  assert.equal(fichiersAbsents({ lvl: 'tâche', ft_ligne: true, created: NEUVE }, tard), false);
-  assert.equal(fichiersAbsents({ lvl: 'tâche', ft_ligne: false, created: NEUVE }, tard), true);
-});
-
-test('fichiers-absents : exemptés — geste de Marc, preuve attendue, travail commencé, PR ouverte ; ni mission ni tâche fermée listées', () => {
-  const tard = new Date(FICHIERS_OBLIGATOIRES.DES_TOUTES);
-  const sans = { lvl: 'tâche', ft_ligne: false, created: NEUVE, labels: [] };
-  for (const e of ['qui:marc', 'preuve-attendue', 'en-cours', 'jules']) assert.equal(fichiersAbsents({ ...sans, labels: [e] }, tard), false, e);
-  assert.equal(fichiersAbsents({ ...sans, pr: { n: 9, state: 'open' } }, tard), false);
-  assert.equal(fichiersAbsents({ ...sans, pr: { n: 9, state: 'closed' } }, tard), true);
-  assert.equal(fichiersAbsents({ ...sans, lvl: 'mission' }, tard), false);
-  const r = calculer(releve(depot('a', [
-    { ...mission(1, [2, 3, 4]), ft_ligne: false },
-    tache(2, { ft_ligne: false, created: NEUVE }),
-    tache(3, { ft_ligne: false, created: NEUVE, state: 'closed', closed: '2026-10-22T11:00:00Z' }),
-    tache(4, { ft_ligne: false, created: NEUVE, labels: ['qui:marc'] }),
-  ])), { maintenant: tard });
-  assert.deepEqual(r.fichiers_absents.map((x) => x.ref), ['a#2']);
 });

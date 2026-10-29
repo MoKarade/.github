@@ -6,7 +6,7 @@
 // ou elle ne l'est pas, et la raison s'écrit. Règles : plan du fil Jules, `commun/plans/2026-10-19_jules-automatique.md`.
 //
 // Jules part même dans un dépôt déjà occupé par un fil (décision de Marc, 23/10/2026 : « il prend quand même » ; ses tâches ne tiennent plus de
-// place, `places-depot.mjs`). Il évite seulement : un incident, un dépôt gelé (`DEPOTS_GELES`), et les fichiers déjà touchés par une PR ouverte
+// place). Il évite seulement : un incident, un dépôt gelé (`DEPOTS_GELES`), et les fichiers déjà touchés par une PR ouverte
 // ou déclarés par une autre tâche en cours (« Fichiers permis » de la tâche contre les fichiers RÉELS de chaque PR ouverte, lus EN DIRECT au moment
 // de confier ; une PR dont les fichiers sont illisibles ou tronqués ne laisse rien passer : dans le doute, il attend). Plafond : trois tâches Jules
 // en même temps sur les dix dépôts (le quota de Jules est de 15 simultanées).
@@ -16,7 +16,7 @@
 //
 // Fonctions pures (`evaluerJules`, `choisirPourJules`), I/O injecté (`lireIssue`, `gh`) : les tests n'ont besoin ni de réseau ni de fichier.
 
-import { fichiersDeclares, fichiersDuTravail, raisonIncompatible } from './capacite.mjs';
+import { fichiersDeclares, fichiersDuTravail, raisonIncompatible } from './fichiers-communs.mjs';
 import { extraireTaches } from './tache-liee.mjs';
 
 const ORG = 'MoKarade';
@@ -25,7 +25,7 @@ export const SECTIONS_REQUISES = ['Avant', 'Après', 'Fini quand', 'Fichiers per
 export const FICHIERS_MAX = 5;
 /**
  * Les deux fichiers de suivi que « La doc suit le code » fait mettre à jour dans la MÊME PR (tâche MoKarade/.github#850, Hubperso#753). Racine du dépôt seulement.
- * Permis à Jules, hors du plafond de FICHIERS_MAX, et jamais cause de `hold` ; `capacite.mjs` les ignore déjà pour les places.
+ * Permis à Jules, hors du plafond de FICHIERS_MAX, et jamais cause de `hold` ; `fichiers-communs.mjs` les ignore déjà.
  */
 export const DOCS_DE_SUITE = ['HANDOVER.md', 'CHANGELOG.md'];
 export const estDocDeSuite = (chemin) => DOCS_DE_SUITE.includes(String(chemin));

@@ -1,11 +1,8 @@
-import './places-deux.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { PLACES_PAR_DEPOT, fichiersDeclares, seRecouvrent, compatibles, raisonIncompatible } from './capacite.mjs';
-
-test('deux places par dépôt', () => assert.equal(PLACES_PAR_DEPOT, 2));
+import { fichiersDeclares, seRecouvrent, conflitDeFichiers, raisonIncompatible, controleFichiers, rapportFichiers } from './fichiers-communs.mjs';
 
 test('fichiersDeclares lit « Fichiers permis » : chemins entre backticks, hors journaux', () => {
   const corps = [
@@ -44,21 +41,24 @@ test('seRecouvrent : même fichier, dossier parent, motif ; pas deux fichiers vo
   assert.equal(seRecouvrent('src/a.ts', '*.ts'), true, 'motif sans dossier : tout recouvre, dans le doute');
 });
 
-test('compatibles : fichiers inconnus ou vides = jamais ; disjoints = oui ; commun = non, avec la raison', () => {
-  assert.equal(compatibles(null, ['a']), false);
-  assert.equal(compatibles(['a'], undefined), false);
-  assert.equal(compatibles([], ['a']), false);
-  assert.equal(compatibles(['HANDOVER.md'], ['a']), false, 'que des journaux = inconnu');
-  assert.equal(compatibles(['x/a.ts', 'x/b.ts'], ['y/c.ts']), true);
-  assert.equal(compatibles(['x/a.ts', 'HANDOVER.md'], ['y/c.ts', 'HANDOVER.md']), true);
-  assert.equal(compatibles(['x/a.ts'], ['x/']), false);
-  assert.equal(raisonIncompatible(['x/a.ts'], ['x/a.ts']), 'fichier-commun:x/a.ts');
-  assert.equal(raisonIncompatible(['x/a.ts'], ['x/']), 'fichier-commun:x/a.ts ~ x/');
-  assert.equal(raisonIncompatible(null, ['a']), 'fichiers-inconnus');
-  assert.equal(raisonIncompatible(['a'], ['b']), null);
+test('conflitDeFichiers : fichiers inconnus ou vides ne bloquent RIEN ; disjoints = null ; commun = la raison', () => {
+  assert.equal(conflitDeFichiers(null, ['a']), null);
+  assert.equal(conflitDeFichiers(['a'], undefined), null);
+  assert.equal(conflitDeFichiers([], ['a']), null);
+  assert.equal(conflitDeFichiers(['HANDOVER.md'], ['HANDOVER.md']), null, 'que des journaux = inconnu');
+  assert.equal(conflitDeFichiers(['x/a.ts', 'x/b.ts'], ['y/c.ts']), null);
+  assert.equal(conflitDeFichiers(['x/a.ts', 'HANDOVER.md'], ['y/c.ts', 'HANDOVER.md']), null);
+  assert.equal(conflitDeFichiers(['x/a.ts'], ['x/a.ts']), 'fichier-commun:x/a.ts');
+  assert.equal(conflitDeFichiers(['x/a.ts'], ['x/']), 'fichier-commun:x/a.ts ~ x/');
 });
 
-test('fetch.py lit les fichiers déclarés comme capacite.mjs (même grammaire, même préférence pour « permis »)', () => {
+test('raisonIncompatible (Jules) : dans le doute on bloque', () => {
+  assert.equal(raisonIncompatible(null, ['a']), 'fichiers-inconnus');
+  assert.equal(raisonIncompatible(['a'], ['b']), null);
+  assert.equal(raisonIncompatible(['x/a.ts'], ['x/']), 'fichier-commun:x/a.ts ~ x/');
+});
+
+test('fetch.py lit les fichiers déclarés comme fichiers-communs.mjs (même grammaire, même préférence pour « permis »)', () => {
   const corps = [
     '**Fichiers touchés** :\n- `lib/a.ts`\n- `HANDOVER.md`\n',
     '<!-- fichiers-auto -->\n**Fichiers touchés** (estimation automatique) :\n- `lib/large.ts`\n\n**Fichiers permis** (aucun autre) :\n- `./lib/exact.ts` (nouveau)\n- `tests/exact.test.ts`\n',
@@ -81,7 +81,7 @@ test('fetch.py lit les fichiers déclarés comme capacite.mjs (même grammaire, 
 });
 
 test('fichiersDuTravail : déclarés ∪ réels, journaux ignorés, null si rien de connu', async () => {
-  const { fichiersDuTravail } = await import('./capacite.mjs');
+  const { fichiersDuTravail } = await import('./fichiers-communs.mjs');
   assert.deepEqual(fichiersDuTravail(['a.ts'], ['a.ts', 'b.ts', 'HANDOVER.md']), ['a.ts', 'b.ts']);
   assert.deepEqual(fichiersDuTravail(null, ['b.ts']), ['b.ts']);
   assert.deepEqual(fichiersDuTravail(['a.ts'], null), ['a.ts']);
@@ -92,5 +92,48 @@ test('fichiersDuTravail : déclarés ∪ réels, journaux ignorés, null si rien
   assert.deepEqual(fichiersDuTravail(['lib/a.ts', 'docs/INDEX.md', 'docs/adr/README.md'], null), ['lib/a.ts']);
   assert.equal(fichiersDuTravail(null, ['docs/INDEX.md', 'docs/adr/README.md']), null);
   assert.deepEqual(fichiersDuTravail(['docs/claude/INDEX.md', 'README.md', 'web/docs/INDEX.md'], null), ['docs/claude/INDEX.md', 'README.md', 'web/docs/INDEX.md']);
-  assert.equal(compatibles(['lib/a.ts', 'docs/INDEX.md', 'docs/adr/README.md'], ['lib/b.ts', 'docs/INDEX.md', 'docs/adr/README.md']), true);
+  assert.equal(conflitDeFichiers(['lib/a.ts', 'docs/INDEX.md', 'docs/adr/README.md'], ['lib/b.ts', 'docs/INDEX.md', 'docs/adr/README.md']), null);
+});
+
+// --- contrôle « Fichiers » du Garde-fou : une fausse API en mémoire ---
+const f = (filename, extra = {}) => ({ filename, ...extra });
+const fauxApi = ({ ouvertes = [], fichiers = {}, panne = null } = {}) => async (methode, chemin) => {
+  if (panne) throw panne;
+  assert.equal(methode, 'GET');
+  if (/\/pulls\?state=open/.test(chemin)) return ouvertes;
+  const m = /\/pulls\/(\d+)\/files/.exec(chemin);
+  return m ? fichiers[m[1]] ?? null : null;
+};
+const moi = { number: 20, draft: false };
+const humain = { login: 'MoKarade', type: 'User' };
+
+test('controleFichiers : brouillon, dispense, tâche de Jules, journaux seuls = sans objet', async () => {
+  const api = fauxApi();
+  assert.match(rapportFichiers(await controleFichiers({ api, depot: 'MoKarade/d', pr: { ...moi, draft: true }, fichiers: [f('a.ts')], lien: {} })), /sans objet \(brouillon\)/);
+  assert.equal((await controleFichiers({ api, depot: 'MoKarade/d', pr: moi, fichiers: [f('a.ts')], lien: { dispense: 'robot' } })).raison, 'robot');
+  assert.equal((await controleFichiers({ api, depot: 'MoKarade/d', pr: moi, fichiers: [f('a.ts')], lien: { ouvertes: [{ jules: true }] } })).raison, 'tâche de Jules');
+  assert.equal((await controleFichiers({ api, depot: 'MoKarade/d', pr: moi, fichiers: [f('HANDOVER.md')], lien: {} })).raison, 'aucun fichier hors journaux');
+});
+
+test('controleFichiers : rouge sur un fichier commun avec une PR ouverte plus ancienne, hors brouillon', async () => {
+  const ouvertes = [{ number: 5, draft: false, user: humain }, { number: 6, draft: true, user: humain }, { number: 21, draft: false, user: humain }, { number: 3, draft: false, user: { login: 'dependabot[bot]', type: 'Bot' } }];
+  const fichiers = { 5: [f('lib/a.ts'), f('HANDOVER.md')], 6: [f('lib/b.ts')], 21: [f('lib/b.ts')], 3: [f('lib/b.ts')] };
+  const v = await controleFichiers({ api: fauxApi({ ouvertes, fichiers }), depot: 'MoKarade/d', pr: moi, fichiers: [f('lib/a.ts'), f('lib/b.ts')], lien: {} });
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.conflits, [{ pr: 5, chemin: 'lib/a.ts' }]);
+  assert.match(rapportFichiers(v), /\*\*rouge\*\*.*#5/);
+  const sain = await controleFichiers({ api: fauxApi({ ouvertes, fichiers }), depot: 'MoKarade/d', pr: moi, fichiers: [f('lib/c.ts')], lien: {} });
+  assert.equal(sain.ok, true);
+  assert.match(rapportFichiers(sain), /Fichiers : vert/);
+});
+
+test('controleFichiers : un fichier renommé compte sous son ancien nom ; liste tronquée ou illisible = aucun blocage ; panne = avertissement, pas refus', async () => {
+  const ouvertes = [{ number: 5, draft: false, user: humain }];
+  const renomme = await controleFichiers({ api: fauxApi({ ouvertes, fichiers: { 5: [f('lib/ancien.ts')] } }), depot: 'MoKarade/d', pr: moi, fichiers: [f('lib/nouveau.ts', { previous_filename: 'lib/ancien.ts' })], lien: {} });
+  assert.equal(renomme.ok, false);
+  const tronquee = await controleFichiers({ api: fauxApi({ ouvertes, fichiers: { 5: Array.from({ length: 300 }, (_, i) => f(i === 0 ? 'lib/a.ts' : `x/${i}.ts`)) } }), depot: 'MoKarade/d', pr: moi, fichiers: [f('lib/a.ts')], lien: {} });
+  assert.equal(tronquee.ok, true);
+  const panne = await controleFichiers({ api: fauxApi({ panne: new Error('HTTP 502') }), depot: 'MoKarade/d', pr: moi, fichiers: [f('lib/a.ts')], lien: {} });
+  assert.equal(panne.ok, true);
+  assert.match(rapportFichiers(panne), /non contrôlés.*HTTP 502/);
 });

@@ -16,7 +16,7 @@
 // Fonctions pures (`champ`, `lireAttend`, `construireReleve`), I/O de l'autre (`fileDuDepot`, avec `api` injecté : les tests n'ont besoin ni de réseau ni de jeton).
 import { pathToFileURL } from 'node:url';
 import { prAttendantMarc } from './attend-marc.mjs';
-import { fichiersDeclares } from './capacite.mjs';
+import { fichiersDeclares } from './fichiers-communs.mjs';
 import { calculer } from './prochaine-tache.mjs';
 import { dispense, extraireTachesCompletes } from './tache-liee.mjs';
 
@@ -29,7 +29,6 @@ const echapper = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const REF_ATTEND = new RegExp(`(?:${PROPRIETAIRE}/([\\w.-]+)|(?<![\\w./-])(${[...NOMS_DEPOTS].sort((a, b) => b.length - a.length).map(echapper).join('|')}))?#(\\d+)`, 'gi');
 const LIGNE_ATTEND = /^\*\*Attend\s*(?::\s*\*\*|\*\*\s*:?)\s*(.*)$/;
 const AUCUNE = /^[\s:*]*(?:rien|aucune?|néant)\b/i;
-const FT_LIGNE = /^\s*\*\*\s*Fichiers (?:permis|touchés)\s*\*\*/im;
 
 /** Le texte d'un champ `**Nom** : …` (même grammaire que `champ` de fetch.py), ou null. */
 export function champ(corps, nom) {
@@ -109,7 +108,6 @@ export function construireReleve({ depot, issues, prs, attendMarc = [], fichiers
       pr: pr ? { n: pr.number, repo: nom, state: 'open', draft: !!pr.draft, merged: null, ff: fichiersPr.get(pr.number) ?? null } : null,
       fq: champ(corps, 'Fini quand') ?? '',
       fpl: fichiersDeclares(corps),
-      ft_ligne: FT_LIGNE.test(corps),
       attend_ligne: corps.split('\n').some((l) => resteAttend(l) !== null),
       deps: [...new Set(lireAttend(corps, nom).filter((d) => d !== `${nom.toLowerCase()}#${i.number}`))].sort(),
       deps_natives: [], upd: i.updated_at,
@@ -134,25 +132,24 @@ export function construireReleve({ depot, issues, prs, attendMarc = [], fichiers
   return { asof: maintenant.toISOString(), repos, prlog: [] };
 }
 
-/** L'instant où la tâche est devenue prenable : le plus tard entre sa création, la fermeture de sa dernière dépendance et, si les places étaient pleines, la libération de l'une d'elles. */
-export function eligibleDepuis({ tache, deps, places, libereA }) {
+/** L'instant où la tâche est devenue prenable : le plus tard entre sa création et la fermeture de sa dernière dépendance. */
+export function eligibleDepuis({ tache, deps }) {
   const fermetures = (tache.deps ?? []).map((d) => deps.get(d)?.closed_at ?? null);
-  const placeLiberee = libereA && places && places.prises + 1 >= places.total ? libereA : null;
-  return plusTard(tache.created, ...fermetures, placeLiberee);
+  return plusTard(tache.created, ...fermetures);
 }
 
 /**
- * La file du dépôt à cet instant : { statut, suivante, suivantes, places, eligibleDepuis, illisibles }.
+ * La file du dépôt à cet instant : { statut, suivante, suivantes, eligibleDepuis, illisibles }.
  * `suivante` : le numéro de la tâche à lancer (jamais son titre : règle MoKarade/.github#136), null si aucune. Une lecture qui échoue rend { statut: 'illisible' }.
- * `frein` : le résultat de `calculerFrein` si l'appelant le connaît (absent : palier normal). `libereA` : l'heure de l'événement qui libère une place (ISO).
+ * `frein` : le résultat de `calculerFrein` si l'appelant le connaît (absent : palier normal).
  * `exclure` : numéros de tâches à ne pas compter (la tâche que la PR fusionnée vient de livrer).
  */
-export async function fileDuDepot({ api, depot, frein = null, maintenant = new Date(), libereA = null, exclure = [] }) {
+export async function fileDuDepot({ api, depot, frein = null, maintenant = new Date(), exclure = [] }) {
   try {
     const lues = await lister(api, `/repos/${depot}/issues?state=open`);
     // `exclure` : les tâches que la PR qui vient de fusionner citait ; leur étiquette `en-cours` n'est remplacée qu'après la fusion, elles ne tiennent plus de place.
     const issues = lues ? lues.filter((i) => !exclure.includes(i.number)) : lues;
-    if (!issues) return { statut: 'illisible', suivante: null, suivantes: [], places: null, eligibleDepuis: null, illisibles: [] };
+    if (!issues) return { statut: 'illisible', suivante: null, suivantes: [], eligibleDepuis: null, illisibles: [] };
     const prs = ((await lister(api, `/repos/${depot}/pulls?state=open`)) ?? []).filter((pr) => !dispense(pr));
     const attendMarc = prAttendantMarc(issues.filter((i) => noms(i).includes('qui:marc')));
     const fichiersPr = new Map();
@@ -191,8 +188,7 @@ export async function fileDuDepot({ api, depot, frein = null, maintenant = new D
       statut: d.statut,
       suivante: numero,
       suivantes: d.suivantes.map((s) => s.n),
-      places: d.places,
-      eligibleDepuis: tache ? eligibleDepuis({ tache, deps, places: d.places, libereA }) : null,
+      eligibleDepuis: tache ? eligibleDepuis({ tache, deps }) : null,
       illisibles,
       // Ce que le Réacteur lit pour confier la première tâche réservée à Jules (scripts/jules-auto.mjs, `confierJulesDuDepot`, tâche #704).
       reservees: d.reservees_jules,
@@ -201,7 +197,7 @@ export async function fileDuDepot({ api, depot, frein = null, maintenant = new D
       incidents: d.incidents,
     };
   } catch (e) {
-    return { statut: 'illisible', suivante: null, suivantes: [], places: null, eligibleDepuis: null, illisibles: [], erreur: e.message };
+    return { statut: 'illisible', suivante: null, suivantes: [], eligibleDepuis: null, illisibles: [], erreur: e.message };
   }
 }
 

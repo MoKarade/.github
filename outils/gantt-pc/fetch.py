@@ -97,13 +97,13 @@ def fichiers_permis(body):
     m = FP.search(body or '')
     return len([l for l in m.group(1).splitlines() if l.strip()]) if m else None
 
-# Fichiers qu'une tâche déclare toucher (deux places par dépôt, 21/10/2026) : même grammaire que `fichiersDeclares` de scripts/capacite.mjs
-# (« Fichiers permis » ou « Fichiers touchés », chemins entre backticks, journaux HANDOVER/CHANGELOG ignorés). None = rien de lisible : pas de parallèle.
-# Un corps peut porter les deux (estimation automatique de scripts/fichiers-touches.mjs, puis « Fichiers permis » exact du gabarit Jules) : « permis » d'abord.
+# Fichiers qu'une tâche déclare toucher (règle « pas deux PR sur les mêmes fichiers ») : même grammaire que `fichiersDeclares` de scripts/fichiers-communs.mjs
+# (« Fichiers permis » ou « Fichiers touchés », chemins entre backticks, journaux HANDOVER/CHANGELOG ignorés). None = rien de lisible : aucun blocage.
+# Un corps peut porter les deux (ancienne estimation automatique, supprimée le 29/10/2026, puis « Fichiers permis » exact du gabarit Jules) : « permis » d'abord.
 FD = re.compile(r'^\s*\*\*\s*Fichiers (permis|touchés)\s*\*\*[^\n]*\n((?:[ \t]*[-*][ \t][^\n]*(?:\n|$))+)', re.I | re.M)
-# La ligne existe-t-elle (même « non déterminés ») ? prochaine-tache.mjs l'exige sur toute tâche (#360), comme `**Attend**`.
+# La ligne existe-t-elle (même « non déterminés ») ? prochaine-tache.mjs ne l'exige plus (29/10/2026).
 FT_LIGNE = re.compile(r'^\s*\*\*\s*Fichiers (?:permis|touchés)\s*\*\*', re.I | re.M)
-JOURNAUX = re.compile(r'(^|/)(HANDOVER|CHANGELOG)\.md$|^docs/(INDEX|adr/README)\.md$', re.I)   # journaux et index que chaque tâche complète : voir capacite.mjs
+JOURNAUX = re.compile(r'(^|/)(HANDOVER|CHANGELOG)\.md$|^docs/(INDEX|adr/README)\.md$', re.I)   # journaux et index que chaque tâche complète : voir fichiers-communs.mjs
 def fichiers_declares(body):
     for m in sorted(FD.finditer(body or ''), key=lambda x: bool(re.match('touch', x.group(1), re.I))):
         chemins = []

@@ -64,8 +64,8 @@ def compacter_prochaines(p):
             'alertes': p.get('alertes', []), 'script': p.get('script'), 'frein': p.get('frein'), 'frein_detail': p.get('frein_detail'),
             'depots': [{'repo': d['repo'], 'cle': d['cle'], 'nom': d['depot'], 'statut': d['statut'], 'suivante': d['suivante']['ref'] if d.get('suivante') else None,
                         'incidents': d.get('incidents', []), 'occupe_par': d.get('occupe_par', []), 'derniere': d.get('derniere'),
-                        # deux places par dépôt (21/10) : sans ces champs la page retombait sur « 2 places, fichiers inconnus » et ne pouvait
-                        # ni montrer les couloirs réels ni prévoir deux tâches à la fois ; les alertes du PC ne gèlent pas la file (incidents_pc)
+                        # `places` et `couloirs` ne sont plus émis par prochaine-tache.mjs (plus de comptage de places, 29/10/2026) : None et [] pour la page
+                        # qui les lisait encore ; les alertes du PC ne gèlent pas la file (incidents_pc)
                         'places': d.get('places'), 'couloirs': d.get('couloirs', []), 'incidents_pc': d.get('incidents_pc', []),
                         'suivantes': [s['ref'] for s in d.get('suivantes') or [] if s and s.get('ref')],
                         'sautees_conflit': d.get('sautees_conflit', []),
@@ -117,11 +117,9 @@ comp['releve'] = {k: gh.get(k) for k in ('v', 'mode', 'appels', 'reqs', 'n304', 
 CTRL = ['niveau:plan à retirer', 'tâche orpheline', 'corps hors gabarit', 'dépendance inconnue', 'cycle de dépendances',
         'PR sans « Tâche : #n »', 'fermée sans preuve', 'fusionnée sans preuve depuis 2 h', 'preuve programmée dépassée depuis plus d\'1 h', 'en cours sans PR depuis 24 h',
         'jules sans PR depuis 24 h', 'bloquée depuis plus de 7 jours', 'PR de plus de 400 lignes', 'incident ouvert',
-        "plus d'un fil en cours sur un dépôt", 'ménage en retard', 'fichiers illisibles', 'workflow en file sans robot']
+        'ménage en retard', 'fichiers illisibles', 'workflow en file sans robot']
 
-# Le contrôle « plus d'un fil » (nom gardé : la page le connaît) ne signale qu'AU-DELÀ des places du dépôt : sans limite depuis le 29/10/2026 (décision de Marc, tâche #874), donc jamais en pratique
-# (trois travaux à la fois du 26 au 29/10/2026 ; scripts/capacite.mjs, PLACES_PAR_DEPOT, à garder égal). Avant ce changement, 7 des 25 défauts du 21/10 n'étaient que des dépôts à deux fils, permis par la règle.
-PLACES_PAR_DEPOT = 99
+# Le contrôle « plus d'un fil en cours sur un dépôt » est supprimé (29/10/2026, nettoyage « go reco » de Marc) : il n'y a plus de limite de places par dépôt.
 
 def chemin_illisible(c):
     # Un « fichier » déclaré qui n'en est pas un : une ligne en gras prise pour une puce (« *Attend** », .github#374 et #375, 21/10/2026), un libellé avec deux-points ou une espace.
@@ -139,7 +137,6 @@ def sante(gh):
         assert kind in CTRL, kind
         pb.append({'k': kind, 'ref': f"{r['repo']}#{n['n']}", 't': n['title'], 'u': n['url'], 'm': msg})
     for r in gh['repos']:
-        fils = []
         for i in r.get('incidents', []):
             pb.append({'k': 'incident ouvert', 'ref': f"{r['repo']}#{i['n']}", 't': i['t'], 'u': i['url'], 'm': ''})
         for n in r['nodes'].values():
@@ -167,8 +164,6 @@ def sante(gh):
                 elif pa is not None and age_t(pa) > 3600:
                     add("preuve programmée dépassée depuis plus d'1 h", r, n, f"preuve attendue {n.get('pa')}")
             if 'en-cours' in labels:
-                # « preuve-attendue » REMPLACE « en-cours » (§10) : une étiquette restée sur une tâche en preuve-attendue est héritée, ce n'est pas un fil
-                if 'preuve-attendue' not in labels: fils.append(n)
                 if not p and age(n.get('start') or n['created']) > 86400:
                     add('en cours sans PR depuis 24 h', r, n)
             if 'jules' in labels and not p and age(n.get('start') or n['created']) > 86400:
@@ -185,9 +180,6 @@ def sante(gh):
             mauvais = [c for c in (n.get('fpl') or []) if chemin_illisible(c)]
             if mauvais:
                 add('fichiers illisibles', r, n, 'pas des chemins : ' + ', '.join(mauvais[:3]))
-        if len(fils) > PLACES_PAR_DEPOT:
-            for n in fils:
-                add("plus d'un fil en cours sur un dépôt", r, n, f"{len(fils)} tâches en cours dans {r['name']} (limite : {PLACES_PAR_DEPOT})")
     # workflows qui attendent un robot (workflows_en_file.py, tâche #532) : lus par fetch.py, signalés ici, jamais corrigés ici
     import workflows_en_file
     en_file, exceptions = workflows_en_file.separer(gh.get('en_file'))

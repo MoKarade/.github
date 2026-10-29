@@ -1,4 +1,3 @@
-import './places-deux.mjs';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
@@ -165,32 +164,32 @@ test('occupations : une lecture qui échoue rend « libre » (un réveil de trop
   assert.deepEqual(await occupations({ api: faux({ [`/repos/${DEPOT}/pulls`]: new Error('HTTP 403') }).api, depot: DEPOT }), []);
 });
 
-test('tâche fermée : deux places prises = aucun réveil ; libre = « libre » ; une place = « une place libre » ; abandon réveille toujours, sans « libre » si occupé', async () => {
+test('tâche fermée : sans limite de places, jamais « aucun réveil » pour dépôt occupé ; libre = « libre » ; des travaux en cours = « une place libre »', async () => {
   const occupe = faux({ [`/repos/${DEPOT}/issues`]: issuesEnCours([20, 21]) });
   const evt = { type: 'tache_fermee', depot: DEPOT, issue: '90', raison: 'completed' };
-  assert.deepEqual(await decider({ api: occupe.api, evt }), { action: 'rien', raison: 'dépôt encore occupé' });
+  assert.equal((await decider({ api: occupe.api, evt })).motif, `RÉACTEUR : ${DEPOT} : une place libre ; tâche ${DEPOT}#90 fermée`);
   assert.equal((await decider({ api: faux().api, evt })).motif, `RÉACTEUR : ${DEPOT} libre ; tâche ${DEPOT}#90 fermée`);
   const une = await decider({ api: faux({ [`/repos/${DEPOT}/issues`]: issuesEnCours([20]) }).api, evt });
   assert.equal(une.motif, `RÉACTEUR : ${DEPOT} : une place libre ; tâche ${DEPOT}#90 fermée`);
   const abandon = await decider({ api: occupe.api, evt: { ...evt, raison: 'not_planned' } });
-  assert.equal(abandon.motif, `RÉACTEUR : tâche ${DEPOT}#90 fermée (abandonnée : vérifier la raison)`);
+  assert.equal(abandon.motif, `RÉACTEUR : ${DEPOT} : une place libre ; tâche ${DEPOT}#90 fermée (abandonnée : vérifier la raison)`);
 });
 
-test('PR fusionnée : dépôt occupé par une autre tâche = aucun réveil ; la tâche de la PR fusionnée ne l’occupe plus', async () => {
+test('PR fusionnée : la tâche de la PR fusionnée n’occupe plus le dépôt ; d’autres travaux en cours ne retiennent plus le réveil', async () => {
   const base = { [`/repos/${DEPOT}/pulls/7`]: { body: 'Tâche : #12', user: humain }, [`/repos/${DEPOT}/issues/12`]: tache({ labels: [{ name: 'niveau:tâche' }, { name: 'preuve-attendue' }] }), [`/repos/${DEPOT}/issues/12/comments`]: [] };
   const evt = { type: 'pr_fusionnee', depot: DEPOT, pr: '7' };
   // seule la tâche #12 de la PR est encore étiquetée en-cours : le dépôt est libre
   assert.equal((await decider({ api: faux({ ...base, [`/repos/${DEPOT}/issues`]: issuesEnCours([12]) }).api, evt })).motif, `RÉACTEUR : ${DEPOT} libre ; PR #7 fusionnée`);
-  // une autre tâche est en cours : une place reste libre (deux places par dépôt, 21/10/2026)
+  // une autre tâche est en cours : le dépôt peut recevoir la suivante
   assert.equal((await decider({ api: faux({ ...base, [`/repos/${DEPOT}/issues`]: issuesEnCours([12, 21]) }).api, evt })).motif, `RÉACTEUR : ${DEPOT} : une place libre ; PR #7 fusionnée`);
-  // deux autres tâches en cours : rien
-  assert.deepEqual(await decider({ api: faux({ ...base, [`/repos/${DEPOT}/issues`]: issuesEnCours([12, 21, 22]) }).api, evt }), { action: 'rien', raison: 'dépôt encore occupé' });
-  // une autre PR de tâche est ouverte : une place libre ; deux autres PR : rien
+  // deux autres tâches en cours : réveil quand même (plus de limite de places, 29/10/2026)
+  assert.equal((await decider({ api: faux({ ...base, [`/repos/${DEPOT}/issues`]: issuesEnCours([12, 21, 22]) }).api, evt })).motif, `RÉACTEUR : ${DEPOT} : une place libre ; PR #7 fusionnée`);
+  // une autre PR de tâche est ouverte, ou deux : une place libre
   assert.equal((await decider({ api: faux({ ...base, [`/repos/${DEPOT}/pulls`]: [prOuverte(41, 'Tâche : #21')] }).api, evt })).motif, `RÉACTEUR : ${DEPOT} : une place libre ; PR #7 fusionnée`);
-  assert.equal((await decider({ api: faux({ ...base, [`/repos/${DEPOT}/pulls`]: [prOuverte(41, 'Tâche : #21'), prOuverte(42, 'Tâche : #22')] }).api, evt })).action, 'rien');
+  assert.equal((await decider({ api: faux({ ...base, [`/repos/${DEPOT}/pulls`]: [prOuverte(41, 'Tâche : #21'), prOuverte(42, 'Tâche : #22')] }).api, evt })).action, 'reveiller');
 });
 
-test('PR fusionnée : dépôt occupé mais preuve à poser = réveil, sans la ligne « libre »', async () => {
+test('PR fusionnée : dépôt avec des travaux en cours et preuve à poser = réveil', async () => {
   const { api } = faux({
     [`/repos/${DEPOT}/pulls/7`]: { body: 'Tâche : #115', user: humain },
     [`/repos/${DEPOT}/issues/115`]: tache(),
@@ -198,7 +197,7 @@ test('PR fusionnée : dépôt occupé mais preuve à poser = réveil, sans la li
     [`/repos/${DEPOT}/issues`]: issuesEnCours([21, 22]),
   });
   const d = await decider({ api, evt: { type: 'pr_fusionnee', depot: DEPOT, pr: '7' } });
-  assert.equal(d.motif, `RÉACTEUR : PR #7 fusionnée ; preuve à poser sur ${DEPOT}#115`);
+  assert.equal(d.motif, `RÉACTEUR : ${DEPOT} : une place libre ; PR #7 fusionnée ; preuve à poser sur ${DEPOT}#115`);
 });
 
 const roug = { type: 'ci_rouge', depot: 'MoKarade/DriveAI', evenement: 'pull_request', pr: '12', sha: 'abcdef1234567', run: '555', brancheDefaut: 'main' };
@@ -616,11 +615,11 @@ test('travaux : une tâche en-cours et sa PR ouverte comptent pour un, une PR sa
   assert.equal(await travaux({ api: faux({ [`/repos/${DEPOT}/pulls`]: new Error('HTTP 403') }).api, depot: DEPOT }), 0, 'lecture ratée : libre');
 });
 
-test('signeLibre : libre, une place libre, rien', () => {
+test('signeLibre : libre, ou une place libre dès qu’un travail est en cours (plus de limite)', () => {
   assert.equal(signeLibre('D', 0), 'D libre');
   assert.equal(signeLibre('D', 1), 'D : une place libre');
-  assert.equal(signeLibre('D', 2), '');
-  assert.equal(signeLibre('D', 3), '');
+  assert.equal(signeLibre('D', 2), 'D : une place libre');
+  assert.equal(signeLibre('D', 3), 'D : une place libre');
 });
 
 test('PR fusionnée : une tâche acceptée seule le dit dans le réveil et n’a plus de « preuve à poser »', async () => {
@@ -763,13 +762,12 @@ test('tâche fermée : la tâche réservée est confiée à Jules par le Réacte
   assert.match(e[1].corps.body, /^Confiée à Jules automatiquement/);
 });
 
-test('Jules part même dans un dépôt dont les deux places sont prises ; le Coordinateur n’est pas réveillé pour autant', async () => {
+test('Jules part dans un dépôt qui a des travaux en cours', async () => {
   const enCours = (n, f) => tachePrete(n, { labels: [{ name: 'niveau:tâche' }, { name: 'en-cours' }], body: `**Fini quand** : ok\n\n**Fichiers touchés** :\n- \`${f}\`\n\n**Attend** : aucune\n` });
   const deux = [enCours(50, 'app/a.ts'), enCours(51, 'app/b.ts')];
   const f = faux(donneesJules({ [`/repos/${DEPOT}/issues?labels=en-cours&state=open&per_page=30`]: deux, [`/repos/${DEPOT}/issues?state=open&per_page=100&page=1`]: [...deux, reservee()] }));
   const d = await decider({ api: f.api, evt: { type: 'tache_fermee', depot: DEPOT, issue: '90', raison: 'completed' } });
-  assert.equal(d.action, 'rien');
-  assert.equal(d.raison, 'dépôt encore occupé');
+  assert.equal(d.action, 'reveiller');
   assert.equal(d.jules.n, 31);
   assert.equal(ecritureJules(f.ecritures).length, 2);
 });
@@ -847,13 +845,10 @@ test('tâche ouverte : si elle devient la suivante d’un dépôt qui a une plac
   assert.doesNotMatch(d.motif, /Titre secret/);
 });
 
-test('tâche ouverte : pas la suivante, dépôt plein, tâche fermée ou autre chose qu’une tâche = personne n’est réveillé', async () => {
+test('tâche ouverte : pas la suivante, tâche fermée ou autre chose qu’une tâche = personne n’est réveillé', async () => {
   const quand = new Date('2026-10-28T21:00:00Z');
   const rien = async (donnees, evt = evtOuverte()) => { const d = await decider({ api: faux(donnees).api, evt, maintenant: quand }); assert.equal(d.action, 'rien'); return d; };
   await rien({ [LISTE]: [tachePrete(12), tachePrete(14)], [`/repos/${DEPOT}/issues/14`]: tachePrete(14) }, evtOuverte('14'));
-  const enCours = (n, f) => tachePrete(n, { labels: [{ name: 'niveau:tâche' }, { name: 'en-cours' }], body: `**Fini quand** : ok\n\n**Fichiers touchés** :\n- \`${f}\`\n\n**Attend** : aucune\n` });
-  const deux = [enCours(50, 'app/a.ts'), enCours(51, 'app/b.ts')];
-  await rien({ [LISTE]: [...deux, tachePrete(12)], [`/repos/${DEPOT}/issues?labels=en-cours&state=open&per_page=30`]: deux, [`/repos/${DEPOT}/issues/12`]: tachePrete(12) });
   await rien({ [LISTE]: [], [`/repos/${DEPOT}/issues/12`]: tachePrete(12, { state: 'closed' }) });
   await rien({ [LISTE]: [], [`/repos/${DEPOT}/issues/12`]: { number: 12, state: 'open', labels: [{ name: 'bug' }] } });
 });

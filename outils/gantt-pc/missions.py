@@ -6,7 +6,7 @@
 #
 #   deriver : pour chaque mission et chantier, `deb` (première tâche réellement commencée), `fin` (dernière fermeture, SEULEMENT si toutes les
 #             tâches sont fermées), `nt` / `nf` (tâches, tâches fermées), `inc` (enfants absents du relevé : alors `fin` reste vide).
-#             Aucun appel d'API, aucune étiquette : une mission `en-cours` compterait comme un travail dans les places du dépôt (places-depot.mjs).
+#             Aucun appel d'API, aucune étiquette : une mission `en-cours` compterait comme un travail du dépôt.
 #   a_fermer: les missions ouvertes dont tous les enfants sont fermés depuis FERMER_APRES_H heures au moins, dont un au moins `completed`.
 #   fermer  : commentaire « Acceptée » puis fermeture `completed`, avec le jeton `gh` du PC (comme reponses.py). Relit l'issue avant d'écrire
 #             (déjà fermée ou `sub_issues_summary` qui ne dit pas « tout fermé » : on ne touche à rien). Au plus PAR_TOUR par tour.

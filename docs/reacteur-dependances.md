@@ -12,14 +12,14 @@ Le Réacteur d'un dépôt ne réveillait que ce dépôt. Le 29/10/2026, app-temp
 
 1. lit les tâches ouvertes (`niveau:tâche`) des **autres** dépôts de la constellation (les clés de `BOITES`) ;
 2. garde celles dont la ligne `**Attend**` cite la tâche fermée (même lecture que la file : `lireAttend`, alias `batchchef` compris) ;
-3. pour chaque dépôt concerné, lit sa file (`fileDuDepot`) : si une tâche citée est la suivante (ou dans les suivantes) et qu'une place est libre, il réveille la boîte de CE dépôt, avec les mêmes règles que tout autre réveil (déduplication de 6 h, session neuve lancée par la routine « Prendre une tâche », jamais un titre dans le message).
+3. pour chaque dépôt concerné, lit sa file (`fileDuDepot`) : si une tâche citée est la suivante (ou dans les suivantes) il réveille la boîte de CE dépôt, avec les mêmes règles que tout autre réveil (déduplication de 6 h, session neuve lancée par la routine « Prendre une tâche », jamais un titre dans le message).
 
 Le message est de la forme `RÉACTEUR : D libre ; suivante : #m ; tâche D0#n fermée ; D#m peut partir`.
 
 ## Ce qui ne bouge pas
 
 - Aucun `schedule:` ou `cron:`, aucun secret de plus : le jeton de réveil existant sert.
-- Un dépôt dont aucune tâche ne cite la fermée n'est pas réveillé. Une tâche citée mais pas prenable (bloquée, places prises, hors file) ne réveille pas non plus : le journal le dit.
+- Un dépôt dont aucune tâche ne cite la fermée n'est pas réveillé. Une tâche citée mais pas prenable (bloquée, hors file) ne réveille pas non plus : le journal le dit.
 - Une lecture qui échoue (dépôt privé, panne) est un avertissement : les autres dépôts partent quand même, et le filet de 6 h reprend la main.
 - La fermeture d'une tâche abandonnée (`not_planned`) ne réveille personne : sa dépendance n'est pas levée.
 
