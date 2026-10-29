@@ -9,7 +9,7 @@ name: Signaler un échec
 # (scripts/boucle-erreur.mjs) et ne contient que des noms de job et d'étape, jamais un journal.
 on:
   workflow_run:
-    workflows: [Réacteur, Commentaire tâche liée, Relecture IA, Surveillance des apps, Rapport hebdomadaire]
+    workflows: [Réacteur, Commentaire tâche liée, Relecture IA, Surveillance des apps]
     types: [completed]
   workflow_call:
 

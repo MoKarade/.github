@@ -540,7 +540,6 @@ test('horloges : reacteur.yml n’a plus aucun minuteur (tâche #712), et les cr
   assert.deepEqual(crons('reacteur.yml'), []);
   assert.doesNotMatch(lire('reacteur.yml').replace(/^\s*#.*$/gm, ''), /^\s*schedule:/m);
 
-  for (const [minute] of crons('rapport-hebdo.yml')) assert.ok(!['0', '15', '30', '45'].includes(minute), `rapport-hebdo.yml : minute ronde « ${minute} »`);
 });
 
 test('reacteur.yml écoute chaque événement qui remplace un minuteur, et envoie le bon type', () => {
@@ -580,7 +579,7 @@ test('commentaire tâche liée : une PR modifiée (corps) lance le balayage, et 
   assert.deepEqual([jour, mois, semaine], ['*', '*', '*']);
 });
 
-// scripts/attend-marc.mjs (tâche #216) : testé ici, car ce fichier est celui que lance le contrôle `tests-reveil-reacteur`.
+// scripts/attend-marc.mjs (tâche #216) : testé ici, car ce fichier est celui que lance le workflow `tests.yml`.
 const issueGeste = (extra = {}) => ({ number: 1, state: 'open', title: 'Garde-fou : la PR #12 attend un geste de Marc', labels: [{ name: 'qui:marc' }], ...extra });
 
 test('attend-marc : prAttendantMarc : lit le numéro de la PR dans le titre de l’issue ouverte qui:marc, trié, sans doublon', () => {
