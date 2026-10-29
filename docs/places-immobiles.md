@@ -27,4 +27,4 @@ Une tâche `en-cours` est un travail du dépôt (il n'y a plus de limite de plac
 
 ## Vérifier
 
-`node --test scripts/place-immobile.test.mjs` (contrôle « Tests du garde-fou »). En production : sur un dépôt qui avait une tâche immobile, la lecture de `file-depot.mjs` montre une place de plus après le second passage.
+`node --test scripts/place-immobile.test.mjs` (contrôle « Tests du garde-fou »). En production : sur un dépôt qui avait une tâche immobile, l'étiquette `en-cours` est retirée et `bloqué` posée après le second passage (la file calculée qui le montrait a été retirée le 29/10/2026).

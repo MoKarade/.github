@@ -9,7 +9,7 @@
 # v8 (16/10/2026) : trois corrections du rapport des défauts du backlog (2026-10-16_defauts-backlog.md) et une donnée de plus.
 #   « Preuve attendue » est aussi lue dans les commentaires (le dernier avec une date lisible l'emporte sur le corps) ;
 #   « **Attend** : rien (PR #n) » n'attend rien ; `jules_at` = les instants où l'étiquette `jules` a été posée (mesure des lancements Jules) ;
-#   les scripts de MoKarade/.github que la page fait tourner (`prochaine-tache.mjs`, `verif-fidelite.mjs`) sont relus à chaque relevé (build.py et refresh.sh les lancent).
+#   les scripts de MoKarade/.github que la page fait tourner (`verif-fidelite.mjs`, `filet-pc.mjs`) sont relus à chaque relevé (build.py et refresh.sh les lancent).
 # v9 (19/10/2026) : demande de Marc (la fiche montre les étapes d'une tâche et ce que Jules peut faire).
 #   `et` = la suite des étapes d'une tâche lue dans ses événements (en cours, attend Marc, bloquée, preuve attendue, correction, faite) ;
 #   `pr.au` = l'auteur de la PR ; `pr.jf` = sa portée (nombre de fichiers, lignes, premier chemin protégé) ; `fp` = nombre de « Fichiers permis » (gabarit Jules).
@@ -445,9 +445,8 @@ print(f"{res['mode']} : {res['appels']} appels comptés ({res['n304']} en 304 gr
 # .github#741 : QUOI pèse dans les appels comptés (les 304 ne coûtent rien) ; une seconde ligne, la première reste celle que le tour recopie
 res['appels_par_chemin'] = dict(ghcache.detail_comptees())
 print('appels comptés par chemin : ' + (', '.join(f'{c} {n}' for c, n in ghcache.detail_comptees()) or 'aucun'), file=sys.stderr)
-# Miroir local des scripts de MoKarade/.github que la page fait tourner : UN calcul de la file (prochaine-tache.mjs) et UNE mesure de fidélité
-# (verif-fidelite.mjs), les mêmes pour la page et pour la routine. Relus à chaque relevé (un 304 ne coûte rien) ; leurs imports relatifs suivent.
-SCRIPTS_ENTREES = ['prochaine-tache.mjs', 'verif-fidelite.mjs', 'filet-pc.mjs']
+# Miroir local des scripts de MoKarade/.github que le PC fait tourner : UNE mesure de fidélité (verif-fidelite.mjs) et le filet (filet-pc.mjs). Le calcul de la file (prochaine-tache.mjs) est retiré (29/10/2026). Relus à chaque relevé (un 304 ne coûte rien) ; leurs imports relatifs suivent.
+SCRIPTS_ENTREES = ['verif-fidelite.mjs', 'filet-pc.mjs']
 SCRIPTS_DIR = D + 'scripts-github/'
 def git_sha(b): return hashlib.sha1(b'blob %d\0' % len(b) + b).hexdigest()
 def miroir_scripts():

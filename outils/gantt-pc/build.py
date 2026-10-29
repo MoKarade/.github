@@ -5,9 +5,11 @@ import couts_manuels      # registre des dépenses lu dans un fichier privé du 
 # v6 (15/10/2026) : cahier des charges du §13 de MoKarade/.github docs/archive/cycle-de-vie-tache-2026-10-29.md.
 # v7 (16/10/2026) : la file « tâche suivante » n'est plus calculée par la page : build.py fait tourner le script de MoKarade/.github
 #   (scripts/prochaine-tache.mjs, copié par fetch.py dans scripts-github/), écrit prochaines.json et l'embarque dans donnees.json.
+#   RETIRÉE le 29/10/2026 (chaîne de lancement, voie courte : une étiquette `go` lance claude-code-action dans la CI de l'app) : plus de prochaines.json ; `donnees.json` garde la clé
+#   `prochaines` sous la forme {'erreur': …}, forme déjà produite quand le calcul de la file échouait.
 #   Corrections du rapport des défauts du backlog : « Preuve attendue » lue dans la zone qu'elle nomme (heure du Québec par défaut),
 #   une étiquette `en-cours` héritée d'une tâche en `preuve-attendue` ne compte plus comme un fil, le nombre de la pastille est écrit une fois (sante.n).
-# backlog.json (relevé de fetch.py) -> donnees.json (relu par la page publiée) + prochaines.json + chantier-apps.html
+# backlog.json (relevé de fetch.py) -> donnees.json (relu par la page publiée) + chantier-apps.html
 # Toute la mise en page est dans page7.html + p7/ ; ce script ne fait que compacter les données et calculer la santé.
 # Usage : python3 build.py [backlog.json] [suffixe]   (suffixe : sorties donnees<suffixe>.json etc., pour les essais)
 D = os.path.dirname(os.path.abspath(__file__)) + '/'
@@ -42,44 +44,6 @@ def preuve_attendue(txt):
     if re.search(r'^(?::\d{2})?\s*Z\b|\b(?:UTC|GMT)\b', zone, re.I): return naif.replace(tzinfo=UTC)
     if QC is not None: return naif.replace(tzinfo=QC).astimezone(UTC)
     return (naif + datetime.timedelta(hours=4 if _ete(naif) else 5)).replace(tzinfo=UTC)
-
-# --- le script de file : UN calcul, lu par la page ET par la routine ---------------------------------------------------------------------------
-def prochaines(sortie):
-    """Fait tourner scripts-github/prochaine-tache.mjs sur le relevé. Rend (contenu, None) ou (None, raison)."""
-    node, script = shutil.which('node'), D + 'scripts-github/prochaine-tache.mjs'
-    if not node: return None, 'node introuvable sur cette machine'
-    if not os.path.exists(script): return None, 'scripts-github/prochaine-tache.mjs absent (fetch.py le copie depuis MoKarade/.github)'
-    tmp = sortie + '.tmp'
-    try: r = subprocess.run([node, script, D + SRC, '--sortie', tmp], capture_output=True, text=True, timeout=120)
-    except Exception as e: return None, 'le script ne répond pas : ' + str(e)[:200]
-    if r.returncode != 0: return None, ('le script a échoué : ' + (r.stderr or r.stdout))[-300:]
-    data = json.load(open(tmp))
-    data['script'] = (gh.get('scripts') or {}).get('prochaine-tache.mjs')
-    with open(tmp, 'w') as f: json.dump(data, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, sortie)
-    return data, None
-def compacter_prochaines(p):
-    # ce que la page affiche : la tâche suivante, la file dans l'ordre (rang, palier, raison), les écartées avec leur code ; titres et adresses viennent du relevé
-    return {'version': p.get('version'), 'calcule_le': p.get('calcule_le'), 'source_asof': p.get('source_asof'), 'non_calcule': p.get('non_calcule', []),
-            'alertes': p.get('alertes', []), 'script': p.get('script'), 'frein': p.get('frein'), 'frein_detail': p.get('frein_detail'),
-            'depots': [{'repo': d['repo'], 'cle': d['cle'], 'nom': d['depot'], 'statut': d['statut'], 'suivante': d['suivante']['ref'] if d.get('suivante') else None,
-                        'incidents': d.get('incidents', []), 'occupe_par': d.get('occupe_par', []), 'derniere': d.get('derniere'),
-                        # `places` et `couloirs` ne sont plus émis par prochaine-tache.mjs (plus de comptage de places, 29/10/2026) : None et [] pour la page
-                        # qui les lisait encore ; les alertes du PC ne gèlent pas la file (incidents_pc)
-                        'places': d.get('places'), 'couloirs': d.get('couloirs', []), 'incidents_pc': d.get('incidents_pc', []),
-                        'suivantes': [s['ref'] for s in d.get('suivantes') or [] if s and s.get('ref')],
-                        'sautees_conflit': d.get('sautees_conflit', []),
-                        'file': [{k: f.get(k) for k in ('ref', 'rang', 'tier', 'prio', 'raison', 'mission', 'chantier', 'fichiers')} for f in d.get('file', [])],
-                        'exclues': d.get('exclues', {}),
-                        # PR dont le seul obstacle est un geste de Marc (#197) : l'onglet « À toi » les range dans « à fusionner »
-                        'attend_marc': d.get('attend_marc', [])} for d in p.get('depots', [])],
-            # tâches oubliées et attentes (.github#238) : la page les montre telles que le script les détecte, sans rien recalculer
-            'oubliees': [{k: o.get(k) for k in ('ref', 'cause', 'racine', 'proprietaire', 'depuis', 'heures')} for o in p.get('oubliees') or []],
-            'file_marc': [{k: m.get(k) for k in ('racine', 'depuis', 'heures', 'retient', 'retient_n', 'en_retard')} for m in p.get('file_marc') or []],
-            'attentes': {r: {k: a.get(k) for k in ('racine', 'code', 'proprietaire', 'depuis', 'heures', 'oubliee')} for r, a in (p.get('attentes') or {}).items()},
-            'seuils_oubli': p.get('seuils_oubli'),
-            # état de chaque tâche ouverte (.github#247) : a-faire, en-cours, en-attente, bloquee ou invalide, avec ce qu'elle attend
-            'etats': {r: {k: e.get(k) for k in ('etat', 'attend', 'proprietaire', 'depuis', 'cause')} for r, e in (p.get('etats') or {}).items()}}
 
 comp = {'asof': gh['asof'], 'built': iso(datetime.datetime.now(UTC)), 'v': 7, 'repos': []}
 # Durée d'une mission ou d'un chantier = celle de ses tâches (missions.py, .github#591) : `deb` première tâche commencée, `fin` dernière fermeture
@@ -257,10 +221,8 @@ try:
     with open(D + 'etapes.json', encoding='utf-8') as _f: comp['etapes'] = json.load(_f)
 except (OSError, ValueError) as _e: print('etapes omis :', type(_e).__name__, file=sys.stderr)
 
-# la file du script : écrite à chaque construction, pour la routine (prochaines.json) et pour la page (embarquée)
-pro, err = prochaines(D + 'prochaines' + OUT + '.json')
-comp['prochaines'] = compacter_prochaines(pro) if pro else {'erreur': err}
-if err: print('prochaines.json NON écrit :', err, file=sys.stderr)
+# La file calculée n'existe plus (chaîne de lancement retirée, 29/10/2026) : la clé reste, avec une raison, pour que la page ne casse pas sur une clé absente (même forme que l'ancien échec du calcul).
+comp['prochaines'] = {'erreur': 'file calculée retirée (voie courte : étiquette go)'}
 # fidélité (T5) : mesurée par refresh.sh après le relevé, puis la page est reconstruite avec ; absente = la pastille dit « non mesurée »
 try:
     fid = json.load(open(D + 'fiabilite.json'))
@@ -283,5 +245,4 @@ if os.path.exists(D + 'page7.html'):
     tmp = D + 'chantier-apps' + OUT + '.html.tmp'
     open(tmp, 'w', encoding='utf-8').write(page)
     os.replace(tmp, D + 'chantier-apps' + OUT + '.html')
-libres = [d['nom'] for d in comp['prochaines'].get('depots', []) if d['statut'] == 'libre']
-print(len(page) if os.path.exists(D + 'page7.html') else 'page non construite :', 'octets,', comp['sante']['n'], 'défaut(s) à la pastille ;', 'file du script : ' + (f"{len(libres)} dépôt(s) libre(s)" if pro else 'INDISPONIBLE'))
+print(len(page) if os.path.exists(D + 'page7.html') else 'page non construite :', 'octets,', comp['sante']['n'], 'défaut(s) à la pastille')

@@ -5,7 +5,7 @@
 // une minute après la CI verte, en médiane) mais le temps entre la fusion et le « **Acceptée** » posé par un fil
 // (médiane 11 min, un tiers des tâches au-delà d'une heure).
 //
-// Quand une PR est fusionnée, le Réacteur (scripts/reveil-reacteur.mjs) appelle ce module AVANT de décider la suite (routine « Prendre une tâche » pour la suivante).
+// Quand une PR est fusionnée, le Réacteur (scripts/reveil-reacteur.mjs) appelle ce module AVANT de décider la suite (les balayages de `.github`).
 // Il pose le commentaire « **Acceptée** » et ferme la tâche SEULEMENT si TOUT est vrai :
 //   - la tâche porte la ligne `**Acceptation automatique** : oui — <pourquoi>` (celui qui écrit la tâche affirme que son « Fini quand »
 //     est un contrôle CI ou un déploiement, jamais une lecture de la production : une machine ne lit que ce que GitHub sait) ;

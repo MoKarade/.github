@@ -1,7 +1,7 @@
 // Une seule règle de Marc reste du comptage de places (nettoyage du 29/10/2026, « go reco ») : pas deux PR sur les mêmes fichiers.
 // Plus de limite de places, plus de fichiers estimés : on lit les fichiers RÉELS des PR ouvertes, et la ligne « Fichiers touchés » (ou « Fichiers permis »)
 // de la tâche quand elle existe. Fichiers inconnus = aucun blocage (avant : « dans le doute, un seul ») ; seul Jules garde le doute (`raisonIncompatible`).
-// Fonctions pures partagées par `prochaine-tache.mjs` (la file), `acceptation-marquage.mjs`, `file-depot.mjs` ; `controleFichiers` (I/O, `api` injecté)
+// Fonctions pures partagées par `acceptation-marquage.mjs` (la file calculée `prochaine-tache.mjs` et `file-depot.mjs` ont été retirées le 29/10/2026) ; `controleFichiers` (I/O, `api` injecté)
 // est le contrôle « Fichiers » du Garde-fou.
 
 import { dispense } from './tache-liee.mjs';
