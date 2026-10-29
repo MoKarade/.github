@@ -190,9 +190,6 @@ export async function fileDuDepot({ api, depot, frein = null, maintenant = new D
       suivantes: d.suivantes.map((s) => s.n),
       eligibleDepuis: tache ? eligibleDepuis({ tache, deps }) : null,
       illisibles,
-      // Ce que le Réacteur lit pour confier la première tâche réservée à Jules (scripts/jules-auto.mjs, `confierJulesDuDepot`, tâche #704).
-      reservees: d.reservees_jules,
-      julesEnCours: d.jules_en_cours,
       occupePar: d.occupe_par,
       incidents: d.incidents,
     };

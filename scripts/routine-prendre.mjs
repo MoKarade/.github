@@ -15,7 +15,7 @@ export const FENETRE_ROUTINE_H = 6;
 export const ENTETE_BETA = 'experimental-cc-routine-2026-04-01';
 export const LABEL_TACHE = 'niveau:tâche';
 // Une tâche qui porte l'une de ces étiquettes est déjà prise (ou ne se prend pas) : la routine ne part pas.
-export const ETIQUETTES_QUI_ECARTENT = ['en-cours', 'jules', 'faisable-jules', 'qui:marc', 'bloqué', 'preuve-attendue'];
+export const ETIQUETTES_QUI_ECARTENT = ['en-cours', 'jules', 'qui:marc', 'bloqué', 'preuve-attendue'];
 // La file doit avoir au moins une tâche prête (`libre`).
 export const STATUTS_AVEC_PLACE = new Set(['libre']);
 export const DELAI_APPEL_MS = 15000;

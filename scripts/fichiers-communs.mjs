@@ -1,7 +1,7 @@
 // Une seule règle de Marc reste du comptage de places (nettoyage du 29/10/2026, « go reco ») : pas deux PR sur les mêmes fichiers.
 // Plus de limite de places, plus de fichiers estimés : on lit les fichiers RÉELS des PR ouvertes, et la ligne « Fichiers touchés » (ou « Fichiers permis »)
 // de la tâche quand elle existe. Fichiers inconnus = aucun blocage (avant : « dans le doute, un seul ») ; seul Jules garde le doute (`raisonIncompatible`).
-// Fonctions pures partagées par `prochaine-tache.mjs` (la file), `jules-auto.mjs`, `acceptation-marquage.mjs`, `file-depot.mjs` ; `controleFichiers` (I/O, `api` injecté)
+// Fonctions pures partagées par `prochaine-tache.mjs` (la file), `acceptation-marquage.mjs`, `file-depot.mjs` ; `controleFichiers` (I/O, `api` injecté)
 // est le contrôle « Fichiers » du Garde-fou.
 
 import { dispense } from './tache-liee.mjs';
@@ -16,9 +16,9 @@ export const MARQUEUR_ANCIEN_PLACES = '<!-- garde-fou-places -->';
 // (une ligne ajoutée par ADR). Tout autre fichier commun (package.json, lockfile, CLAUDE.md, AGENTS.md…) compte.
 const JOURNAUX = /(^|\/)(HANDOVER|CHANGELOG)\.md$|^docs\/(INDEX|adr\/README)\.md$/i;
 
-// « **Fichiers permis** (aucun autre) : » (gabarit Jules, docs/jules-gabarit-issue.md) ou « **Fichiers touchés** : » (tâche écrite pour Claude),
+// « **Fichiers permis** (aucun autre) : » (PR de Jules, `jules-suivi.mjs`) ou « **Fichiers touchés** : » (tâche écrite pour Claude),
 // suivi d'une liste à puces. Même grammaire que `fichiers_declares` de outils/gantt-pc/fetch.py. Un corps peut porter les deux (une estimation
-// automatique écrite jadis par `fichiers-touches.mjs`, supprimé, puis le « Fichiers permis » exact du gabarit Jules) : « permis » d'abord, « touchés » à défaut.
+// automatique écrite jadis par le filet, supprimée, puis un « Fichiers permis » exact) : « permis » d'abord, « touchés » à défaut.
 const SECTION = /^\s*\*\*\s*Fichiers (permis|touchés)\s*\*\*[^\n]*\n((?:[ \t]*[-*][ \t][^\n]*(?:\n|$))+)/gim;
 
 const nettoyer = (c) => String(c).trim().replace(/^\.\//, '').replace(/[`,;:.]+$/g, '').replace(/\\/g, '/');

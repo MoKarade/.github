@@ -84,7 +84,7 @@ def liens(body, repo):
 HORS_TAILLE = re.compile(r'(^|/)(tests?|__tests__|e2e|fixtures?|__snapshots__|dist|captures)/|\.(test|spec)\.[cm]?[jt]sx?$|(^|/)drizzle/meta/|\.snap$|(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$|\.lock$', re.I)
 def taille(files):
     return sum(f['additions'] + f['deletions'] for f in files if not HORS_TAILLE.search(f['filename']))
-# Portée de Jules (cycle de vie §6 et docs/jules-gabarit-issue.md : deux fichiers au plus, environ 150 lignes, aucun chemin protégé).
+# Portée de Jules (cycle de vie §6 : deux fichiers au plus, environ 150 lignes, aucun chemin protégé).
 # Le relevé donne les mesures ; la page applique les seuils et dit lequel manque.
 PROTEGE = re.compile(r'(^|/)(\.github|\.claude|scripts/hooks|qualite|drizzle|migrations?)/|(^|/)(vercel\.json|\.mergify\.yml|CODEOWNERS|appsscript\.json'
                      r'|package(-lock)?\.json|AGENTS\.md|CLAUDE\.md)$|(^|/)\.env|\.gs$', re.I)

@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 // Pilotage des tâches et de Jules À L'ÉVÉNEMENT (tâche MoKarade/.github#715, mission #703 « tout par événements »).
-// Avant : le tour du PC (`filet-pc.mjs`, toutes les 10 min) posait `faisable-jules`, complétait le corps des tâches, écrivait « Fichiers touchés » et
+// Avant : le tour du PC (`filet-pc.mjs`, toutes les 10 min) écrivait « Fichiers touchés » et
 // « Acceptation automatique », suivait les PR de Jules, retirait les étiquettes des tâches fermées. Un PC éteint = rien de tout cela.
 // Maintenant : le Réacteur (`reveil-reacteur.mjs`) appelle LES MÊMES fonctions, avec les mêmes règles et les mêmes plafonds, quand l'événement qui les
 // rend utiles arrive (voir `PAR_EVENEMENT`). Aucune règle n'est réécrite ici : ce fichier ne fait que choisir quelle fonction part sur quel événement.
 //
 // Ce qui change par rapport au tour du PC, dit une fois :
-//   - pas d'état gardé d'un passage à l'autre (un job GitHub ne garde rien) : le plafond « 20 complétées par 24 h » du gabarit et la mémoire de refus
-//     ne vivent que le temps du passage (au plus UNE tâche complétée par passage, et un refus n'écrit rien) ; le signalement d'un problème est
+//   - pas d'état gardé d'un passage à l'autre (un job GitHub ne garde rien) : le signalement d'un problème est
 //     dédoublonné par le Réacteur (même texte déjà sur la boîte depuis moins de 6 h = rien) ;
 //   - les appels GitHub passent par `ghSynchrone` (un `node` enfant qui fait le `fetch`, jeton `github.token`, issues et pull-requests en écriture) : aucun nouveau secret, et
 //     surtout aucune CLI `gh` à trouver dans le PATH (le robot du PC, qui sert les dépôts privés, n'en a pas : DriveAI#798, 29/10/2026) ;
@@ -16,17 +15,15 @@
 // Fonctions pures d'un côté (`etapesPour`, `lignesDe`), I/O de l'autre (`gh` injecté).
 import { spawnSync } from 'node:child_process';
 import { suivreDepot, menageFermees, marquerParJules } from './jules-suivi.mjs';
-import { marquerFaisables, retirerPerimees } from './jules-marquage.mjs';
-import { completerDepot as completerGabarit } from './jules-gabarit.mjs';
 import { completerDepot as marquerAcceptation, PAR_TOUR_MAX as MARQUAGES_PAR_TOUR } from './acceptation-marquage.mjs';
 import { libererPlacesImmobiles } from './place-immobile.mjs';
 
 /** Les étapes, dans l'ordre où le tour du PC les faisait : une étiquette périmée libère la tâche avant qu'on la complète, la complétion précède la réservation. */
-export const ETAPES = ['suivi', 'parJules', 'menage', 'perimees', 'completer', 'acceptation', 'marquer', 'immobiles'];
+export const ETAPES = ['suivi', 'parJules', 'menage', 'acceptation', 'immobiles'];
 
 /**
  * Quelle étape pour quel événement du Réacteur.
- *   tache_ouverte (issue qui s'ouvre, change ou change d'étiquette) : tout ce qui prépare une tâche pour Jules ou pour un fil ;
+ *   tache_ouverte (issue qui s'ouvre, change ou change d'étiquette) : « Fichiers touchés » et « Acceptation automatique » d'une tâche ;
  *   tache_fermee : les étiquettes de travail d'une tâche fermée ;
  *   pr_ouverte / pr_fusionnee : le suivi des PR de Jules (nettoyage du corps, `hold`, acceptation d'une PR de tests fusionnée) et son étiquette `par-jules` ;
  *   deploiement : une PR de Jules fusionnée n'est acceptée qu'une fois le déploiement de production réussi ;
@@ -35,7 +32,7 @@ export const ETAPES = ['suivi', 'parJules', 'menage', 'perimees', 'completer', '
  *   filet : tout, en rattrapage d'un événement manqué.
  */
 export const PAR_EVENEMENT = {
-  tache_ouverte: ['perimees', 'completer', 'acceptation', 'marquer', 'immobiles'],
+  tache_ouverte: ['acceptation', 'immobiles'],
   tache_fermee: ['menage', 'immobiles'],
   pr_ouverte: ['suivi', 'parJules'],
   pr_fusionnee: ['suivi', 'parJules', 'immobiles'],
@@ -105,7 +102,7 @@ export function pilotage({ evt, gh = ghSynchrone(), maintenant = new Date(), aBl
   const depot = evt.depot;
   const sortie = { etapes: etapesPour(evt.type), lignes: [], signaux: [], erreurs: [] };
   if (!depot || sortie.etapes.length === 0) return sortie;
-  const etat = {}; // un job ne garde rien (voir l'en-tête) : la mémoire du gabarit et le « pas de Jules » ne durent que ce passage
+  const etat = {}; // un job ne garde rien (voir l'en-tête) : la mémoire des signalements ne dure que ce passage
   const budgetAcceptation = { restant: MARQUAGES_PAR_TOUR };
   const dire = (texte) => sortie.lignes.push(texte);
   const essayer = (nom, f) => {
@@ -128,23 +125,10 @@ export function pilotage({ evt, gh = ghSynchrone(), maintenant = new Date(), aBl
       const r = menageFermees({ depot, gh, aBlanc });
       if (r.length) dire(`ménage : ${r.length} étiquette(s) retirée(s) sur tâches fermées (${r.slice(0, 4).join(', ')})`);
     },
-    perimees: () => {
-      const r = retirerPerimees({ depot, gh, aBlanc });
-      if (r.length) dire(`faisable-jules périmée(s) retirée(s) (${r.join(', ')})`);
-    },
-    completer: () => {
-      const r = completerGabarit({ depot, gh, etat, maintenant, aBlanc });
-      if (r.completees.length) dire(`corps complété(s) au gabarit (${r.completees.join(', ')})`);
-      if (r.refusees.length) dire(`gabarit refusé : ${r.refusees.slice(0, 3).map((x) => `${x.ref} ${x.raison.slice(0, 70)}`).join(' ; ')}`);
-    },
     acceptation: () => {
       const r = marquerAcceptation({ depot, gh, budget: budgetAcceptation, aBlanc });
       if (r.ecrites.length) dire(`acceptation automatique marquée (${r.ecrites.slice(0, 6).join(', ')})`);
       if (r.retirees.length) dire(`acceptation automatique retirée (${r.retirees.slice(0, 4).join(', ')})`);
-    },
-    marquer: () => {
-      const r = marquerFaisables({ depot, gh, aBlanc });
-      if (r.marquees.length) dire(`faisable-jules posé (${r.marquees.join(', ')})`);
     },
     immobiles: () => {
       const r = libererPlacesImmobiles({ depot, gh, maintenant, aBlanc });
