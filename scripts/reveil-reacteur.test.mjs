@@ -579,7 +579,7 @@ test('commentaire tâche liée : une PR modifiée (corps) lance le balayage, et 
   assert.deepEqual([jour, mois, semaine], ['*', '*', '*']);
 });
 
-// scripts/attend-marc.mjs (tâche #216) : testé ici, car ce fichier est celui que lance le contrôle `tests-reveil-reacteur`.
+// scripts/attend-marc.mjs (tâche #216) : testé ici, car ce fichier est celui que lance le workflow `tests.yml`.
 const issueGeste = (extra = {}) => ({ number: 1, state: 'open', title: 'Garde-fou : la PR #12 attend un geste de Marc', labels: [{ name: 'qui:marc' }], ...extra });
 
 test('attend-marc : prAttendantMarc : lit le numéro de la PR dans le titre de l’issue ouverte qui:marc, trié, sans doublon', () => {
