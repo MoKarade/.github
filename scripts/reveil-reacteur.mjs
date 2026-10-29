@@ -56,6 +56,7 @@ import { fileDuDepot } from './file-depot.mjs';
 import { confierJulesDuDepot } from './jules-auto.mjs';
 import { ghSynchrone, lignesDesSignaux, piloteDuJob } from './pilotage-evenement.mjs';
 import { estDeConfiance } from './auteur-de-confiance.mjs';
+import { lancerRoutine } from './routine-prendre.mjs';
 
 export const DEPOT_BOITE = 'MoKarade/app-template';
 export const WORKFLOW_BOITE = 'boite-reacteur.yml';
@@ -771,8 +772,8 @@ export async function traiter({ pilote = null, ...options }) {
   return pilotage ? { ...resultat, pilotage, ...(signale ? { signauxDits: pilotage.signaux.length } : {}) } : resultat;
 }
 
-async function traiterDecision({ api, evt, jetonReveil, journal = console.log, maintenant = new Date(), jetonLecture = '', accepterDifferees, boites = BOITES, directes = BOITES_DIRECTES, boitePc = BOITE_PC, decisionImposee = null, pause, fetchImpl, apps }) {
-  const d = decisionImposee ?? await decider({ api, evt, maintenant, jetonLecture, boitePc, pause, fetchImpl, journal, apps, ...(accepterDifferees ? { accepterDifferees } : {}) });
+async function traiterDecision({ api, evt, jetonReveil, journal = console.log, maintenant = new Date(), jetonLecture = '', accepterDifferees, boites = BOITES, directes = BOITES_DIRECTES, boitePc = BOITE_PC, decisionImposee = null, pause, fetchImpl, apps, routine = null, appeler = fetch }) {
+  let d = decisionImposee ?? await decider({ api, evt, maintenant, jetonLecture, boitePc, pause, fetchImpl, journal, apps, ...(accepterDifferees ? { accepterDifferees } : {}) });
   if (d.differees?.acceptees.length) journal(`Réacteur : preuve différée lue et acceptée automatiquement sur ${d.differees.acceptees.map((n) => `#${n}`).join(', ')} (docs/cycle-de-vie-tache.md §10 quater).`);
   if (d.differees?.erreur) journal(`::warning::Réacteur : preuves différées non lues (${d.differees.erreur}). Un fil prouvera.`);
   if (d.acceptation?.statut === 'acceptee') journal(`Réacteur : tâche #${d.acceptation.tache} acceptée automatiquement (docs/cycle-de-vie-tache.md §10 ter).`);
@@ -795,6 +796,15 @@ async function traiterDecision({ api, evt, jetonReveil, journal = console.log, m
       return { ...d, balayages: [] };
     }
     return { ...d, balayages: await lancerBalayages({ api, jetonReveil, journal, workflows: d.workflows ?? WORKFLOWS_PR_OUVERTE }) };
+  }
+  // Dépôt sans fil à l'écoute de sa boîte (app-template, hub-contract) : la tâche suivante part dans une session neuve (tâche MoKarade/.github#860, docs/cycle-de-vie-tache.md §6).
+  // Sans les secrets de la routine, rien ne change ; un lancement raté est un avertissement, jamais une exception. La ligne ajoutée au réveil dit au Coordinateur de ne pas lancer un second fil.
+  const suivante = d.file?.suivante;
+  if (routine && suivante && !directes.has(evt.depot) && d.jules?.n !== suivante) {
+    const lancee = await lancerRoutine({ api, depot: evt.depot, n: suivante, routine, file: d.file, maintenant, journal, appeler });
+    // « déjà lancée » : une session part pour cette tâche et n'a pas encore posé `en-cours` ; le réveil le dit aussi, pour que le Coordinateur ne lance pas un second fil.
+    if (lancee.statut === 'lancee' || lancee.statut === 'deja') d = { ...d, routine: { n: suivante }, motif: `${d.motif} ; routine : #${suivante} ${lancee.statut === 'deja' ? 'déjà ' : ''}lancée`.slice(0, LONGUEUR_MAX) };
+    else if (lancee.statut === 'rien') journal(`Réacteur : routine non lancée pour ${evt.depot}#${suivante} (${lancee.raison}).`);
   }
   if (!jetonReveil) {
     const locale = await reveilLocal({ api, evt, texte: d.motif, journal });
@@ -892,7 +902,7 @@ export async function main(env = process.env) {
   };
   try {
     // Le pilotage des tâches et de Jules écrit avec le jeton du job, jamais avec celui du réveil, et sans la CLI `gh` (absente du PATH du robot du PC : DriveAI#798).
-    const r = await traiter({ api: apiGitHub(env.GITHUB_TOKEN), evt, jetonReveil: env.REVEIL_TOKEN, jetonLecture: env.GITHUB_TOKEN, pilote: piloteDuJob({ gh: ghSynchrone({ jeton: env.GITHUB_TOKEN }) }) });
+    const r = await traiter({ api: apiGitHub(env.GITHUB_TOKEN), evt, jetonReveil: env.REVEIL_TOKEN, jetonLecture: env.GITHUB_TOKEN, routine: env.ROUTINE_PRENDRE_URL && env.ROUTINE_PRENDRE_TOKEN ? { url: env.ROUTINE_PRENDRE_URL, token: env.ROUTINE_PRENDRE_TOKEN } : null, pilote: piloteDuJob({ gh: ghSynchrone({ jeton: env.GITHUB_TOKEN }) }) });
     // Une étape du pilotage en échec rend le run rouge APRÈS le réveil : `signaler-echec.yml` ouvre alors l'issue `boucle:erreur` (rien ne se perd en silence).
     if (r?.pilotage?.erreurs.length) process.exitCode = 1;
   } catch (e) {

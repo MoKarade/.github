@@ -1393,3 +1393,65 @@ test('relevé PC et « Acceptée » : un compte tiers (NONE, CONTRIBUTOR, FIRST_
   const r = await decider({ api, evt: { type: 'commentaire', depot: DEPOT, issue: '31' }, boitePc: BOITE_PC });
   assert.equal(r.action, 'rien');
 });
+
+// Routine « Prendre une tâche » (tâche MoKarade/.github#860) : lancée par le Réacteur pour la suivante d'un dépôt sans fil à l'écoute.
+const URL_ROUTINE = 'https://api.anthropic.com/v1/claude_code/routines/trig_01ABCDEFGHJKLMNOPQRSTUVW/fire';
+const routineTest = { url: URL_ROUTINE, token: 'jeton-de-test' };
+const donneesRoutine = {
+  '/repos/MoKarade/app-template/issues/212': { state: 'open', labels: [{ name: 'niveau:tâche' }] },
+  '/repos/MoKarade/app-template/issues/212/comments': [],
+};
+const decisionPrete = (extra = {}) => ({ action: 'reveiller', motif: construireMotif(['MoKarade/app-template libre', 'suivante : #212']), file: { statut: 'libre', suivante: 212 }, ...extra });
+function fauxLancement(statut = 200) {
+  const appels = [];
+  const appeler = async (url, options) => { appels.push({ url, options }); return { ok: statut < 300, status: statut, json: async () => ({ claude_code_session_url: 'https://claude.ai/code/session_01X' }) }; };
+  return { appeler, appels };
+}
+const reveilDe = (ecritures) => ecritures.find((e) => e.chemin.includes(WORKFLOW_BOITE))?.corps.inputs.texte;
+
+test('routine : suivante prête dans un dépôt sans fil → une session lancée et la ligne « routine : #n lancée » dans le réveil', async () => {
+  const { api, ecritures } = faux(donneesRoutine);
+  const { appeler, appels } = fauxLancement();
+  const r = await traiter({ boites: {}, api, appeler, routine: routineTest, evt: { type: 'tache_fermee', depot: 'MoKarade/app-template', issue: '9' }, decisionImposee: decisionPrete(), jetonReveil: 'jeton', journal: () => {} });
+  assert.equal(appels.length, 1);
+  assert.deepEqual(JSON.parse(appels[0].options.body), { text: 'MoKarade/app-template#212' });
+  assert.ok(reveilDe(ecritures).endsWith('routine : #212 lancée'));
+  assert.equal(r.routine.n, 212);
+});
+
+test('routine : sans secrets, le réveil est identique et aucun appel ne part', async () => {
+  const { api, ecritures } = faux(donneesRoutine);
+  const { appeler, appels } = fauxLancement();
+  await traiter({ boites: {}, api, appeler, routine: null, evt: { type: 'tache_fermee', depot: 'MoKarade/app-template', issue: '9' }, decisionImposee: decisionPrete(), jetonReveil: 'jeton', journal: () => {} });
+  assert.equal(appels.length, 0);
+  assert.equal(reveilDe(ecritures), decisionPrete().motif);
+});
+
+test('routine : tâche confiée à Jules ou dépôt dont un fil écoute la boîte → aucun appel', async () => {
+  for (const [depot, extra] of [['MoKarade/app-template', { jules: { n: 212 } }], ['MoKarade/CarAI', {}]]) {
+    const { api } = faux({ ...donneesRoutine, '/repos/MoKarade/CarAI/issues/212': { state: 'open', labels: [{ name: 'niveau:tâche' }] }, '/repos/MoKarade/CarAI/issues/212/comments': [] });
+    const { appeler, appels } = fauxLancement();
+    await traiter({ boites: {}, api, appeler, routine: routineTest, evt: { type: 'tache_fermee', depot, issue: '9' }, decisionImposee: decisionPrete(extra), jetonReveil: 'jeton', journal: () => {} });
+    assert.equal(appels.length, 0, depot);
+  }
+});
+
+test('routine : lancement refusé (500) → avertissement, réveil inchangé, aucune exception', async () => {
+  const { api, ecritures } = faux(donneesRoutine);
+  const { appeler } = fauxLancement(500);
+  const lignes = [];
+  const r = await traiter({ boites: {}, api, appeler, routine: routineTest, evt: { type: 'tache_fermee', depot: 'MoKarade/app-template', issue: '9' }, decisionImposee: decisionPrete(), jetonReveil: 'jeton', journal: (l) => lignes.push(l) });
+  assert.ok(lignes.some((l) => l.startsWith('::warning::Routine')));
+  assert.equal(reveilDe(ecritures), decisionPrete().motif);
+  assert.equal(r.routine, undefined);
+});
+
+test('routine : session déjà lancée (marqueur récent, `en-cours` pas encore posé) → aucun second appel, le réveil le dit', async () => {
+  const marqueur = { user: { login: 'github-actions[bot]', type: 'Bot' }, body: '<!-- routine-lancee -->\nlancée', created_at: new Date(Date.now() - 3600 * 1000).toISOString() };
+  const { api, ecritures } = faux({ ...donneesRoutine, '/repos/MoKarade/app-template/issues/212/comments': [marqueur] });
+  const { appeler, appels } = fauxLancement();
+  const r = await traiter({ boites: {}, api, appeler, routine: routineTest, evt: { type: 'tache_fermee', depot: 'MoKarade/app-template', issue: '9' }, decisionImposee: decisionPrete(), jetonReveil: 'jeton', journal: () => {} });
+  assert.equal(appels.length, 0);
+  assert.ok(reveilDe(ecritures).endsWith('routine : #212 déjà lancée'));
+  assert.equal(r.routine.n, 212);
+});
