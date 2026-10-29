@@ -2,7 +2,3 @@
 # Graphe de code local (scripts/graphe.sh) : sorties de mesure, jamais committées (commentaires TODO copiés, graph.html charge unpkg)
 graphify-out/
 .graphify_root
-
-# Cache Python des tests du Gantt : jamais committé
-__pycache__/
-*.pyc
