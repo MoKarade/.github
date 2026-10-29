@@ -9,11 +9,12 @@
 //   - pas d'état gardé d'un passage à l'autre (un job GitHub ne garde rien) : le plafond « 20 complétées par 24 h » du gabarit et la mémoire de refus
 //     ne vivent que le temps du passage (au plus UNE tâche complétée par passage, et un refus n'écrit rien) ; le signalement d'un problème est
 //     dédoublonné par le Réacteur (même texte déjà sur la boîte depuis moins de 6 h = rien) ;
-//   - `gh` est la CLI du job, jeton `github.token` (issues et pull-requests en écriture) : aucun nouveau secret ;
+//   - les appels GitHub passent par `ghSynchrone` (un `node` enfant qui fait le `fetch`, jeton `github.token`, issues et pull-requests en écriture) : aucun nouveau secret, et
+//     surtout aucune CLI `gh` à trouver dans le PATH (le robot du PC, qui sert les dépôts privés, n'en a pas : DriveAI#798, 29/10/2026) ;
 //   - un échec d'une étape est DIT (`erreurs`), les autres étapes passent ; le Réacteur le rend visible (avertissement, puis échec du run, donc
 //     une issue `boucle:erreur` par `signaler-echec.yml`) : rien ne se perd en silence.
 // Fonctions pures d'un côté (`etapesPour`, `lignesDe`), I/O de l'autre (`gh` injecté).
-import { ghCli } from './lier-taches.mjs';
+import { spawnSync } from 'node:child_process';
 import { suivreDepot, menageFermees, marquerParJules } from './jules-suivi.mjs';
 import { marquerFaisables, retirerPerimees } from './jules-marquage.mjs';
 import { completerDepot as completerGabarit } from './jules-gabarit.mjs';
@@ -45,12 +46,60 @@ export const etapesPour = (type) => PAR_EVENEMENT[type] ?? [];
 
 const court = (e) => String(e?.message ?? e).replace(/\s+/g, ' ').slice(0, 80);
 
+const SCRIPT_ENFANT = `
+const { methode, chemin, corps, base } = JSON.parse(process.env.PILOTAGE_REQUETE);
+const reponse = await fetch(base + '/' + chemin.replace(/^\\//, ''), {
+  method: methode,
+  headers: {
+    authorization: 'Bearer ' + process.env.PILOTAGE_JETON,
+    accept: 'application/vnd.github+json',
+    'x-github-api-version': '2022-11-28',
+    'content-type': 'application/json',
+    'user-agent': 'pilotage-evenement',
+  },
+  body: corps ? JSON.stringify(corps) : undefined,
+});
+process.stdout.write(JSON.stringify({ statut: reponse.status, texte: await reponse.text() }));
+`;
+
+/** Le corps d'un appel `gh api -F k=v` : une clé en `[]` est une liste (`labels[]`), les autres gardent leur valeur. */
+export function corpsJson(corps) {
+  if (!corps) return undefined;
+  const sortie = {};
+  for (const [k, v] of Object.entries(corps)) {
+    if (k.endsWith('[]')) (sortie[k.slice(0, -2)] ??= []).push(v);
+    else sortie[k] = v;
+  }
+  return sortie;
+}
+
+/**
+ * `gh(methode, chemin, corps) -> JSON` synchrone, SANS la CLI `gh` : un `node` enfant (celui qui nous fait tourner) fait la requête. Même contrat que `ghCli` : chemin sans
+ * barre initiale, `{}` quand la réponse est vide, une exception portant le statut HTTP (« 404 Not Found ») quand GitHub refuse.
+ * @param lancer  `spawnSync` (injectable pour les tests) ; @param base  l'URL de l'API (injectable pour les tests)
+ */
+export function ghSynchrone({ jeton = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN ?? '', lancer = spawnSync, base = 'https://api.github.com' } = {}) {
+  return (methode, chemin, corps) => {
+    const r = lancer(process.execPath, ['--input-type=module', '-e', SCRIPT_ENFANT], {
+      encoding: 'utf8',
+      env: { ...process.env, PILOTAGE_JETON: jeton, PILOTAGE_REQUETE: JSON.stringify({ methode, chemin, corps: corpsJson(corps), base }) },
+      timeout: 60_000,
+    });
+    if (r.error) throw new Error(`${methode} ${chemin} : ${court(r.error)}`);
+    let reponse;
+    try { reponse = JSON.parse(r.stdout); } catch { throw new Error(`${methode} ${chemin} : réponse illisible (${court(r.stderr || r.stdout)})`); }
+    if (reponse.statut >= 200 && reponse.statut < 300) return reponse.texte.trim() ? JSON.parse(reponse.texte) : {};
+    const motif = `HTTP ${reponse.statut}${reponse.statut === 404 ? ' Not Found' : ''} sur ${methode} ${chemin}`;
+    throw Object.assign(new Error(motif), { stderr: motif });
+  };
+}
+
 /**
  * Lance les étapes d'un événement sur le dépôt de l'événement. Ne lève jamais : une étape qui échoue est dite dans `erreurs`, les autres passent.
- * @param gh (methode, chemin, corps) -> JSON ; par défaut `gh api` du job
+ * @param gh (methode, chemin, corps) -> JSON ; par défaut `ghSynchrone()` (pas de CLI `gh`)
  * @returns {{ etapes: string[], lignes: string[], signaux: {ref: string, raison: string}[], erreurs: string[] }}
  */
-export function pilotage({ evt, gh = ghCli, maintenant = new Date(), aBlanc = false }) {
+export function pilotage({ evt, gh = ghSynchrone(), maintenant = new Date(), aBlanc = false }) {
   const depot = evt.depot;
   const sortie = { etapes: etapesPour(evt.type), lignes: [], signaux: [], erreurs: [] };
   if (!depot || sortie.etapes.length === 0) return sortie;
@@ -110,7 +159,7 @@ export function pilotage({ evt, gh = ghCli, maintenant = new Date(), aBlanc = fa
 export const lignesDesSignaux = (signaux) => signaux.slice(0, 4).map((x) => `jules : ${x.ref} ${x.raison}`);
 
 /** Le pilotage tel que le Réacteur l'appelle : `pilote({ evt, maintenant })`. Ne lève jamais. */
-export const piloteDuJob = ({ gh = ghCli, aBlanc = false } = {}) => async ({ evt, maintenant }) => {
+export const piloteDuJob = ({ gh = ghSynchrone(), aBlanc = false } = {}) => async ({ evt, maintenant }) => {
   try {
     return pilotage({ evt, gh, maintenant, aBlanc });
   } catch (e) {
