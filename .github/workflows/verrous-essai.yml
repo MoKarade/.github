@@ -1,0 +1,19 @@
+name: Verrous (essai)
+
+# Mode miroir (option C, étape 2) : les PR de CE dépôt passent aussi par verrous.yml, pour voir qu'il dit la même chose que le
+# Garde-fou. Job NON REQUIS (ne pas l'ajouter aux contrôles exigés) ; il ne remplace rien. Aucun `paths:`.
+# Le script est pris au commit de la PR (et non à main) : tant que verrous.mjs n'est pas fusionné, main ne l'a pas.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  essai:
+    name: Verrous (essai)
+    permissions:
+      contents: read
+    uses: ./.github/workflows/verrous.yml
+    with:
+      ref-script: ${{ github.event.pull_request.head.sha }}
