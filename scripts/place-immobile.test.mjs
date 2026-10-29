@@ -1,7 +1,7 @@
 // Tests de la libération des places immobiles (scripts/place-immobile.mjs, tâche MoKarade/.github#868) : une fausse API GitHub en mémoire, aucun réseau.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decider, poseEnCours, libererPlacesImmobiles, MARQUEUR } from './place-immobile.mjs';
+import { decider, poseEnCours, libererPlacesImmobiles, attendUnReleve, MARQUEUR } from './place-immobile.mjs';
 import { pilotage, lignesDesSignaux } from './pilotage-evenement.mjs';
 
 const H = 3_600_000;
@@ -115,4 +115,25 @@ test('aucun minuteur ni secret dans le script', async () => {
   const { readFileSync } = await import('node:fs');
   const code = readFileSync(new URL('./place-immobile.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(code, /secrets\.|schedule:|cron:/);
+});
+
+test('relevé PC demandé ou rendu après en-cours : la tâche attend, elle n’est ni signalée ni libérée (Hubperso#719)', () => {
+  const releve = { body: '**Relevé PC** — 2026-10-29 11:21 (Québec) : le test n’a pas pu être fait.', created_at: il_y_a(2) };
+  const r = tour({ prises: [tache(17)], posesEnCours: { 17: il_y_a(5) }, commentaires: { 17: [releve] } });
+  assert.deepEqual([r.signalees, r.liberees], [[], []]);
+  assert.equal(r.ecritures.length, 0);
+  // même avec un marqueur vieux de 2 h : la tâche qui attend le PC reste en place
+  const avecMarqueur = tour({ prises: [tache(17)], posesEnCours: { 17: il_y_a(6) }, commentaires: { 17: [{ body: MARQUEUR, created_at: il_y_a(3) }, releve] } });
+  assert.deepEqual(avecMarqueur.liberees, []);
+});
+
+test('attendUnReleve : avant en-cours, vieux de 24 h ou sans l’en-tête exact, il ne protège pas', () => {
+  const c = (body, h) => ({ body, created_at: il_y_a(h) });
+  const depuis = il_y_a(10);
+  assert.equal(attendUnReleve({ commentaires: [c('**Relevé PC demandé** — lire /chantier', 1)], enCoursDepuis: depuis, maintenant: MAINTENANT }), true);
+  assert.equal(attendUnReleve({ commentaires: [c('**Preuve attendue** : 2026-10-30 12:00', 1)], enCoursDepuis: depuis, maintenant: MAINTENANT }), true);
+  assert.equal(attendUnReleve({ commentaires: [c('**Relevé PC** — x', 11)], enCoursDepuis: depuis, maintenant: MAINTENANT }), false, 'avant en-cours');
+  assert.equal(attendUnReleve({ commentaires: [c('**Relevé PC** — x', 30)], enCoursDepuis: il_y_a(40), maintenant: MAINTENANT }), false, '24 h passées');
+  assert.equal(attendUnReleve({ commentaires: [c('on attend le Relevé PC', 1)], enCoursDepuis: depuis, maintenant: MAINTENANT }), false);
+  assert.equal(attendUnReleve({ commentaires: undefined, enCoursDepuis: depuis, maintenant: MAINTENANT }), false);
 });
