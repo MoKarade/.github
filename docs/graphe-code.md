@@ -54,14 +54,14 @@
 
 ## Le graphe doit rester en place : contrôle de conformité (tâche MoKarade/.github#841, 29/10/2026)
 - `scripts/graphe-en-place.mjs` (fonction pure `controlerGrapheEnPlace`, aucun réseau ni jeton) est exécuté par le workflow commun `conformite.yml` sur le dépôt appelant, dans l'étape « Graphe de code en place ». Il nomme chaque manque : `scripts/graphe.sh` absent ou de moins de 2 Ko ; `.claude/settings.json` absent, illisible ou sans hook `SessionStart` ou `PreToolUse` vers `scripts/graphe.sh` ; `.mcp.json` absent, illisible ou sans serveur `graphify` qui lance `scripts/graphe.sh serve`. Un JSON invalide compte comme un manque, jamais comme une exception.
-- Rouge si l'appel de conformité est `bloquant: true`, sinon annotation `::warning`. La lecture se fait à la racine du dépôt (pas sous `racine` : `web/` chez batchchef-). Test : `scripts/graphe-en-place.test.mjs` (workflow `tests-conformite.yml`).
+- Rouge si l'appel de conformité est `bloquant: true`, sinon annotation `::warning`. La lecture se fait à la racine du dépôt (pas sous `racine` : `web/` chez batchchef-). Test : `scripts/graphe-en-place.test.mjs` (workflow `tests.yml`).
 - Ce que le contrôle ne vérifie pas encore : le hook `garde-lecture` (#840) et l'identité de la copie de `graphe.sh` entre dépôts. Il le fera quand les 9 autres dépôts auront reçu la copie à jour. [Certain : les 10 clones locaux passent le contrôle actuel le 29/10/2026]
 
 ## Lecture massive refusée par le hook (tâche MoKarade/.github#840, 29/10/2026, demande de Marc : une obligation mécanique, pas une consigne)
 - `scripts/graphe.sh garde-lecture` lit le JSON du hook `PreToolUse` sur l'entrée standard et rend une décision `deny` dans deux cas seulement : un `Read` SANS `offset`, `limit` ni `pages` d'un fichier de plus de 400 lignes ou 40 Ko (hors `.md`, `.txt`, images, PDF, `*.lock`, `package-lock.json`, `*.min.js`), et un `Glob` de tout le dépôt (`**`, `**/*`, `**/*.*` sans dossier). Le motif du refus cite la commande du graphe à utiliser (`explain`, `affected`, `query`) puis `Read` avec `offset` et `limit`.
 - Échec ouvert : JSON illisible, fichier absent ou hors du dépôt, autre outil, python absent → silence, code 0. Le hook ne dépend pas du graphe (il refuse même graphe absent). Chaque refus écrit `garde-lecture-refus` dans `graphify-out/usage.jsonl`.
 - Contournement honnête : relire avec `offset` et `limit` (la zone utile), jamais en désactivant le hook. Les seuils (400 lignes, 40 Ko) sont en tête du script, à ajuster d'après les refus journalisés. [Probable : seuils choisis sans mesure]
-- Test : `scripts/graphe-garde-lecture.test.mjs` (workflow `tests-graphe-page.yml`). Le hook ne se charge que dans une session ouverte DANS le dépôt (limite connue de `.claude/settings.json`).
+- Test : `scripts/graphe-garde-lecture.test.mjs` (workflow `tests.yml`). Le hook ne se charge que dans une session ouverte DANS le dépôt (limite connue de `.claude/settings.json`).
 
 ## Retour arrière
 Supprimer `.claude/settings.json` (ou ses trois blocs), `.mcp.json`, `scripts/graphe.sh`, `.graphifyignore`, les deux lignes de `.gitignore` et la ligne de `CLAUDE.md`. Rien d'autre n'a été modifié.

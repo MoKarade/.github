@@ -42,4 +42,4 @@ Un échec qui s'exécute laisse une trace ; un ARRÊT complet (Réacteur en pann
 
 L'état vit dans GitHub (l'issue ouverte), pas sur le PC : un redémarrage ne double pas l'alerte. Un run « skipped » ne compte pas (l'issue d'alerte lance elle-même le Réacteur, qui s'ignore). Aucun secret écrit, aucune ligne `secrets.`, aucun cron GitHub : le jeton vient de `gh auth token` sur le PC.
 
-Code : `scripts/guetteur-silence.mjs` (tests : `node --test scripts/guetteur-silence.test.mjs`, contrôle « Tests du guetteur de silence »). Lanceur Windows : `outils/gantt-pc/guetteur.ps1`, tâche « Guetteur-silence » toutes les 15 min en `conhost.exe --headless` (installation : `outils/gantt-pc/LISEZMOI.md`).
+Code : `scripts/guetteur-silence.mjs` (tests : `node --test scripts/guetteur-silence.test.mjs`, contrôle « Tests du garde-fou »). Lanceur Windows : `outils/gantt-pc/guetteur.ps1`, tâche « Guetteur-silence » toutes les 15 min en `conhost.exe --headless` (installation : `outils/gantt-pc/LISEZMOI.md`).

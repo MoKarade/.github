@@ -27,4 +27,4 @@ Une tâche `en-cours` tient une place du dépôt (`PLACES_PAR_DEPOT`). Quand son
 
 ## Vérifier
 
-`node --test scripts/place-immobile.test.mjs` (contrôle « Tests du réveil du Coordinateur »). En production : sur un dépôt qui avait une tâche immobile, la lecture de `file-depot.mjs` montre une place de plus après le second passage.
+`node --test scripts/place-immobile.test.mjs` (contrôle « Tests du garde-fou »). En production : sur un dépôt qui avait une tâche immobile, la lecture de `file-depot.mjs` montre une place de plus après le second passage.
