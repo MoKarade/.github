@@ -410,3 +410,11 @@ test('traiter : la preuve posée avant le statut du déploiement est acceptée a
   const r = await traiter({ api, depot: 'MoKarade/Hubperso', numero: 7, config: { pause: async () => {}, maintenant: MAINTENANT_PROCHE } });
   assert.equal(r.statut, 'acceptee');
 });
+
+test('un « Acceptée » d’un compte tiers n’est pas une preuve (dépôt public) ; celui du propriétaire l’est', () => {
+  const passant = { login: 'passant', type: 'User' };
+  const tiers = { ...commentaire(preuveOk, passant), author_association: 'NONE' };
+  assert.equal(trouverPreuve([tiers]), null);
+  const maison = { ...commentaire(preuveOk), author_association: 'OWNER' };
+  assert.equal(trouverPreuve([tiers, maison]), maison);
+});
