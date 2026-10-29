@@ -1,0 +1,19 @@
+name: Impact du graphe
+
+# Commentaire d'impact du graphe de code sur chaque PR de CE dépôt. Le travail est dans le workflow commun `impact-pr.yml` (même dépôt) ;
+# ici, seulement l'appel. Sur .github, le script de commentaire vient de la tête de la PR (le `main` d'avant la fusion ne l'a pas encore).
+# Job séparé : jamais un check requis. Tâche : MoKarade/.github#842 (mission #839).
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  impact:
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/impact-pr.yml
+    with:
+      runner: ${{ github.event.repository.visibility == 'public' && '"ubuntu-latest"' || '["self-hosted","pc-marc"]' }}
+      ref_outils: ${{ github.event.pull_request.head.sha }}
