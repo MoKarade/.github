@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Graphe de code LOCAL du dépôt (graphifyy, AST Tree-sitter) : 0 jeton, 0 clé, 0 réseau hors installation du paquet.
 # Usage : scripts/graphe.sh [update | query "<question>" | affected "<symbole>" | path "A" "B" | explain "<symbole>" | god-nodes
-#                            | wiki | serve | session | hook-guard search|read | usage]
+#                            | wiki | serve | session | hook-guard search|read | garde-lecture | usage]
 # `affected` remonte 1 niveau par défaut ; `--depth 2` (ou plus) pour le rayon d'impact complet.
-# `session` (hook SessionStart), `hook-guard` (hooks PreToolUse) et `serve` (.mcp.json) sont appelés par Claude Code.
+# `session` (hook SessionStart), `hook-guard` et `garde-lecture` (hooks PreToolUse) et `serve` (.mcp.json) sont appelés par Claude Code.
+# `garde-lecture` REFUSE un Read entier de plus de 400 lignes (ou 40 Ko) et un Glob de tout le dépôt ; échec ouvert, jamais de blocage sur une erreur.
 # `usage` résume graphify-out/usage.jsonl, le journal LOCAL des appels (jamais les arguments).
 # Détail, limites et mesure : docs/claude/12-graphe-code.md. Sortie dans graphify-out/ (ignoré par git, jamais committé).
 set -euo pipefail
@@ -128,5 +129,52 @@ print("Branches : " + ", ".join("%s (%d)" % kv for kv in br.most_common(5)))
     journal "hook-${1:-garde}" 0 0
     exit 0
     ;;
-  *) echo "usage : scripts/graphe.sh [update | query | affected | path | explain | god-nodes | wiki | serve | session | hook-guard | usage]" >&2; exit 2 ;;
+  garde-lecture)
+    # PreToolUse `Read|Glob` (tâche MoKarade/.github#840) : REFUSE la lecture massive, rien d'autre. Lit le JSON du hook sur l'entrée standard.
+    # Échec ouvert partout : JSON illisible, fichier absent ou hors du dépôt, python absent → le hook laisse passer en silence.
+    python="$venv/bin/python"; [ -x "$python" ] || python="python3"
+    command -v "$python" >/dev/null 2>&1 || exit 0
+    sortie="$("$python" -I -c '
+import json, os, sys
+LIGNES_MAX, OCTETS_MAX = 400, 40000
+LIBRES = (".md", ".mdx", ".txt", ".lock", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".ipynb")
+TOUT = {"**", "**/*", "**/*.*"}
+def refuser(raison):
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": raison}}, ensure_ascii=False))
+    sys.exit(0)
+try:
+    entree = json.load(sys.stdin)
+    outil, args = entree.get("tool_name"), entree.get("tool_input") or {}
+    racine = os.path.realpath(sys.argv[1])
+    if outil == "Glob":
+        motif = str(args.get("pattern") or "").strip()
+        dossier = args.get("path")
+        if motif in TOUT and (not dossier or os.path.realpath(str(dossier)) == racine):
+            refuser("Glob de tout le dépôt refusé : interroge le graphe (scripts/graphe.sh query \"<question>\" ou explain \"<symbole>\"), ou cible un dossier ou une extension.")
+    elif outil == "Read":
+        if args.get("offset") is not None or args.get("limit") is not None or args.get("pages") is not None:
+            sys.exit(0)
+        chemin = os.path.realpath(str(args.get("file_path") or ""))
+        if not chemin.startswith(racine + os.sep) or not os.path.isfile(chemin):
+            sys.exit(0)
+        nom = os.path.basename(chemin).lower()
+        if nom.endswith(LIBRES) or nom.endswith((".min.js", ".min.css", "package-lock.json")):
+            sys.exit(0)
+        with open(chemin, "rb") as f:
+            contenu = f.read(OCTETS_MAX * 4)
+        if b"\0" in contenu[:4096]:
+            sys.exit(0)
+        lignes = contenu.count(b"\n") + (0 if contenu.endswith(b"\n") or not contenu else 1)
+        if lignes > LIGNES_MAX or os.path.getsize(chemin) > OCTETS_MAX:
+            refuser("Lecture entière refusée (%s, %d lignes ou plus) : demande d abord au graphe (scripts/graphe.sh explain \"<symbole>\" ou affected \"<symbole>\" rendent fichier:ligne), puis Read avec offset et limit sur la zone utile." % (os.path.relpath(chemin, racine), lignes))
+except SystemExit:
+    raise
+except Exception:
+    pass
+sys.exit(0)
+' "$racine" 2>/dev/null)" || sortie=""
+    [ -n "$sortie" ] && { printf '%s\n' "$sortie"; journal garde-lecture-refus 0 "${#sortie}"; }
+    exit 0
+    ;;
+  *) echo "usage : scripts/graphe.sh [update | query | affected | path | explain | god-nodes | wiki | serve | session | hook-guard | garde-lecture | usage]" >&2; exit 2 ;;
 esac
