@@ -147,7 +147,7 @@ async function lancerGardeFou({ corps, auteur = humain, tache = tacheOuverte, br
   await new Promise((r) => serveur.listen(0, '127.0.0.1', r));
   const script = fileURLToPath(new URL('./garde-fou.mjs', import.meta.url));
   const env = {
-    PATH: process.env.PATH, GITHUB_TOKEN: 'jeton-fictif', GITHUB_REPOSITORY: 'MoKarade/depot', PR_NUMBER: '7',
+    PATH: process.env.PATH, PLACES_ENV: '3', GITHUB_TOKEN: 'jeton-fictif', GITHUB_REPOSITORY: 'MoKarade/depot', PR_NUMBER: '7',
     CHEMINS_PROTEGES: '^(\\.github/|scripts/hooks/|qualite/|vercel\\.json|drizzle/|\\.env|\\.mergify\\.yml)',
     GITHUB_API_URL: `http://127.0.0.1:${serveur.address().port}`,
   };
@@ -208,7 +208,7 @@ test('Garde-fou de bout en bout : 3000 lignes en brouillon ou avec la dérogatio
 
 test('Garde-fou de bout en bout : dépôt plein (un autre travail en cours), rouge avec un commentaire « places » ; tâche déjà en cours, vert', async () => {
   const unAutre = (number) => ({ number, title: 'autre', labels: [{ name: 'niveau:tâche' }, { name: 'en-cours' }] });
-  const autre = [unAutre(130), unAutre(131), unAutre(132)]; // trois places depuis le 26/10/2026
+  const autre = [unAutre(130), unAutre(131), unAutre(132)]; // la mécanique « plein » se teste à trois places (PLACES_ENV) : la production n'a plus de limite depuis le 29/10/2026
   const deux = await lancerGardeFou({ corps: 'Tâche : #120', enCours: autre.slice(0, 2) });
   assert.equal(deux.code, 0, deux.texte);
   const plein = await lancerGardeFou({ corps: 'Tâche : #120', enCours: autre });
