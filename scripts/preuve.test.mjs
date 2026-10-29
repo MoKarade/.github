@@ -355,3 +355,58 @@ test('traiter : PR d’un autre dépôt illisible (privé) → pas de réouvertu
   const meme = fauxGitHub({ issue: issueFermee(), commentaires: [commentaire(preuveOk)] });
   assert.equal((await traiter({ api: meme.api, depot: 'MoKarade/.github', numero: 7, config: { deploiement: 'aucun' } })).statut, 'rouverte');
 });
+
+// Course constatée le 29/10/2026 (Hubperso#743, batchchef-#366) : GitHub n'enregistre le statut `success` d'un déploiement
+// Vercel qu'une à deux minutes après la fusion, et la preuve était rouverte à tort.
+const MAINTENANT_PROCHE = () => Date.parse('2026-10-16T14:01:30Z');
+const MAINTENANT_LOIN = () => Date.parse('2026-10-16T16:00:00Z');
+const statutTardif = (apres) => {
+  let lectures = 0;
+  const base = fauxGitHub({ deploiements: [{ id: 1, sha: SHA, created_at: '2026-10-16T14:00:30Z' }], statuts: { 1: [{ state: 'success' }] } });
+  const api = async (chemin, ...reste) => {
+    if (/\/deployments\/1\/statuses/.test(chemin)) {
+      lectures += 1;
+      if (lectures <= apres) return [{ state: 'pending' }];
+    }
+    return base.api(chemin, ...reste);
+  };
+  return { api, lectures: () => lectures };
+};
+
+test('verifierDeploiement : une fusion récente attend le statut du déploiement avant de conclure (valide)', async () => {
+  const faux = statutTardif(2);
+  const pauses = [];
+  const r = await verifierDeploiement({ api: faux.api, depot: 'MoKarade/Hubperso', sha: SHA, fusionLe: FUSION, delais: [20_000, 20_000, 20_000], pause: async (ms) => pauses.push(ms), maintenant: MAINTENANT_PROCHE });
+  assert.equal(r.ok, true);
+  assert.deepEqual(pauses, [20_000, 20_000]);
+});
+
+test('verifierDeploiement : une fusion récente sans jamais de déploiement réussi échoue après tous les délais (rejeté)', async () => {
+  const faux = statutTardif(99);
+  const pauses = [];
+  const r = await verifierDeploiement({ api: faux.api, depot: 'MoKarade/Hubperso', sha: SHA, fusionLe: FUSION, delais: [20_000, 20_000], pause: async (ms) => pauses.push(ms), maintenant: MAINTENANT_PROCHE });
+  assert.equal(r.ok, false);
+  assert.deepEqual(pauses, [20_000, 20_000]);
+});
+
+test('verifierDeploiement : une fusion de plus de dix minutes n’attend jamais (rejeté tout de suite)', async () => {
+  const faux = statutTardif(99);
+  const pauses = [];
+  const r = await verifierDeploiement({ api: faux.api, depot: 'MoKarade/Hubperso', sha: SHA, fusionLe: FUSION, delais: [20_000, 20_000], pause: async (ms) => pauses.push(ms), maintenant: MAINTENANT_LOIN });
+  assert.equal(r.ok, false);
+  assert.deepEqual(pauses, []);
+});
+
+test('traiter : la preuve posée avant le statut du déploiement est acceptée après l’attente, pas rouverte', async () => {
+  const base = fauxGitHub({ issue: issueFermee(), commentaires: [commentaire(preuveOk)], prs: { 12: prFusionnee }, fichiers: { 12: [{ filename: 'app/page.tsx' }] }, deploiements: [{ id: 1, sha: SHA, created_at: '2026-10-16T14:00:30Z' }], statuts: { 1: [{ state: 'success' }] } });
+  let lectures = 0;
+  const api = async (chemin, ...reste) => {
+    if (/\/deployments\/1\/statuses/.test(chemin)) {
+      lectures += 1;
+      if (lectures <= 1) return [{ state: 'pending' }];
+    }
+    return base.api(chemin, ...reste);
+  };
+  const r = await traiter({ api, depot: 'MoKarade/Hubperso', numero: 7, config: { pause: async () => {}, maintenant: MAINTENANT_PROCHE } });
+  assert.equal(r.statut, 'acceptee');
+});

@@ -146,8 +146,30 @@ const descend = async (api, depot, base, tete) => {
   return r.status === 'ahead' || r.status === 'identical';
 };
 
-/** Cherche un déploiement de production réussi sur le commit fusionné, ou sur un commit qui le contient. */
-export async function verifierDeploiement({ api, depot, sha, fusionLe, workflows = [] }) {
+/** Délais d'attente (ms) avant de conclure qu'un déploiement manque, pour une fusion de moins de FENETRE_FUSION_MS. */
+export const DELAIS_DEPLOIEMENT = [20_000, 20_000, 20_000, 20_000, 20_000, 20_000];
+const FENETRE_FUSION_MS = 10 * 60_000;
+const pauseReelle = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Cherche un déploiement de production réussi sur le commit fusionné, ou sur un commit qui le contient.
+ * GitHub n'enregistre le statut `success` d'un déploiement Vercel qu'une à deux minutes après la fusion : une preuve posée
+ * dans cette fenêtre était rouverte à tort (Hubperso#743 et batchchef-#366, 29/10/2026). Pour une fusion récente, la lecture
+ * est donc refaite après chaque délai de `delais` avant de conclure que le déploiement manque (un événement de plus, pas un
+ * minuteur : la lecture se déclenche toujours sur la fermeture de l'issue). Une fusion plus ancienne n'attend jamais.
+ */
+export async function verifierDeploiement({ api, depot, sha, fusionLe, workflows = [], delais = [], pause = pauseReelle, maintenant = Date.now }) {
+  let r = await lireDeploiement({ api, depot, sha, fusionLe, workflows });
+  if (r.ok || Date.parse(fusionLe) + FENETRE_FUSION_MS < maintenant()) return r;
+  for (const delai of delais) {
+    await pause(delai);
+    r = await lireDeploiement({ api, depot, sha, fusionLe, workflows });
+    if (r.ok) return r;
+  }
+  return r;
+}
+
+async function lireDeploiement({ api, depot, sha, fusionLe, workflows }) {
   const plancher = new Date(Date.parse(fusionLe) - 60_000).toISOString();
   let essais = 0;
   const deps = await api(`/repos/${depot}/deployments?environment=Production&per_page=15`).catch(() => []);
@@ -204,7 +226,7 @@ export async function traiter({ api, depot, numero, config = {} }) {
         fichiers = (await pages(api, `/repos/${cible}/pulls/${cite.pr.numero}/files`).catch(() => [])).map((f) => f.filename);
         pr = { merged: true, merged_at: pr.merged_at, merge_commit_sha: pr.merge_commit_sha, head_sha: pr.head?.sha };
         if (config.deploiement !== 'aucun' && servi(fichiers)) {
-          const d = await verifierDeploiement({ api, depot: cible, sha: pr.merge_commit_sha, fusionLe: pr.merged_at, workflows: config.workflows ?? [] });
+          const d = await verifierDeploiement({ api, depot: cible, sha: pr.merge_commit_sha, fusionLe: pr.merged_at, workflows: config.workflows ?? [], delais: config.delaisDeploiement ?? DELAIS_DEPLOIEMENT, pause: config.pause, maintenant: config.maintenant });
           deploiement = { requis: true, ...d };
         }
       } else if (pr && !pr.illisible) pr = { merged: false };

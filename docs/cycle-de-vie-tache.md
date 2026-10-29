@@ -448,6 +448,8 @@ Constat du 28/10/2026 : toute preuve d'écran qui exige la session de Marc passa
 
 **Rien ne se perd** : PC éteint ou script arrêté, la demande reste dans la boîte et le filet de 6 h existant reprend ; un relevé trop court ou un commentaire neuf après le relevé ne réveille personne. **Durées visées** (chacune 10 min au plus, à mesurer sur la page du chantier) : demande → réveil du PC, réveil → relevé, relevé → « Acceptée ». Sans `REVEIL_TOKEN` dans le dépôt de l'app, la demande ne peut pas atteindre la boîte d'app-template : elle ne réveille personne et le fil prouve comme avant.
 
+**Attente du déploiement (MoKarade/.github#823, 29/10/2026).** GitHub n'enregistre le statut `success` d'un déploiement de production qu'une à deux minutes après la fusion : le garde-fou de preuve relit donc jusqu'à 6 fois à 20 s d'écart (2 minutes) avant de conclure qu'il manque, seulement si la PR est fusionnée depuis moins de 10 minutes. Il faut toujours un déploiement de production réussi sur le commit ; on lit seulement un peu plus tard (Hubperso#743 et batchchef-#366 avaient été rouvertes à tort).
+
 ## 11. Retour en arrière (automatique)
 
 Le workflow commun `fumee` tourne après chaque déploiement de production. Il contrôle `/api/sante`, le summary du hub et la page de connexion.
