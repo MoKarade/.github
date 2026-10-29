@@ -57,6 +57,7 @@ import { confierJulesDuDepot } from './jules-auto.mjs';
 import { ghSynchrone, lignesDesSignaux, piloteDuJob } from './pilotage-evenement.mjs';
 import { estDeConfiance } from './auteur-de-confiance.mjs';
 import { lancerRoutine } from './routine-prendre.mjs';
+import { dependantsAutresDepots } from './dependants-autres-depots.mjs';
 
 export const DEPOT_BOITE = 'MoKarade/app-template';
 export const WORKFLOW_BOITE = 'boite-reacteur.yml';
@@ -769,7 +770,44 @@ export async function traiter({ pilote = null, ...options }) {
       signale = true;
     }
   }
-  return pilotage ? { ...resultat, pilotage, ...(signale ? { signauxDits: pilotage.signaux.length } : {}) } : resultat;
+  const dependants = await reveillerDependants({ options, maintenant });
+  return { ...resultat, ...(pilotage ? { pilotage, ...(signale ? { signauxDits: pilotage.signaux.length } : {}) } : {}), ...(dependants.length ? { dependants } : {}) };
+}
+
+/**
+ * Une tâche fermée ET prouvée (`completed`) réveille aussi les dépôts dont une tâche l'attendait (tâche MoKarade/.github#870, docs/reacteur-dependances.md) :
+ * même boîte, même routine, même déduplication que les autres réveils. Seule une tâche citée qui est vraiment prenable (dans la file du dépôt, une place libre) réveille.
+ * Rend la liste des dépôts réveillés ; ne lève jamais (le filet de 6 h reprend la main).
+ */
+async function reveillerDependants({ options, maintenant }) {
+  const { api, evt, jetonReveil, journal = console.log, boites = BOITES, directes = BOITES_DIRECTES } = options;
+  if (evt.type !== 'tache_fermee' || evt.raison !== 'completed' || !jetonReveil || !(Number(evt.issue) > 0)) return [];
+  const reveilles = [];
+  try {
+    const { dependants, illisibles } = await dependantsAutresDepots({ api, depot: evt.depot, numero: Number(evt.issue), depots: Object.keys(boites) });
+    if (illisibles.length) journal(`::warning::Réacteur : dépendants non lus dans ${illisibles.join(', ')}. Le filet de 6 h reprend la main.`);
+    for (const dep of dependants) {
+      try {
+        const en = await travaux({ api, depot: dep.depot });
+        const suite = await suivanteDe({ api, depot: dep.depot, maintenant });
+        const pretes = dep.taches.filter((n) => suite.brut?.suivante === n || suite.brut?.suivantes?.includes(n));
+        if (pretes.length === 0 || en >= PLACES_PAR_DEPOT) {
+          journal(`Réacteur : ${dep.depot} attendait ${evt.depot}#${evt.issue}, rien de prenable pour l'instant (${pretes.length === 0 ? 'pas dans la file' : 'places prises'}).`);
+          continue;
+        }
+        const motif = construireMotif([signeLibre(dep.depot, en), suite.ligne, `tâche ${evt.depot}#${evt.issue} fermée`, `${pretes.map((n) => `${dep.depot}#${n}`).join(', ')} peut partir`]);
+        if (evt.forcer !== 'true' && (await dejaSignale({ api, motif, maintenant, depot: dep.depot }))) continue;
+        const cibles = boitesDuReveil({ evt: { depot: dep.depot, type: 'tache_fermee' }, boites, directes });
+        await traiterDecision({ ...options, maintenant, evt: { ...evt, type: 'dependant_pret', depot: dep.depot, pr: '', issue: String(pretes[0]) }, decisionImposee: { action: 'reveiller', motif, file: suite.file, sujets: pretes, cibles } });
+        reveilles.push(dep.depot);
+      } catch (e) {
+        journal(`::warning::Réacteur : ${dep.depot} non réveillé pour ${evt.depot}#${evt.issue} (${e.message}).`);
+      }
+    }
+  } catch (e) {
+    journal(`::warning::Réacteur : dépendants de ${evt.depot}#${evt.issue} non lus (${e.message}).`);
+  }
+  return reveilles;
 }
 
 async function traiterDecision({ api, evt, jetonReveil, journal = console.log, maintenant = new Date(), jetonLecture = '', accepterDifferees, boites = BOITES, directes = BOITES_DIRECTES, boitePc = BOITE_PC, decisionImposee = null, pause, fetchImpl, apps, routine = null, appeler = fetch }) {
