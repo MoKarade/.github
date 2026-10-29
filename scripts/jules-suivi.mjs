@@ -196,7 +196,7 @@ export const piedDeJules = (corps) => PIED_JULES.test(String(corps ?? ''));
  * n'est lu que pour une PR OUVERTE sans pied de page (une lecture par PR et par tour, au plus `COMMENTAIRES_MAX`). Une PR déjà étiquetée n'est pas relue.
  * L'étiquette est créée au premier besoin (le dépôt neuf n'en a pas). @returns {{ marquees: string[] }}
  */
-export function marquerParJules({ depot, gh, aBlanc = false, etat = null, maintenant = new Date() }) {
+export function marquerParJules({ depot, gh, aBlanc = false, etat = null, maintenant = new Date(), seulement = null }) {
   const court = depot.replace('MoKarade/', '');
   const sortie = { marquees: [] };
   const liste = (r) => (Array.isArray(r) ? r : []);
@@ -208,6 +208,7 @@ export function marquerParJules({ depot, gh, aBlanc = false, etat = null, mainte
   for (const p of [...ouvertes, ...fermees]) {
     if (vues.has(p.number)) continue;
     vues.add(p.number);
+    if (seulement !== null && p.number !== seulement) continue; // l'événement d'une PR ne relit pas les commentaires des autres
     if (noms(p.labels).includes(ETIQUETTE_PAR_JULES)) continue;
     let jules = piedDeJules(p.body);
     const cle = `${CLE_NON_JULES}${depot}#${p.number}`;

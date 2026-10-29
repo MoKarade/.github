@@ -1,6 +1,6 @@
 name: Tests du réveil du Coordinateur
 
-# Les tests du réveil sans IA (scripts/reveil-reacteur.mjs), de la file d'un dépôt calculée à l'événement (scripts/file-depot.mjs) et du filet porté par le PC (scripts/filet-pc.mjs, avec ses modules jules-*, lier-taches et fichiers-touches) : une fausse API GitHub en mémoire, aucun réseau,
+# Les tests du réveil sans IA (scripts/reveil-reacteur.mjs), de la file d'un dépôt calculée à l'événement (scripts/file-depot.mjs) du pilotage des tâches et de Jules à l'événement (scripts/pilotage-evenement.mjs) et du filet porté par le PC (scripts/filet-pc.mjs, avec ses modules jules-*, lier-taches et fichiers-touches) : une fausse API GitHub en mémoire, aucun réseau,
 # aucune dépendance. Aucun `paths:` : un contrôle exigé filtré ne tournerait pas.
 on:
   push:
@@ -26,4 +26,4 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-      - run: node --test scripts/reveil-reacteur.test.mjs scripts/filet-pc.test.mjs scripts/jules-auto.test.mjs scripts/jules-gabarit.test.mjs scripts/jules-marquage.test.mjs scripts/jules-suivi.test.mjs scripts/lier-taches.test.mjs scripts/fichiers-touches.test.mjs scripts/file-depot.test.mjs
+      - run: node --test scripts/reveil-reacteur.test.mjs scripts/filet-pc.test.mjs scripts/jules-auto.test.mjs scripts/jules-gabarit.test.mjs scripts/jules-marquage.test.mjs scripts/jules-suivi.test.mjs scripts/lier-taches.test.mjs scripts/fichiers-touches.test.mjs scripts/file-depot.test.mjs scripts/pilotage-evenement.test.mjs
