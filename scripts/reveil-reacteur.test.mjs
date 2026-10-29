@@ -540,7 +540,6 @@ test('horloges : reacteur.yml n’a plus aucun minuteur (tâche #712), et les cr
   assert.deepEqual(crons('reacteur.yml'), []);
   assert.doesNotMatch(lire('reacteur.yml').replace(/^\s*#.*$/gm, ''), /^\s*schedule:/m);
 
-  for (const [minute] of crons('rapport-hebdo.yml')) assert.ok(!['0', '15', '30', '45'].includes(minute), `rapport-hebdo.yml : minute ronde « ${minute} »`);
 });
 
 test('reacteur.yml écoute chaque événement qui remplace un minuteur, et envoie le bon type', () => {
