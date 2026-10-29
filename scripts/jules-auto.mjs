@@ -23,6 +23,12 @@ const ORG = 'MoKarade';
 
 export const SECTIONS_REQUISES = ['Avant', 'Après', 'Fini quand', 'Fichiers permis', 'À faire', 'À ne pas faire', 'Vérifier', 'À citer dans la PR'];
 export const FICHIERS_MAX = 5;
+/**
+ * Les deux fichiers de suivi que « La doc suit le code » fait mettre à jour dans la MÊME PR (tâche MoKarade/.github#850, Hubperso#753). Racine du dépôt seulement.
+ * Permis à Jules, hors du plafond de FICHIERS_MAX, et jamais cause de `hold` ; `capacite.mjs` les ignore déjà pour les places.
+ */
+export const DOCS_DE_SUITE = ['HANDOVER.md', 'CHANGELOG.md'];
+export const estDocDeSuite = (chemin) => DOCS_DE_SUITE.includes(String(chemin));
 export const CANDIDATES_MAX = 8;
 export const FOIS_MAX = 2;
 export const SIMULTANEES_MAX = 3;
@@ -49,7 +55,7 @@ export const CHEMINS_INTERDITS = [
   [/schema\.(ts|sql)$|\.sql$/i, 'base de données'],
   [/(^|\/)(auth|middleware|proxy)[\w.-]*\.(ts|tsx|js|mjs)$/i, 'authentification'],
   [/secret|token|credential|sentry/i, 'secret, jeton ou Sentry'],
-  [/(^|\/)(BACKLOG|HANDOVER|CLAUDE|AGENTS)\.md$/, 'fichier d\'instructions à ne pas réécrire'],
+  [/(^|\/)(BACKLOG|CLAUDE|AGENTS)\.md$/, 'fichier d\'instructions à ne pas réécrire'],
 ];
 const DEPOTS_INTERDITS = { 'hub-contract': 'le contrat', };
 /**
@@ -111,7 +117,8 @@ export function evaluerJules({ repo, n, labels = [], body = '' }) {
   const fichiers = fichiersPermis(body);
   if (section(body, 'Fichiers permis') !== null) {
     if (fichiers.length === 0) raisons.push('aucun fichier permis lisible (puces `chemin`)');
-    if (fichiers.length > FICHIERS_MAX) raisons.push(`plus de ${FICHIERS_MAX} fichiers permis (${fichiers.length})`);
+    const comptes = fichiers.filter((f) => !estDocDeSuite(f));
+    if (comptes.length > FICHIERS_MAX) raisons.push(`plus de ${FICHIERS_MAX} fichiers permis (${comptes.length})`);
     for (const f of fichiers) for (const [motif, pourquoi] of CHEMINS_INTERDITS) if (motif.test(f)) { raisons.push(`${f} : ${pourquoi}`); break; }
     if (depot === 'driveai' && fichiers.some((f) => /^src\//.test(f))) raisons.push('moteur DriveAI (src/) réservé à Claude');
 
@@ -125,7 +132,7 @@ export function evaluerJules({ repo, n, labels = [], body = '' }) {
     if (fichiers.some((f) => FICHIER_DEPENDANCES.test(f)) && !(/npm audit/i.test(consignes) && /mineure|patch/i.test(consignes))) {
       raisons.push('dépendances : seulement des montées mineures/patch, avec « npm audit » à 0 dans Vérifier');
     }
-    if (fichiers.some((f) => FICHIER_MD.test(f)) && !(/fran[cç]ais/i.test(consignes) && /accent/i.test(consignes))) {
+    if (fichiers.some((f) => FICHIER_MD.test(f) && !estDocDeSuite(f)) && !(/fran[cç]ais/i.test(consignes) && /accent/i.test(consignes))) {
       raisons.push('.md : le corps doit demander explicitement le français et les accents (et un test des mots)');
     }
   } else {

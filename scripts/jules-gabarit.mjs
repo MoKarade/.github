@@ -15,7 +15,7 @@
 //
 // Fonctions pures (`cheminsCites`, `deriverTest`, `composerBloc`), I/O injecté (`gh`) : les tests n'ont besoin ni de réseau ni de fichier.
 
-import { evaluerJules, section, fichiersPermis, SECTIONS_REQUISES, FICHIERS_MAX, FICHIER_ECRAN, CHEMINS_INTERDITS, exclueParDecision } from './jules-auto.mjs';
+import { evaluerJules, section, fichiersPermis, SECTIONS_REQUISES, FICHIERS_MAX, FICHIER_ECRAN, CHEMINS_INTERDITS, DOCS_DE_SUITE, estDocDeSuite, exclueParDecision } from './jules-auto.mjs';
 import { tachesCitees } from './jules-suivi.mjs';
 import { ETIQUETTE, MENTION_MCP, dependanceOuverte, aLigneAttend } from './jules-marquage.mjs';
 
@@ -111,7 +111,8 @@ function typeDeCommit(fichiers, titre) {
 export function composerBloc({ n, titre, depot, fichiers, nouveaux = [], manquantes, prefixe = '', sansTest = false }) {
   const test = fichiers.find((f) => FICHIER_TEST.test(f));
   const ecran = fichiers.some((f) => FICHIER_ECRAN.test(f));
-  const md = fichiers.some((f) => /\.md$/i.test(f));
+  const md = fichiers.some((f) => /\.md$/i.test(f) && !estDocDeSuite(f));
+  const suivi = fichiers.filter(estDocDeSuite);
   const dependances = fichiers.some((f) => /(^|\/)package(-lock)?\.json$/.test(f));
   const filtre = test ? (/\/([^/]+)\.(test|spec)\.[a-z]+$/.exec(test)?.[1] ?? '') : '';
   const lancer = (cmd) => (prefixe === 'web/' ? `cd web && ${cmd}` : cmd);
@@ -128,6 +129,7 @@ export function composerBloc({ n, titre, depot, fichiers, nouveaux = [], manquan
       test && !sansTest ? `Écris ou complète \`${test}\` pour verrouiller ce que « Fini quand » demande, avec des données fictives seulement.` : null,
       ecran ? 'Prends des captures avant/après avec des données fictives et joins-les à la PR (workflow de captures du dépôt).' : null,
       dependances ? 'Monte la dépendance visée par une mise à jour mineure ou un correctif (patch) seulement, jamais `npm audit fix --force` ; `npm install` met le lockfile à jour.' : null,
+      suivi.length ? `Mets à jour ${suivi.map((f) => `\`${f}\``).join(' et ')} dans la même PR (la doc suit le code) : une ligne sur ce que la PR change, ajoutée à la section qui existe déjà ; ne réécris rien d'autre.` : null,
       md ? 'Écris en français, avec tous les accents ; ne touche à aucun mot français existant hors des lignes visées.' : null,
       'Lance les commandes de « Vérifier » et montre leur sortie dans la PR.',
     ].filter(Boolean).map((l, i) => `${i + 1}. ${l}`).join('\n')}`,
@@ -216,6 +218,8 @@ export function preparer({ depot, court, tache, gh }) {
       }
     }
     if (permis.length > FICHIERS_MAX) return refus(`plus de ${FICHIERS_MAX} fichiers permis (${permis.length}) : à découper`);
+    // « La doc suit le code » : une tâche qui change autre chose que du .md met aussi à jour HANDOVER.md (et CHANGELOG.md) dans la même PR ; hors plafond (tâche #850).
+    if (permis.some((f) => !/\.md$/i.test(f))) for (const doc of DOCS_DE_SUITE) if (!permis.includes(doc) && existe(gh, depot, doc)) permis.push(doc);
   } else {
     permis = fichiersPermis(corps);
   }
