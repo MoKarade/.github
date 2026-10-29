@@ -62,7 +62,7 @@ export function construireCommentaire({ modifies, sorties }) {
     const { dependants, tests } = lireAffected(sorties[i], fichier);
     if (!dependants.length) return;
     const nb = dependants.length;
-    lignes.push(`- ${echapper(fichier)} : **${nb} fichier${nb > 1 ? 's' : ''}** en dépendent, dont ${tests} test${tests > 1 ? 's' : ''}`);
+    lignes.push(`- ${echapper(fichier)} : **${nb} fichier${nb > 1 ? 's' : ''}** ${nb > 1 ? 'en dépendent' : 'en dépend'}, dont ${tests} test${tests > 1 ? 's' : ''}`);
     const premiers = dependants.slice(0, MAX_DEPENDANTS).map(echapper).join(', ');
     lignes.push(`  - ${premiers}${nb > MAX_DEPENDANTS ? ` et ${nb - MAX_DEPENDANTS} autres` : ''}`);
   });

@@ -39,7 +39,7 @@ test('commentaire valide : marqueur, fichier modifié, nombre de dépendants, 8 
 
 test('un seul dépendant : singulier', () => {
   const corps = construireCommentaire({ modifies: ['a.mjs'], sorties: [AFFECTED(dep('b.mjs'))] });
-  assert.match(corps, /\*\*1 fichier\*\* en dépendent, dont 0 test\b/);
+  assert.match(corps, /\*\*1 fichier\*\* en dépend, dont 0 test\b/);
 });
 
 test('aucun fichier de code modifié, ou aucun dépendant → pas de commentaire', () => {
@@ -70,7 +70,7 @@ test('plus de 12 fichiers de code modifiés : coupé avec « et N autres »', ()
   const modifies = chemins(15, 'src/m');
   const sorties = modifies.slice(0, 12).map(() => AFFECTED(dep('src/lecteur.mjs')));
   const corps = construireCommentaire({ modifies, sorties });
-  assert.equal((corps.match(/en dépendent/g) ?? []).length, 12);
+  assert.equal((corps.match(/en dépendent?,/g) ?? []).length, 12);
   assert.match(corps, /et 3 autres fichiers de code modifiés/);
 });
 
