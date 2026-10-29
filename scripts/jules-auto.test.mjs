@@ -1,7 +1,7 @@
 import './places-deux.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluerJules, choisirPourJules, confierAJules, section, fichiersPermis, FICHIERS_MAX, FOIS_MAX } from './jules-auto.mjs';
+import { evaluerJules, choisirPourJules, confierAJules, section, fichiersPermis, FICHIERS_MAX, FOIS_MAX, DOCS_DE_SUITE, estDocDeSuite } from './jules-auto.mjs';
 
 // Un corps d'issue au gabarit `docs/jules-gabarit-issue.md`, fictif.
 const corps = (n = 7, repo = 'carai', surcharge = {}) => {
@@ -55,6 +55,20 @@ test('les chemins que Jules ne touche jamais sont refusés avec leur raison', ()
   assert.match(refuse('lib/token-store.ts'), /secret/);
   assert.match(refuse('BACKLOG.md'), /instructions/);
   assert.match(refuse('AGENTS.md'), /instructions/);
+});
+
+test('la doc suit le code (#850) : HANDOVER.md et CHANGELOG.md sont permis hors plafond ; CLAUDE.md, AGENTS.md, BACKLOG.md restent refusés', () => {
+  assert.deepEqual(DOCS_DE_SUITE, ['HANDOVER.md', 'CHANGELOG.md']);
+  assert.equal(estDocDeSuite('HANDOVER.md'), true);
+  assert.equal(estDocDeSuite('docs/HANDOVER.md'), false);
+  assert.equal(estDocDeSuite('README.md'), false);
+  const avecDocs = (liste) => evalue({ 'Fichiers permis': `:\n${liste.map((f) => `- \`${f}\``).join('\n')}` });
+  assert.deepEqual(avecDocs(['lib/format.test.ts', 'HANDOVER.md', 'CHANGELOG.md']), { ok: true, raisons: [] });
+  const cinq = ['a', 'b', 'c', 'd', 'e'].map((x) => `lib/${x}.test.ts`);
+  assert.equal(avecDocs([...cinq, 'HANDOVER.md', 'CHANGELOG.md']).ok, true, 'cinq fichiers + les deux docs : le plafond ne compte pas les docs');
+  assert.match(avecDocs([...cinq, 'lib/f.test.ts', 'HANDOVER.md']).raisons.join(), /plus de 5 fichiers permis \(6\)/);
+  assert.match(avecDocs(['lib/format.test.ts', 'CLAUDE.md']).raisons.join(), /instructions/);
+  assert.match(avecDocs(['lib/format.test.ts', 'README.md']).raisons.join(), /français/, 'un autre .md garde sa preuve du français');
 });
 
 test('exclusions levées par Marc le 19/10 : un workflow listé, sans secret, convient', () => {

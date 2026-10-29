@@ -11,7 +11,7 @@
 //      au format du garde-fou (`scripts/preuve.mjs`), on retire les étiquettes de travail et on ferme (suite de #289 : tâche #300, décisions de
 //      Marc du 19/10/2026 19:56Z, « 3 ok 4 oui »). Déploiement ou captures pas encore là : on attend ; au-delà d'une heure, réveil.
 // Fonctions pures d'un côté, I/O de l'autre (`gh` injecté).
-import { fichiersPermis, FICHIER_ECRAN } from './jules-auto.mjs';
+import { fichiersPermis, estDocDeSuite, FICHIER_ECRAN } from './jules-auto.mjs';
 import { servi } from './preuve.mjs';
 import { MARQUEUR as MARQUEUR_CAPTURES } from './captures.mjs';
 
@@ -29,10 +29,10 @@ export function tachesCitees(pr) {
 /** Tous les fichiers sont des tests (et il y en a au moins un). */
 export const testsSeuls = (fichiers) => fichiers.length > 0 && fichiers.every((f) => TESTS.test(f));
 
-/** Fichiers de la PR qui ne sont pas dans « Fichiers permis » de la tâche (chemins exacts). */
+/** Fichiers de la PR qui ne sont pas dans « Fichiers permis » de la tâche (chemins exacts). HANDOVER.md et CHANGELOG.md n'en sortent jamais : la doc suit le code (tâche #850, Hubperso#753). */
 export function horsPermis(fichiers, corpsTache) {
   const permis = new Set(fichiersPermis(corpsTache));
-  return fichiers.filter((f) => !permis.has(f));
+  return fichiers.filter((f) => !permis.has(f) && !estDocDeSuite(f));
 }
 
 /** Le corps d'une PR ouverte de Jules, nettoyé : plus de ligne fermante, une ligne `Tâche : #n`. Rend le même texte s'il n'y a rien à faire. */
