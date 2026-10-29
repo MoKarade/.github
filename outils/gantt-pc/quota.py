@@ -142,6 +142,8 @@ def actions():
     todo, en_cours = [], []
     for r in scrutes:
         for run in pages(f'repos/MoKarade/{r}/actions/runs?created=%3E%3D{depuis}', 'workflow_runs'):
+            # une exécution lancée pendant que le dépôt était public n'est jamais facturée ni comptée plus bas (`etait_prive`) : ses jobs ne sont pas relus
+            if not visibilite.etait_prive(vis, r, run['created_at']): continue
             key = f"{r}/{run['id']}/{run.get('run_attempt', 1)}"
             if run['status'] != 'completed': en_cours.append((r, run))
             if key in cache['runs'] and run['status'] == 'completed': continue
