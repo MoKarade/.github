@@ -11,7 +11,7 @@
 // Le workflow commente app-template#58 en `github-actions[bot]`, ce qui réveille.
 //
 // Règles (fonctions pures, voir les tests) :
-//   - un dépôt compte s'il est `libre` ou `partiel` (une place libre et une tâche compatible) avec une suivante dans `prochaines.json`, depuis plus de 30 min d'observations continues ;
+//   - un dépôt compte s'il est `libre` (au moins une tâche prête) avec une suivante dans `prochaines.json`, depuis plus de 30 min d'observations continues ;
 //   - un seul réveil par couple (dépôt, tâche) et par 2 h, et un seul message par tour pour tous les dépôts ;
 //   - `prochaines.json` périmé (plus de 30 min) = rien. Le frein de quota n'a pas besoin d'un test à part : `suivante` ne contient que les tâches
 //     qu'il laisse passer (un dépôt dont tout est retenu est `frein`, pas `libre`) ; décision du Coordinateur, 17/10/2026 17:58 UTC ;
@@ -33,13 +33,12 @@
 // `scripts/jules-suivi.mjs`) : nettoyer le corps des PR ouvertes, poser `hold` et réveiller si un fichier sort de « Fichiers permis », et accepter seul
 // (« **Acceptée** » au format du garde-fou, étiquettes retirées, tâche fermée) la PR de TESTS SEULS fusionnée.
 // Septième et huitième ajouts (pose de `faisable-jules`, gabarit de tâche pour Jules) : SUPPRIMÉS le 29/10/2026 (nettoyage « Jules repéré seul », « go reco » de Marc).
-// Neuvième ajout (tâche MoKarade/.github#358) : écrire seul la ligne « Fichiers touchés » des tâches qui n'en ont pas (`scripts/fichiers-touches.mjs`), 8 par tour au plus :
-// sans fichiers connus, la deuxième place d'un dépôt ne sert jamais.
+// Neuvième ajout (tâche #358) : estimation des « Fichiers touchés » des tâches. SUPPRIMÉ le 29/10/2026 (nettoyage « go reco » de Marc) : la règle « pas deux PR sur les mêmes fichiers » lit les fichiers réels des PR.
 // Dixième ajout (tâche MoKarade/.github#421) : écrire seul la ligne « Acceptation automatique » des tâches dont le « Fini quand » se lit par une machine
 // (`scripts/acceptation-marquage.mjs`, 8 par tour au plus) : sans elle, `acceptation-auto.mjs` n'accepte jamais rien (§10 ter).
 // Onzième ajout (tâche MoKarade/.github#513) : redire au Coordinateur, toutes les 4 h, chaque preuve en retard (`scripts/preuves-retard.mjs`, `defauts-preuve.json` du relevé) :
 // une tâche fusionnée sans « Acceptée » valide ou dont la preuve programmée est dépassée ne dépend plus du seul fil qui devait la poser.
-// Du sixième au dixième rôle (suivi des PR de Jules, « Fichiers touchés », « Acceptation automatique ») : DÉPLACÉS vers le Réacteur le 29/10/2026
+// Du sixième au dixième rôle (suivi des PR de Jules, « Fichiers touchés » [supprimé ensuite], « Acceptation automatique ») : DÉPLACÉS vers le Réacteur le 29/10/2026
 // (tâche MoKarade/.github#715, « rien ne dépend du PC »). Les fonctions `tour*` restent ici, testées, mais `main` ne les lance plus ; le Réacteur appelle les fonctions des
 // modules (`scripts/pilotage-evenement.mjs`) sur l'événement qui les rend utiles.
 // Un échec du réveil ne fait JAMAIS échouer le tour (il se dit sur la ligne imprimée) et n'enregistre pas le signalement :
@@ -51,11 +50,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DEPOT_BOITE, WORKFLOW_BOITE, construireMotif } from './reveil-reacteur.mjs';
 import { lierTout, ghCli, compteursGh } from './lier-taches.mjs';
 import { suivreDepot, menageFermees, marquerParJules } from './jules-suivi.mjs';
-import { completerDepot as estimerFichiers, PAR_TOUR_MAX as ESTIMATIONS_PAR_TOUR } from './fichiers-touches.mjs';
 import { completerDepot as marquerAcceptation, PAR_TOUR_MAX as MARQUAGES_PAR_TOUR } from './acceptation-marquage.mjs';
 import { annulerPreuves, evaluerPreuvesRetard, motifDesPreuves } from './preuves-retard.mjs';
 
-export const MODULES_VERSION = ['filet-pc', 'jules-suivi', 'fichiers-touches', 'acceptation-marquage', 'preuves-retard'];
+export const MODULES_VERSION = ['filet-pc', 'jules-suivi', 'acceptation-marquage', 'preuves-retard'];
 
 /**
  * La version du code que ce tour exécute : le sha git (7 caractères) de chaque fichier, calculé comme `git hash-object` (le PC n'a pas de dépôt,
@@ -103,8 +101,8 @@ export function evaluerFilet({ prochaines, etat = {}, maintenant = new Date() })
   const reveils = [];
   for (const d of prochaines.depots ?? []) {
     const depot = d.repo;
-    // `partiel` : une place est libre et une tâche compatible attend (deux places par dépôt, 21/10/2026) ; `libre` : les deux places le sont.
-    const ref = d.statut === 'libre' || d.statut === 'partiel' ? d.suivante?.ref : null;
+    // `libre` : au moins une tâche prête (plus de limite de places depuis le 29/10/2026).
+    const ref = d.statut === 'libre' ? d.suivante?.ref : null;
     if (!depot || !ref) continue; // occupé, incident, frein, rien : le compte de ce dépôt repart de zéro
     const avant = etat?.[depot] ?? {};
     const continu = avant.libre_depuis && avant.vu && minutesEntre(avant.vu, maintenant) <= CONTINUITE_MAX_MIN;
@@ -550,34 +548,6 @@ export function tourJulesSuivi({ fichierEtat, executer = false, aBlanc = false, 
 }
 
 /**
- * Un tour de l'estimation des fichiers touchés : voir `scripts/fichiers-touches.mjs`. Rend la ligne à afficher ; ne lève jamais (un dépôt illisible est dit, les autres passent).
- * @param gh (methode, chemin, corps) -> objet JSON ; par défaut `gh api` du PC
- */
-export function tourFichiersTouches({ executer = false, aBlanc = false, gh = null, depots = DEPOTS_FILET, parTour = ESTIMATIONS_PAR_TOUR }) {
-  try {
-    const appel = gh ?? ghCli;
-    const budget = { restant: parTour };
-    const ecrites = [];
-    const recalculees = [];
-    const echecs = [];
-    for (const depot of depots) {
-      try {
-        const r = estimerFichiers({ depot, gh: appel, budget, aBlanc: aBlanc || !executer });
-        ecrites.push(...r.ecrites);
-        recalculees.push(...r.recalculees);
-      } catch (e) {
-        echecs.push(`${depot.replace('MoKarade/', '')} (${String(e.message).replace(/\s+/g, ' ').slice(0, 60)})`);
-      }
-    }
-    const seul = !executer || aBlanc ? ' (non appliqué)' : '';
-    const connus = ecrites.filter((x) => x.fichiers.length).length;
-    return `fichiers-touches : ${ecrites.length} écrite(s)${ecrites.length ? ` (${connus} estimée(s), ${ecrites.length - connus} non déterminée(s) : ${ecrites.slice(0, 6).map((x) => x.ref).join(', ')}${ecrites.length > 6 ? ', …' : ''})` : ''}${recalculees.length ? `, ${recalculees.length} non déterminée(s) devenue(s) estimée(s) (${recalculees.slice(0, 4).map((x) => x.ref).join(', ')})` : ''}${seul}${echecs.length ? `, ÉCHEC ${echecs.join(' ; ')}` : ''}`;
-  } catch (e) {
-    return `fichiers-touches : ÉCHEC (${String(e.message).slice(0, 160)})`;
-  }
-}
-
-/**
  * Un tour du marquage « Acceptation automatique » : voir `scripts/acceptation-marquage.mjs`. Rend la ligne à afficher ; ne lève jamais.
  * @param gh (methode, chemin, corps) -> objet JSON ; par défaut `gh api` du PC
  */
@@ -628,7 +598,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const quota = mesure('quota', () => tourQuota({ fichierProchaines, fichierEtat: fichierEtat.replace(/(\.json)?$/, '-quota.json'), ...options }));
     const liens = mesure('liens', () => tourLiens({ fichierProchaines, ...options }));
     const file = mesure('file', () => tourFile({ fichierEtat: fichierEtat.replace(/(\.json)?$/, '-file.json'), ...options }));
-    // .github#715 : le suivi des PR de Jules, « Fichiers touchés » et « Acceptation automatique » partent à l'événement
+    // .github#715 : le suivi des PR de Jules et « Acceptation automatique » partent à l'événement
     // (`scripts/pilotage-evenement.mjs`, appelé par le Réacteur) ; le tour du PC n'en lance plus aucun. Il garde la file Mergify (`tourFile`) : mettre une branche à
     // jour AVEC un jeton qui relance la CI est le seul geste que le jeton du job ne sait pas faire (GitHub ne lance aucun workflow sur un push du jeton du job).
     const preuves = mesure('preuves', () => tourPreuvesRetard({ fichierDefauts: fichierProchaines.replace(/[^/\\]*$/, '') + 'defauts-preuve.json', fichierEtat: fichierEtat.replace(/(\.json)?$/, '-preuves.json'), ...options }));

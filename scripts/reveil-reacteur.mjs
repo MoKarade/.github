@@ -13,7 +13,7 @@
 // Sur une PR fusionnée, une CI rouge ou une tâche fermée, il lance aussi `commentaire-tache-liee.yml` et `relecture-ia.yml` de `.github` (tâche #148) ; sur la fin en échec du
 // Garde-fou d'une PR, `relecture-ia.yml` seule (#633) ; à l'ouverture d'une PR, `commentaire-tache-liee.yml` seule (#157).
 //
-// « D libre » n'est dit que si D est VRAIMENT libre (`travaux`). Jamais de nom de tâche suivante dans le message (règle MoKarade/.github#136) : des identifiants seulement.
+// « D libre » est dit sans travail en cours (`travaux`), « D : une place libre » avec des travaux en cours (plus de limite de places depuis le 29/10/2026). Jamais de nom de tâche suivante dans le message (règle MoKarade/.github#136) : des identifiants seulement.
 // Les corps de PR et d'issues sont des données : seuls des numéros en sortent.
 //
 // Fonctions pures d'un côté (`estPanneRunner`, `construireMotif`), I/O de l'autre (`traiter`, avec `api` injecté : les tests n'ont besoin ni de réseau ni de jeton).
@@ -21,7 +21,6 @@
 import { pathToFileURL } from 'node:url';
 import { prAttendantMarc } from './attend-marc.mjs';
 import { dispense, extraireTachesCompletes } from './tache-liee.mjs';
-import { PLACES_PAR_DEPOT } from './capacite.mjs';
 import { accepterApresFusion } from './acceptation-auto.mjs';
 import { accepterPreuvesAttendues, LUES_EVENEMENT, LUES_FILET } from './preuve-attendue-auto.mjs';
 import { fileDuDepot } from './file-depot.mjs';
@@ -111,7 +110,7 @@ export async function occupations({ api, depot, tachesExclues = [] }) {
 }
 
 /**
- * Le nombre de TRAVAUX du dépôt (deux places par dépôt, décision de Marc du 21/10/2026) : une tâche `en-cours` et sa PR ouverte
+ * Le nombre de TRAVAUX du dépôt (il ne limite plus rien depuis le 29/10/2026, il choisit seulement entre « D libre » et « D : une place libre ») : une tâche `en-cours` et sa PR ouverte
  * comptent pour un, une PR qui ne cite aucune tâche occupée compte pour un. Même lecture que `occupations`, même repli (lecture ratée : 0).
  */
 export async function travaux({ api, depot, tachesExclues = [] }) {
@@ -149,15 +148,13 @@ async function lireOccupations({ api, depot, tachesExclues }) {
  * (une lecture qui échoue ne devine rien : le réveil part sans suivante, le Coordinateur lit le Gantt comme avant).
  */
 async function suivanteDe({ api, depot, maintenant, exclure = [] }) {
-  const file = await fileDuDepot({ api, depot, maintenant, exclure, libereA: maintenant.toISOString() }).catch(() => null);
+  const file = await fileDuDepot({ api, depot, maintenant, exclure }).catch(() => null);
   return file?.suivante ? { ligne: `suivante : #${file.suivante}`, file, brut: file } : { ligne: '', file: null, brut: file };
 }
 
-/** « D libre » sans travail, « D : une place libre » avec un seul ; rien quand les deux places sont prises. */
+/** « D libre » sans travail, « D : une place libre » avec des travaux en cours (plus de limite de places depuis le 29/10/2026 : le dépôt peut toujours recevoir une tâche). */
 export function signeLibre(depot, travauxEnCours) {
-  if (travauxEnCours <= 0) return `${depot} libre`;
-  if (travauxEnCours < PLACES_PAR_DEPOT) return `${depot} : une place libre`;
-  return '';
+  return travauxEnCours <= 0 ? `${depot} libre` : `${depot} : une place libre`;
 }
 
 // Les événements qui passent par le Réacteur et pendant lesquels une preuve différée DUE peut se lire (tâche MoKarade/.github#700, §10 quater) :
@@ -297,7 +294,6 @@ export async function decider({ api, evt, maintenant = new Date(), accepter = ac
 async function suiteApresAcceptation({ api, depot, maintenant, taches }) {
   const en = await travaux({ api, depot });
   const suite = await suivanteDe({ api, depot, maintenant });
-  if (en >= PLACES_PAR_DEPOT) return null;
   const lignes = taches.map((n) => `tâche ${depot}#${n} acceptée seule`);
   return { action: 'lancer', motif: construireMotif([signeLibre(depot, en), suite.ligne, ...lignes]), ...(suite.file ? { file: suite.file } : {}) };
 }
@@ -320,7 +316,6 @@ async function deciderEvenement({ api, evt, maintenant, accepter, pause, fetchIm
     if (!issue || issue.state !== 'open' || !noms.includes(LABEL_TACHE)) return { action: 'rien', raison: 'pas une tâche ouverte' };
     const en = await travaux({ api, depot });
     const suite = await suivanteDe({ api, depot, maintenant });
-    if (en >= PLACES_PAR_DEPOT) return { action: 'rien', raison: 'dépôt encore occupé' };
     if (suite.brut?.suivante !== n) return { action: 'rien', raison: 'cette tâche n’est pas la suivante' };
     // Une modification de plus du même corps ne relance pas la routine : son marqueur (routine-prendre.mjs) tient six heures.
     return { action: 'lancer', motif: construireMotif([signeLibre(depot, en), suite.ligne, `tâche ${depot}#${n} prête`]), file: suite.file };
@@ -372,7 +367,6 @@ async function deciderEvenement({ api, evt, maintenant, accepter, pause, fetchIm
     const abandon = evt.raison === 'not_planned' ? ' (abandonnée)' : '';
     const en = await travaux({ api, depot });
     const suite = await suivanteDe({ api, depot, maintenant });
-    if (en >= PLACES_PAR_DEPOT) return { action: 'rien', raison: 'dépôt encore occupé' };
     return { action: 'lancer', motif: construireMotif([signeLibre(depot, en), suite.ligne, `tâche ${depot}#${evt.issue} fermée${abandon}`]), ...(suite.file ? { file: suite.file } : {}) };
   }
 
@@ -389,7 +383,6 @@ async function deciderEvenement({ api, evt, maintenant, accepter, pause, fetchIm
     const tachesExclues = taches.filter((t) => t.depot === depot).map((t) => t.numero);
     const en = await travaux({ api, depot, tachesExclues });
     const suite = await suivanteDe({ api, depot, maintenant, exclure: tachesExclues });
-    if (en >= PLACES_PAR_DEPOT) return { action: 'rien', raison: 'dépôt encore occupé', ...dit };
     const acceptee = acceptation.statut === 'acceptee' ? `tâche ${depot}#${acceptation.tache} acceptée seule` : '';
     return { action: 'lancer', motif: construireMotif([signeLibre(depot, en), suite.ligne, `PR #${evt.pr} fusionnée`, acceptee]), ...dit, ...(suite.file ? { file: suite.file } : {}) };
   }

@@ -15,12 +15,11 @@
 // Fonctions pures d'un côté (`etapesPour`, `lignesDe`), I/O de l'autre (`gh` injecté).
 import { spawnSync } from 'node:child_process';
 import { suivreDepot, menageFermees, marquerParJules } from './jules-suivi.mjs';
-import { completerDepot as estimerFichiers, PAR_TOUR_MAX as ESTIMATIONS_PAR_TOUR } from './fichiers-touches.mjs';
 import { completerDepot as marquerAcceptation, PAR_TOUR_MAX as MARQUAGES_PAR_TOUR } from './acceptation-marquage.mjs';
 import { libererPlacesImmobiles } from './place-immobile.mjs';
 
 /** Les étapes, dans l'ordre où le tour du PC les faisait : une étiquette périmée libère la tâche avant qu'on la complète, la complétion précède la réservation. */
-export const ETAPES = ['suivi', 'parJules', 'menage', 'fichiers', 'acceptation', 'immobiles'];
+export const ETAPES = ['suivi', 'parJules', 'menage', 'acceptation', 'immobiles'];
 
 /**
  * Quelle étape pour quel événement du Réacteur.
@@ -33,7 +32,7 @@ export const ETAPES = ['suivi', 'parJules', 'menage', 'fichiers', 'acceptation',
  *   filet : tout, en rattrapage d'un événement manqué.
  */
 export const PAR_EVENEMENT = {
-  tache_ouverte: ['fichiers', 'acceptation', 'immobiles'],
+  tache_ouverte: ['acceptation', 'immobiles'],
   tache_fermee: ['menage', 'immobiles'],
   pr_ouverte: ['suivi', 'parJules'],
   pr_fusionnee: ['suivi', 'parJules', 'immobiles'],
@@ -104,7 +103,6 @@ export function pilotage({ evt, gh = ghSynchrone(), maintenant = new Date(), aBl
   const sortie = { etapes: etapesPour(evt.type), lignes: [], signaux: [], erreurs: [] };
   if (!depot || sortie.etapes.length === 0) return sortie;
   const etat = {}; // un job ne garde rien (voir l'en-tête) : la mémoire des signalements ne dure que ce passage
-  const budgetFichiers = { restant: ESTIMATIONS_PAR_TOUR };
   const budgetAcceptation = { restant: MARQUAGES_PAR_TOUR };
   const dire = (texte) => sortie.lignes.push(texte);
   const essayer = (nom, f) => {
@@ -126,11 +124,6 @@ export function pilotage({ evt, gh = ghSynchrone(), maintenant = new Date(), aBl
     menage: () => {
       const r = menageFermees({ depot, gh, aBlanc });
       if (r.length) dire(`ménage : ${r.length} étiquette(s) retirée(s) sur tâches fermées (${r.slice(0, 4).join(', ')})`);
-    },
-    fichiers: () => {
-      const r = estimerFichiers({ depot, gh, budget: budgetFichiers, aBlanc });
-      if (r.ecrites.length) dire(`fichiers touchés écrits (${r.ecrites.map((x) => x.ref).slice(0, 6).join(', ')})`);
-      if (r.recalculees.length) dire(`fichiers touchés recalculés (${r.recalculees.map((x) => x.ref).slice(0, 4).join(', ')})`);
     },
     acceptation: () => {
       const r = marquerAcceptation({ depot, gh, budget: budgetAcceptation, aBlanc });

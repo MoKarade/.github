@@ -2,7 +2,7 @@
 // Tâche suivante de chaque dépôt (docs/cycle-de-vie-tache.md §5 et §6) : UN seul calcul, lu par le Gantt ET par la routine.
 //
 // Rôle : lit le relevé `backlog.json` (écrit par fetch.py) et écrit `prochaines.json` : pour chaque dépôt, son état
-// (`libre`, `partiel`, `occupe`, `incident`, `frein`, `rien`), ses deux places, les tâches suivantes, la file complète dans l'ordre, et pour chaque tâche
+// (`libre`, `occupe`, `incident`, `frein`, `rien`), les tâches suivantes, la file complète dans l'ordre, et pour chaque tâche
 // ouverte écartée la raison. Rien n'est lu sur le réseau : le fichier peut dater de quelques dizaines de minutes,
 // donc l'appelant revérifie EN DIRECT la tâche choisie (ouverte, sans `en-cours`, sans PR ouverte) avant de la lancer.
 //
@@ -15,13 +15,14 @@
 // Prenable : ouverte et `niveau:tâche` ; sans `qui:marc`, `bloqué`, `en-cours`, `jules` (déjà confiée), `preuve-attendue` ;
 // toutes les tâches attendues fermées ; aucune PR ouverte ne la cite ; un « Fini quand » écrit.
 // Frein de quota (palier `frein` en tête du fichier) : retient les tâches non permises, état `frein` si c'est tout ce qui reste.
-// Capacité : DEUX travaux par dépôt au plus (décision de Marc, 21/10/2026), sur des fichiers disjoints (`capacite.mjs`). Un travail est une
-// tâche `en-cours` ouverte, une PR de tâche ouverte, ou un fil actif passé en option. Une tâche `jules` n'en est PAS un (décision de Marc,
-// 23/10/2026 22:45Z) : elle sort de `occupe_par` et de `places`. Une tâche `preuve-attendue` n'occupe pas
+// Pas de limite de places (nettoyage du 29/10/2026, « go reco » de Marc) : toute tâche prête part. Une seule règle de capacité reste, celle de Marc :
+// pas deux PR sur les mêmes fichiers. Une tâche qui DÉCLARE ses fichiers (« Fichiers touchés ») attend si l'un d'eux est déjà touché par une PR ouverte,
+// lus sur les fichiers RÉELS de la PR (`pr.ff`) ; fichiers non déclarés ou PR sans liste (tronquée) : aucun blocage (`fichiers-communs.mjs`). Un travail est
+// une tâche `en-cours` ouverte, une PR de tâche ouverte, ou un fil actif passé en option. Une tâche `jules` n'en est PAS un (décision de Marc,
+// 23/10/2026 22:45Z) : elle sort de `occupe_par`. Une tâche `preuve-attendue` n'occupe pas
 // le dépôt, ni une tâche dont la PR ouverte n'attend plus qu'un geste de Marc (`pr_attend_marc` du dépôt dans le relevé, tâche #197) : elle
-// sort de `occupe_par`, reste dans `attend_marc`. Statut : `libre` (aucun travail), `partiel` (un travail et une tâche à fichiers disjoints
-// à lui associer), `occupe` (deux travaux, ou un seul sans tâche compatible : fichiers non déclarés ou communs = un seul). `suivantes` : les
-// tâches à lancer, autant que de places libres, deux à deux disjointes ; `suivante` en est la tête. `couloirs` : les deux places.
+// sort de `occupe_par`, reste dans `attend_marc`. Statut : `libre` (au moins une tâche à lancer), `occupe` (des travaux en cours et rien à lancer),
+// `incident`, `frein`, `rien`. `suivantes` : les tâches à lancer, dans l'ordre de la file ; `suivante` en est la tête.
 //
 // Frein de quota (MoKarade/.github#184, docs/cycle-de-vie-tache.md §5 bis) : le pourcentage hebdomadaire du quota Claude,
 // relevé par la tâche du PC (`quota.json`, .github#45), fixe un palier `frein` (`normal`, `1`, `2`) qui ne laisse passer
@@ -38,7 +39,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { PLACES_PAR_DEPOT, raisonIncompatible, fichiersDuTravail } from './capacite.mjs';
+import { conflitDeFichiers, fichiersDuTravail } from './fichiers-communs.mjs';
 
 /**
  * Une alerte du PC (« Entretien du PC : rouge le 21-10 », « Gemini en panne sur le PC ») porte l'étiquette `incident` mais n'est pas une panne
@@ -66,7 +67,7 @@ export const NON_CALCULE = [
   'avis de sécurité Dependabot ou npm (seule l’étiquette `sécurité` compte)',
   'fil actif du projet (à passer avec --fils-actifs)',
   '« Fini quand » prouvable vite (seule sa présence est vérifiée)',
-  'conflit réel entre deux travaux (seuls les fichiers DÉCLARÉS sont comparés : non déclarés, un dépôt n’a qu’une place utilisable)',
+  'conflit réel entre deux travaux (seuls les fichiers DÉCLARÉS d’une tâche sont comparés aux fichiers réels des PR ouvertes : non déclarés, aucun blocage)',
 ];
 
 const TIERS = {
@@ -280,25 +281,6 @@ export function attendAbsent(n, maintenant = new Date()) {
   return nouvelle || maintenant.getTime() >= Date.parse(ATTEND_OBLIGATOIRE.DES_TOUTES);
 }
 
-// Ligne « Fichiers touchés » (ou « Fichiers permis ») obligatoire (tâche #360, demande de Marc relayée le 21/10/2026 : « la deuxième place doit être réelle »).
-// Même mécanique que `**Attend**` : une tâche créée à partir de `DES_NOUVELLES` la porte `GRACE_NOUVELLE_H` heures après sa création au plus (le temps que le filet du
-// PC, toutes les 10 minutes, en écrive une estimation si son fil ne l'a pas fait : `fichiers-touches.mjs`, qui peut aussi la déclarer « non déterminés ») ; les plus anciennes
-// ont jusqu'à `DES_TOUTES` pour la recevoir. `ft_ligne` vient de `fetch.py` ; absent (relevé d'une
-// ancienne version du PC) : aucune règle, on ne devine pas. Exemptées : un geste de Marc (aucun fichier), une preuve attendue ou manquante (déjà livrée), un travail commencé
-// (`en-cours`, `jules`) et une tâche dont la PR est ouverte (ses fichiers viennent de la PR).
-export const FICHIERS_OBLIGATOIRES = { DES_NOUVELLES: '2026-10-21T16:00:00Z', DES_TOUTES: '2026-10-23T16:00:00Z', GRACE_NOUVELLE_H: 3 };
-const EXEMPTEES_DE_FICHIERS = ['qui:marc', 'preuve-attendue', 'preuve-manquante', 'en-cours', 'jules'];
-
-/** Vrai si la tâche n'a pas la ligne « Fichiers touchés » ET que la règle s'applique déjà à elle. */
-export function fichiersAbsents(n, maintenant = new Date()) {
-  if (n.lvl !== 'tâche' || n.ft_ligne !== false) return false;
-  if (EXEMPTEES_DE_FICHIERS.some((e) => (n.labels ?? []).includes(e)) || n.pr?.state === 'open') return false;
-  const creee = n.created ? Date.parse(n.created) : NaN;
-  const nouvelle = Number.isFinite(creee) && creee >= Date.parse(FICHIERS_OBLIGATOIRES.DES_NOUVELLES);
-  if (nouvelle && maintenant.getTime() >= creee + FICHIERS_OBLIGATOIRES.GRACE_NOUVELLE_H * 3_600_000) return true;
-  return maintenant.getTime() >= Date.parse(FICHIERS_OBLIGATOIRES.DES_TOUTES);
-}
-
 /** Pourquoi une tâche ouverte n'est pas prenable (code), ou null si elle l'est. */
 function ecart(n, depot, idx, maintenant = new Date()) {
   const dependances = n.deps ?? [];
@@ -315,8 +297,6 @@ function ecart(n, depot, idx, maintenant = new Date()) {
   if (ouverte) return { code: 'attend-ouverte', detail: ouverte };
   // Toute tâche dit ce qu'elle attend (décision de Marc, 19/10/2026) : `**Attend** : aucune` ou `**Attend** : #n — raison`. Sans la ligne (et sans lien natif), rien n'est prouvé.
   if (attendAbsent(n, maintenant)) return { code: 'attend-absent', detail: '' };
-  // Les fichiers aussi s'écrivent (#360) : sans eux, la deuxième place du dépôt ne peut jamais servir à cette tâche.
-  if (fichiersAbsents(n, maintenant)) return { code: 'fichiers-absents', detail: '' };
   if (n.pr?.state === 'open') return { code: 'pr-ouverte', detail: `PR ${n.pr.repo ?? depot.repo}#${n.pr.n}` };
   if (!String(n.fq ?? '').trim()) return { code: 'fini-quand-absent', detail: '' };
   return null;
@@ -328,7 +308,7 @@ export const ATTENTE = { marcHeures: 48, marcIsoleHeures: 168, filHeures: 24 };
 
 // Qui peut lever l'obstacle d'après son code. Un code absent de la table n'a PERSONNE pour le lever.
 const PROPRIETAIRE = { 'geste-marc': 'marc', 'preuve-attendue': 'preuve', 'en-cours': 'fil', jules: 'fil', 'pr-ouverte': 'fil', 'frein-quota': 'frein', prenable: 'file', mission: 'mission' };
-const CAUSE_SANS_PROPRIETAIRE = { 'attend-absent': 'attend-absent', 'fichiers-absents': 'fichiers-absents', 'preuve-chez-marc': 'preuve-chez-marc', bloquee: 'bloquee-sans-reprise', 'attend-inconnue': 'dependance-illisible', 'fini-quand-absent': 'fini-quand-absent', cycle: 'dependance-circulaire' };
+const CAUSE_SANS_PROPRIETAIRE = { 'attend-absent': 'attend-absent', 'preuve-chez-marc': 'preuve-chez-marc', bloquee: 'bloquee-sans-reprise', 'attend-inconnue': 'dependance-illisible', 'fini-quand-absent': 'fini-quand-absent', cycle: 'dependance-circulaire' };
 
 const heuresDepuis = (t, maintenant) => (t ? (maintenant.getTime() - Date.parse(t)) / 3_600_000 : null);
 const plusRecent = (...dates) => dates.filter(Boolean).sort().pop() ?? null;
@@ -438,41 +418,24 @@ export function liensManquants(idx) {
 }
 
 /**
- * Les tâches à lancer dans les places libres : la file dans l'ordre, en sautant ce qui ne va pas avec un travail en cours (ou avec une tâche
- * déjà retenue) faute de fichiers déclarés ou à cause d'un fichier commun. La première tâche d'un dépôt sans travail n'a rien à éviter.
+ * Les tâches à lancer : la file dans l'ordre, en sautant ce qui toucherait un fichier déjà touché par une PR ouverte (`reels` de chaque travail : les fichiers
+ * RÉELS de sa PR) ou déclaré par une tâche déjà retenue. Fichiers inconnus ou liste tronquée : aucun blocage.
  * Rend { suivantes, sautees } ; `sautees` (cinq au plus) dit pourquoi une tâche de la file n'a pas été retenue.
  */
-export function choisirSuivantes(file, occupePar, libres) {
+export function choisirSuivantes(file, occupePar) {
   const suivantes = [];
   const sautees = [];
   for (const f of file) {
-    if (suivantes.length >= libres) break;
     let raison = null;
     let avec = null;
-    for (const o of [...occupePar, ...suivantes]) {
-      raison = raisonIncompatible(o.fichiers ?? null, f.fichiers ?? null);
+    for (const o of [...occupePar.map((x) => ({ ...x, fichiers: x.reels ?? null })), ...suivantes]) {
+      raison = conflitDeFichiers(o.fichiers ?? null, f.fichiers ?? null);
       if (raison) { avec = o.ref ?? o.motif; break; }
     }
     if (raison) { if (sautees.length < 5) sautees.push({ ref: f.ref, avec, raison }); continue; }
     suivantes.push(f);
   }
   return { suivantes, sautees };
-}
-
-/** Les places d'un dépôt : travail en cours, tâche prévue ou place libre (le Gantt en fait ses deux couloirs). */
-const COULOIRS_MIN = 3;
-export function couloirsDe(occupePar, suivantes) {
-  const couloirs = [];
-  // Sans limite de places (29/10/2026) : jamais plus de couloirs que de travaux et de tâches prévues, avec au moins `COULOIRS_MIN` pour que la page garde sa forme.
-  const n = Math.min(PLACES_PAR_DEPOT, Math.max(occupePar.length + suivantes.length, COULOIRS_MIN));
-  for (let i = 0; i < n; i++) {
-    const o = occupePar[i];
-    const s = suivantes[i - occupePar.length];
-    if (o) couloirs.push({ place: i + 1, etat: 'occupee', ref: o.ref, motif: o.motif, fichiers: o.fichiers ?? null });
-    else if (s) couloirs.push({ place: i + 1, etat: 'prevue', ref: s.ref, motif: null, fichiers: s.fichiers ?? null });
-    else couloirs.push({ place: i + 1, etat: 'libre', ref: null, motif: null, fichiers: null });
-  }
-  return couloirs;
 }
 
 /**
@@ -502,10 +465,10 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
     const attendMarc = new Set(depot.pr_attend_marc ?? []);
     const enAttenteMarc = taches.filter((n) => n.pr?.state === 'open' && attendMarc.has(n.pr.n));
     const attend = new Set(enAttenteMarc);
-    // Capacité : deux travaux à la fois, sur des fichiers disjoints. Un fil actif passé en option n'a pas de fichiers connus.
+    // Les travaux du dépôt. `reels` : les fichiers RÉELS de la PR ouverte (la seule chose que la règle « pas deux PR sur les mêmes fichiers » lit). Un fil actif passé en option n'a pas de fichiers connus.
     const occupePar = [
-      ...taches.filter((n) => !attend.has(n) && n.labels.includes('en-cours')).map((n) => ({ ref: ref(depot.repo, n.n), motif: 'en-cours', fichiers: fichiersDuTravail(n.fpl, n.pr?.state === 'open' ? n.pr.ff : null) })),
-      ...taches.filter((n) => !attend.has(n) && n.pr?.state === 'open' && !n.labels.includes('en-cours') && !n.labels.includes('jules')).map((n) => ({ ref: ref(depot.repo, n.n), motif: 'pr-ouverte', fichiers: fichiersDuTravail(n.fpl, n.pr.ff) })),
+      ...taches.filter((n) => !attend.has(n) && n.labels.includes('en-cours')).map((n) => ({ ref: ref(depot.repo, n.n), motif: 'en-cours', fichiers: fichiersDuTravail(n.fpl, n.pr?.state === 'open' ? n.pr.ff : null), reels: n.pr?.state === 'open' ? n.pr.ff ?? null : null })),
+      ...taches.filter((n) => !attend.has(n) && n.pr?.state === 'open' && !n.labels.includes('en-cours') && !n.labels.includes('jules')).map((n) => ({ ref: ref(depot.repo, n.n), motif: 'pr-ouverte', fichiers: fichiersDuTravail(n.fpl, n.pr.ff), reels: n.pr.ff ?? null })),
       ...(actifs.has(minuscule(depot.repo)) || actifs.has(minuscule(depot.name)) || actifs.has(minuscule(depot.key)) ? [{ ref: null, motif: 'fil-actif', fichiers: null }] : []),
     ];
     // Jules ne tient pas de place (décision de Marc, 23/10/2026 22:45Z : « il prend quand même ») : ses tâches sortent de `occupe_par`.
@@ -549,9 +512,8 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
 
     const incidentsPc = (depot.incidents ?? []).filter((i) => INCIDENT_PC.test(i.t ?? ''));
     const incidents = (depot.incidents ?? []).filter((i) => !INCIDENT_PC.test(i.t ?? ''));
-    const places = { total: PLACES_PAR_DEPOT, prises: occupePar.length, libres: Math.max(0, PLACES_PAR_DEPOT - occupePar.length) };
-    const { suivantes, sautees } = choisirSuivantes(file, occupePar, incidents.length ? 0 : places.libres);
-    const statut = incidents.length ? 'incident' : occupePar.length === 0 ? (file.length ? 'libre' : retenues ? 'frein' : 'rien') : suivantes.length ? 'partiel' : 'occupe';
+    const { suivantes, sautees } = incidents.length ? { suivantes: [], sautees: [] } : choisirSuivantes(file, occupePar);
+    const statut = incidents.length ? 'incident' : suivantes.length ? 'libre' : occupePar.length ? 'occupe' : file.length ? 'libre' : retenues ? 'frein' : 'rien';
     return {
       depot: depot.name,
       cle: depot.key,
@@ -560,8 +522,6 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
       suivante: suivantes[0] ?? null,
       suivantes,
       sautees_conflit: sautees,
-      places,
-      couloirs: couloirsDe(occupePar, suivantes),
       si_libre: file[0]?.ref ?? null,
       incidents: incidents.map((i) => ({ n: i.n, titre: i.t, url: i.url })),
       incidents_pc: incidentsPc.map((i) => ({ n: i.n, titre: i.t, url: i.url })),
@@ -573,7 +533,7 @@ export function calculer(backlog, { filsActifs = [], frein = null, maintenant = 
     };
   });
   const { attentes, oubliees, file_marc, etats } = analyserAttentes(depots, idx, maintenant);
-  return { version: VERSION, source_asof: backlog.asof, non_calcule: NON_CALCULE, frein: palier, frein_detail: frein?.detail ?? null, alertes, depots, attentes, oubliees, file_marc, etats, liens_manquants: liensManquants(idx), attend_absent: attendAbsentListe(idx, maintenant), fichiers_absents: fichiersAbsentsListe(idx, maintenant), seuils_oubli: ATTENTE };
+  return { version: VERSION, source_asof: backlog.asof, non_calcule: NON_CALCULE, frein: palier, frein_detail: frein?.detail ?? null, alertes, depots, attentes, oubliees, file_marc, etats, liens_manquants: liensManquants(idx), attend_absent: attendAbsentListe(idx, maintenant), seuils_oubli: ATTENTE };
 }
 
 function lireArguments(argv) {
@@ -600,17 +560,6 @@ export function attendAbsentListe(idx, maintenant = new Date()) {
   for (const [r, { noeud: n }] of idx.noeuds) {
     if (n.lvl !== 'tâche' || n.state !== 'open' || n.attend_ligne !== false || (n.deps ?? []).length) continue;
     out.push({ ref: r, applique: attendAbsent(n, maintenant) });
-  }
-  return out.sort((a, b) => a.ref.localeCompare(b.ref));
-}
-
-/** Les tâches ouvertes sans ligne de fichiers : { ref, applique } (`applique` faux = délai de grâce, la règle ne les écarte pas encore). */
-export function fichiersAbsentsListe(idx, maintenant = new Date()) {
-  const out = [];
-  for (const [r, { noeud: n }] of idx.noeuds) {
-    if (n.lvl !== 'tâche' || n.state !== 'open' || n.ft_ligne !== false) continue;
-    if (EXEMPTEES_DE_FICHIERS.some((e) => (n.labels ?? []).includes(e)) || n.pr?.state === 'open') continue;
-    out.push({ ref: r, applique: fichiersAbsents(n, maintenant) });
   }
   return out.sort((a, b) => a.ref.localeCompare(b.ref));
 }

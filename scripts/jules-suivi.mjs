@@ -16,7 +16,7 @@ import { MARQUEUR as MARQUEUR_CAPTURES } from './captures.mjs';
 
 /**
  * Les deux fichiers de suivi que « La doc suit le code » fait mettre à jour dans la MÊME PR (tâche MoKarade/.github#850, Hubperso#753). Racine du dépôt seulement.
- * Permis à Jules, hors du plafond de FICHIERS_MAX, et jamais cause de `hold` ; `capacite.mjs` les ignore déjà pour les places.
+ * Permis à Jules, hors du plafond de FICHIERS_MAX, et jamais cause de `hold`.
  */
 export const DOCS_DE_SUITE = ['HANDOVER.md', 'CHANGELOG.md'];
 export const estDocDeSuite = (chemin) => DOCS_DE_SUITE.includes(String(chemin));

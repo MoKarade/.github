@@ -4,7 +4,7 @@ Décision de Marc (29/10/2026, 15:00Z, « oui go » sur le rapport « Workflow A
 
 ## Le problème
 
-Une tâche `en-cours` tient une place du dépôt (`PLACES_PAR_DEPOT`). Quand son fil s'arrête sans ouvrir de PR, la place reste prise : FinanceAI avait 5 `en-cours` pour 3 places, MemoryAI 4, et leurs files (28 tâches sur 38) ne sortaient rien. L'alerte du Gantt existait, elle ne libérait rien.
+Une tâche `en-cours` est un travail du dépôt (il n'y a plus de limite de places depuis le 29/10/2026, mais la tâche reste dans `occupe_par`). Quand son fil s'arrête sans ouvrir de PR, elle traîne : FinanceAI avait 5 `en-cours` pour 3 places (à l'époque), MemoryAI 4, et leurs files (28 tâches sur 38) ne sortaient rien. L'alerte du Gantt existait, elle ne libérait rien.
 
 ## Ce qui se passe (à l'événement, aucun minuteur)
 

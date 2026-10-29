@@ -17,7 +17,6 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, renameSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { dispense, extraireTaches } from './tache-liee.mjs';
-import { PLACES_PAR_DEPOT } from './capacite.mjs';
 
 export const VERSION = 1;
 export const DEPUIS_DEFAUT = '2026-10-16T18:00:13Z'; // fusion de .github#125 (règle « tâche liée »)
@@ -192,9 +191,8 @@ function mesurerI3(releve, vivant, toutes, depuis, seuilPriseH) {
 
 /**
  * Dépôt `occupe` au dernier calcul : la tâche lancée ensuite est un accord si c'était la tête de file (`si_libre`) ET si au moins un occupant
- * du calcul (`occupe_par`) était fermé avant le lancement (le fil a pris la tête de file dès qu'une place s'est libérée). Avec deux places par
- * dépôt (21/10/2026), un occupant peut rester : la tâche lancée prend la place libérée. Plus de places que d'occupants fermés, ou un occupant
- * sans référence (fil actif) seul, reste un écart : trop de travaux en même temps.
+ * du calcul (`occupe_par`) était fermé avant le lancement (le fil a pris la tête de file dès que ses fichiers se sont libérés). Un occupant peut rester.
+ * Aucun occupant fermé (ou un occupant sans référence, fil actif, seul) reste un écart.
  */
 function apresLiberation(avant, r, depot, lance) {
   if (avant.statut !== 'occupe' || avant.si_libre !== r || !avant.occupe_par?.length) return false;
@@ -203,7 +201,7 @@ function apresLiberation(avant, r, depot, lance) {
     const noeud = depot.nodes[num];
     return !(noeud?.state === 'closed' && noeud.closed && noeud.closed <= lance);
   });
-  return ouverts.length < avant.occupe_par.length && ouverts.length < PLACES_PAR_DEPOT;
+  return ouverts.length < avant.occupe_par.length;
 }
 
 /** I4 : chaque tâche lancée depuis `depuis` était-elle la suivante annoncée juste avant ? */
@@ -242,8 +240,8 @@ function majSnapshots(anciens, prochaines) {
     const cle = minuscule(d.repo);
     const liste = (sortie[cle] ?? []).filter((s) => s.asof >= limite && s.asof !== asof);
     const point = { asof, statut: d.statut, suivante: d.suivante?.ref ?? null };
-    if ((d.suivantes ?? []).length > 1) point.suivantes = d.suivantes.map((x) => x.ref); // deux places libres : l'une ou l'autre est un accord
-    if (d.statut === 'occupe' || d.statut === 'partiel') { point.si_libre = d.si_libre ?? null; point.occupe_par = (d.occupe_par ?? []).map((o) => o.ref); }
+    if ((d.suivantes ?? []).length > 1) point.suivantes = d.suivantes.map((x) => x.ref); // plusieurs tâches prêtes : l'une ou l'autre est un accord
+    if (d.statut === 'occupe') { point.si_libre = d.si_libre ?? null; point.occupe_par = (d.occupe_par ?? []).map((o) => o.ref); }
     liste.push(point);
     sortie[cle] = liste;
   }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { avertissementDeLaTache, controleTacheLiee, defautDeLaTache, dispense, estUneTacheJules, extraireTaches, rapportTacheLiee, tientUnePlace } from './tache-liee.mjs';
+import { avertissementDeLaTache, controleTacheLiee, defautDeLaTache, dispense, estUneTacheJules, extraireTaches, rapportTacheLiee } from './tache-liee.mjs';
 
 // Données fictives, aucun réseau : une fausse API GitHub en mémoire.
 const humain = { login: 'MoKarade', type: 'User' };
@@ -125,7 +125,7 @@ test('une erreur de l’API se propage (échec fermé : jamais un feu vert)', as
 // ── Le Garde-fou de bout en bout : vrai script, fausse API GitHub sur un port local ─────────────────
 
 /** Lance garde-fou.mjs contre une fausse API ; rend le code de sortie et les écritures faites. */
-async function lancerGardeFou({ corps, auteur = humain, tache = tacheOuverte, branche = 'claude/x', lignes = 1, labels = [], brouillon = false, enCours = [] }) {
+async function lancerGardeFou({ corps, auteur = humain, tache = tacheOuverte, branche = 'claude/x', lignes = 1, labels = [], brouillon = false, autresPrs = [], fichiersPr = { 7: [{ filename: 'docs/a.md', status: 'modified', additions: lignes, deletions: 0, patch: '@@ -1 +1 @@\n+x' }] } }) {
   const ecritures = [];
   const serveur = createServer((req, res) => {
     let donnees = '';
@@ -137,8 +137,9 @@ async function lancerGardeFou({ corps, auteur = humain, tache = tacheOuverte, br
       if (chemin === '/repos/MoKarade/depot/pulls/7') {
         return rep(200, { number: 7, state: 'open', draft: brouillon, labels, body: corps, user: auteur, title: 'feat: x', base: { sha: 'b' }, head: { sha: 'h', ref: branche, repo: { full_name: 'MoKarade/depot' } } });
       }
-      if (chemin === '/repos/MoKarade/depot/pulls/7/files') return rep(200, [{ filename: 'docs/a.md', status: 'modified', additions: lignes, deletions: 0, patch: '@@ -1 +1 @@\n+x' }]);
-      if (chemin === '/repos/MoKarade/depot/issues') return rep(200, req.url.includes('labels=en-cours') ? enCours : []);
+      const fp = /^\/repos\/MoKarade\/depot\/pulls\/(\d+)\/files$/.exec(chemin);
+      if (fp && fichiersPr[fp[1]]) return rep(200, fichiersPr[fp[1]]);
+      if (chemin === '/repos/MoKarade/depot/pulls') return rep(200, autresPrs);
       if (chemin === '/repos/MoKarade/depot/issues/7/comments') return rep(200, []);
       if (chemin === '/repos/MoKarade/depot/issues/120') return tache ? rep(200, tache) : rep(404, {});
       return rep(404, {});
@@ -147,7 +148,7 @@ async function lancerGardeFou({ corps, auteur = humain, tache = tacheOuverte, br
   await new Promise((r) => serveur.listen(0, '127.0.0.1', r));
   const script = fileURLToPath(new URL('./garde-fou.mjs', import.meta.url));
   const env = {
-    PATH: process.env.PATH, PLACES_ENV: '3', GITHUB_TOKEN: 'jeton-fictif', GITHUB_REPOSITORY: 'MoKarade/depot', PR_NUMBER: '7',
+    PATH: process.env.PATH, GITHUB_TOKEN: 'jeton-fictif', GITHUB_REPOSITORY: 'MoKarade/depot', PR_NUMBER: '7',
     CHEMINS_PROTEGES: '^(\\.github/|scripts/hooks/|qualite/|vercel\\.json|drizzle/|\\.env|\\.mergify\\.yml)',
     GITHUB_API_URL: `http://127.0.0.1:${serveur.address().port}`,
   };
@@ -206,26 +207,31 @@ test('Garde-fou de bout en bout : 3000 lignes en brouillon ou avec la dérogatio
   assert.match(deroge.texte, /dérogation/);
 });
 
-test('Garde-fou de bout en bout : dépôt plein (un autre travail en cours), rouge avec un commentaire « places » ; tâche déjà en cours, vert', async () => {
-  const unAutre = (number) => ({ number, title: 'autre', labels: [{ name: 'niveau:tâche' }, { name: 'en-cours' }] });
-  const autre = [unAutre(130), unAutre(131), unAutre(132)]; // la mécanique « plein » se teste à trois places (PLACES_ENV) : la production n'a plus de limite depuis le 29/10/2026
-  const deux = await lancerGardeFou({ corps: 'Tâche : #120', enCours: autre.slice(0, 2) });
-  assert.equal(deux.code, 0, deux.texte);
-  const plein = await lancerGardeFou({ corps: 'Tâche : #120', enCours: autre });
-  assert.equal(plein.code, 1, plein.texte);
-  assert.match(plein.texte, /Places : \*\*rouge\*\*/);
-  assert.equal(plein.ecritures.length, 1);
-  assert.match(plein.ecritures[0], /^POST \/repos\/MoKarade\/depot\/issues\/7\/comments .*garde-fou-places/);
-  const tient = await lancerGardeFou({ corps: 'Tâche : #120', enCours: autre, tache: { ...tacheOuverte, labels: [{ name: 'niveau:tâche' }, { name: 'en-cours' }] } });
-  assert.equal(tient.code, 0, tient.texte);
-  const brouillon = await lancerGardeFou({ corps: 'Tâche : #120', enCours: autre, brouillon: true });
-  assert.equal(brouillon.code, 0, brouillon.texte);
+test('Garde-fou de bout en bout : fichier déjà touché par une PR ouverte plus ancienne, rouge avec un commentaire « fichiers » ; fichiers disjoints, brouillon ou PR plus récente, vert', async () => {
+  const f = (filename) => ({ filename, status: 'modified', additions: 1, deletions: 0, patch: '@@ -1 +1 @@\n+x' });
+  const ancienne = { number: 5, draft: false, user: humain };
+  const commun = { 5: [f('docs/a.md')] };
+  const rouge = await lancerGardeFou({ corps: 'Tâche : #120', autresPrs: [ancienne], fichiersPr: { 7: [f('docs/a.md')], ...commun } });
+  assert.equal(rouge.code, 1, rouge.texte);
+  assert.match(rouge.texte, /Fichiers : \*\*rouge\*\*/);
+  assert.match(rouge.texte, /#5/);
+  assert.equal(rouge.ecritures.length, 1);
+  assert.match(rouge.ecritures[0], /^POST \/repos\/MoKarade\/depot\/issues\/7\/comments .*garde-fou-fichiers/);
+  const disjoints = await lancerGardeFou({ corps: 'Tâche : #120', autresPrs: [ancienne], fichiersPr: { 7: [f('docs/a.md')], 5: [f('docs/b.md')] } });
+  assert.equal(disjoints.code, 0, disjoints.texte);
+  assert.match(disjoints.texte, /Fichiers : vert/);
+  const brouillonAutre = await lancerGardeFou({ corps: 'Tâche : #120', autresPrs: [{ ...ancienne, draft: true }], fichiersPr: { 7: [f('docs/a.md')], ...commun } });
+  assert.equal(brouillonAutre.code, 0, brouillonAutre.texte);
+  const plusRecente = await lancerGardeFou({ corps: 'Tâche : #120', autresPrs: [{ ...ancienne, number: 9 }], fichiersPr: { 7: [f('docs/a.md')], 9: [f('docs/a.md')] } });
+  assert.equal(plusRecente.code, 0, 'la plus ancienne garde ses fichiers');
+  const enBrouillon = await lancerGardeFou({ corps: 'Tâche : #120', brouillon: true, autresPrs: [ancienne], fichiersPr: { 7: [f('docs/a.md')], ...commun } });
+  assert.equal(enBrouillon.code, 0, enBrouillon.texte);
+  const inconnu = await lancerGardeFou({ corps: 'Tâche : #120', autresPrs: [ancienne], fichiersPr: { 7: [f('docs/a.md')] } });
+  assert.equal(inconnu.code, 0, 'fichiers de l’autre PR illisibles : aucun blocage');
 });
 
-test('une tâche jules ne tient pas de place (23/10/2026), une tâche en-cours si ; la tâche jules est repérée pour n\u2019être jamais refusée', () => {
+test('la tâche jules est repérée : sa PR n\u2019est jamais refusée pour des fichiers communs', () => {
   const avec = (...noms) => ({ labels: noms.map((name) => ({ name })) });
-  assert.equal(tientUnePlace(avec('niveau:tâche', 'en-cours')), true);
-  assert.equal(tientUnePlace(avec('niveau:tâche', 'jules')), false);
   assert.equal(estUneTacheJules(avec('niveau:tâche', 'jules')), true);
   assert.equal(estUneTacheJules(avec('niveau:tâche', 'en-cours')), false);
 });

@@ -16,7 +16,7 @@
 // Fonctions pures (`evaluerMarquage`, `composerLigne`) d'un côté ; I/O injecté (`gh`) de l'autre : les tests n'ont besoin ni de réseau ni de fichier.
 
 import { section } from './jules-suivi.mjs';
-import { fichiersDeclares } from './capacite.mjs';
+import { fichiersDeclares } from './fichiers-communs.mjs';
 import { ECRAN, LABELS_ATTENTE } from './acceptation-auto.mjs';
 
 const ORG = 'MoKarade';

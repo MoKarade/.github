@@ -31,7 +31,7 @@ import {
   toutesSurmontables,
 } from './relecture-regles.mjs';
 import { MARQUEUR_TACHE, controleTacheLiee, rapportTacheLiee } from './tache-liee.mjs';
-import { MARQUEUR_PLACES, controlePlaces, rapportPlaces } from './places-depot.mjs';
+import { MARQUEUR_FICHIERS, MARQUEUR_ANCIEN_PLACES, controleFichiers, rapportFichiers } from './fichiers-communs.mjs';
 import { MARQUEUR_TAILLE, controleTaille, rapportTaille } from './taille-pr.mjs';
 
 export const MARQUEUR = '<!-- garde-fou -->';
@@ -454,10 +454,6 @@ async function main() {
   // Pas de PR sans tâche (plan Gantt source de vérité, règle 2) : verdict à part, rapporté plus bas.
   const lien = await controleTacheLiee({ api, depot: GITHUB_REPOSITORY, pr });
   const texteLien = rapportTacheLiee(lien);
-  // Places du dépôt (cycle de vie §6, capacité) : une PR sortie du brouillon dont la tâche ne tient pas de place dans un dépôt plein est refusée.
-  const places = await controlePlaces({ api, pr, lien });
-  const textePlaces = rapportPlaces(places);
-
   const fichiers = [];
   for (let page = 1; ; page += 1) {
     const lot = await api('GET', `/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100&page=${page}`);
@@ -467,6 +463,11 @@ async function main() {
       throw new Error('3000 fichiers ou plus : la liste de l’API est tronquée, impossible à garantir');
     }
   }
+
+  // Fichiers (cycle de vie §6, règle de Marc « pas deux PR sur les mêmes fichiers ») : une PR sortie du brouillon qui touche un fichier déjà touché par une
+  // autre PR ouverte sortie du brouillon, plus ancienne, est refusée. Il n'y a plus de limite de places (29/10/2026).
+  const fichiersComm = await controleFichiers({ api, depot: GITHUB_REPOSITORY, pr, fichiers, lien });
+  const texteFichiers = rapportFichiers(fichiersComm);
 
   // PR trop longue à relire (cycle de vie §1, environ 400 lignes hors tests) : verdict à part, comme la tâche liée.
   const taille = controleTaille({ pr, fichiers });
@@ -500,12 +501,12 @@ async function main() {
       'la PR attend la relecture IA (quelques minutes) ; si elle refuse, elle attend Marc.',
     );
   }
-  texte = `${texte}\n\n${texteLien}\n\n${texteTaille}\n\n${textePlaces}`;
+  texte = `${texte}\n\n${texteLien}\n\n${texteTaille}\n\n${texteFichiers}`;
   console.log(texte);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${texte}\n`);
   if (dry) {
     console.log('(DRY_RUN : rien écrit sur GitHub)');
-    process.exitCode = resultat.violations.length > 0 || !lien.ok || !taille.ok || !places.ok ? 1 : 0;
+    process.exitCode = resultat.violations.length > 0 || !lien.ok || !taille.ok || !fichiersComm.ok ? 1 : 0;
     return;
   }
 
@@ -575,18 +576,26 @@ async function main() {
       console.warn(`Garde-fou : commentaire « taille » non posté (le verdict reste rouge). ${erreur.message}`);
     }
   }
-  // Commentaire de la règle « places » : même forme, un seul, mis à jour.
-  const anciennePlaces = commentaires.find((c) => c.body?.includes(MARQUEUR_PLACES));
-  if (!places.ok || anciennePlaces) {
+  // Commentaire de la règle « fichiers » : même forme, un seul, mis à jour. Un ancien commentaire « places » (contrôle supprimé le 29/10/2026) est levé une fois.
+  const ancienFichiers = commentaires.find((c) => c.body?.includes(MARQUEUR_FICHIERS));
+  if (!fichiersComm.ok || ancienFichiers) {
     try {
-      const corps = `${MARQUEUR_PLACES}\n${places.ok ? 'Places : vert, le blocage est levé.' : textePlaces}`;
-      if (anciennePlaces) await api('PATCH', `/repos/${GITHUB_REPOSITORY}/issues/comments/${anciennePlaces.id}`, { body: corps });
+      const corps = `${MARQUEUR_FICHIERS}\n${fichiersComm.ok ? 'Fichiers : vert, le blocage est levé.' : texteFichiers}`;
+      if (ancienFichiers) await api('PATCH', `/repos/${GITHUB_REPOSITORY}/issues/comments/${ancienFichiers.id}`, { body: corps });
       else await api('POST', `/repos/${GITHUB_REPOSITORY}/issues/${numero}/comments`, { body: corps });
     } catch (erreur) {
-      console.warn(`Garde-fou : commentaire « places » non posté (le verdict reste rouge). ${erreur.message}`);
+      console.warn(`Garde-fou : commentaire « fichiers » non posté (le verdict reste rouge). ${erreur.message}`);
     }
   }
-  process.exitCode = echec || !lien.ok || !taille.ok || !places.ok ? 1 : 0;
+  const anciennePlaces = commentaires.find((c) => c.body?.includes(MARQUEUR_ANCIEN_PLACES) && !/contrôle supprimé/.test(c.body));
+  if (anciennePlaces) {
+    try {
+      await api('PATCH', `/repos/${GITHUB_REPOSITORY}/issues/comments/${anciennePlaces.id}`, { body: `${MARQUEUR_ANCIEN_PLACES}\nPlaces : contrôle supprimé (29/10/2026), le blocage est levé.` });
+    } catch (erreur) {
+      console.warn(`Garde-fou : ancien commentaire « places » non levé. ${erreur.message}`);
+    }
+  }
+  process.exitCode = echec || !lien.ok || !taille.ok || !fichiersComm.ok ? 1 : 0;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
