@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { calculer, collecterDepot, cycleRouge, depuisEffectifs, duree, estPremierLundi, executantDe, ligneCachee, lire, lireLigneCachee, lirePages, mediane, rendre, repartition, resumeConformite, titreRapport } from './rapport-hebdo.mjs';
+import { calculer, collecterDepot, cycleRouge, enParallele, depuisEffectifs, duree, estPremierLundi, executantDe, ligneCachee, lire, lireLigneCachee, lirePages, mediane, rendre, repartition, resumeConformite, titreRapport } from './rapport-hebdo.mjs';
 
 const H = 3_600_000;
 const J = 24 * H;
@@ -400,4 +400,21 @@ test('lirePages : une page de moins de 100 s\'arrête, une page pleine appelle l
   assert.equal(tout.length, 102);
   assert.equal(compteur.taches, 2);
   assert.match(vus[1], /per_page=100&page=2$/);
+});
+
+test('enParallele : ordre des résultats gardé, jamais plus de n en vol, la première erreur est relancée', async () => {
+  let enVol = 0;
+  let max = 0;
+  const attente = (ms) => new Promise((r) => setTimeout(r, ms));
+  const sortie = await enParallele([30, 5, 20, 1, 10, 2], 3, async (ms, i) => {
+    enVol += 1;
+    max = Math.max(max, enVol);
+    await attente(ms);
+    enVol -= 1;
+    return i * 10;
+  });
+  assert.deepEqual(sortie, [0, 10, 20, 30, 40, 50]);
+  assert.ok(max <= 3 && max >= 2, `en vol : ${max}`);
+  assert.deepEqual(await enParallele([], 4, async () => 1), []);
+  await assert.rejects(() => enParallele([1, 2, 3], 2, async (x) => { if (x === 2) throw new Error('panne 2'); return x; }), /panne 2/);
 });
