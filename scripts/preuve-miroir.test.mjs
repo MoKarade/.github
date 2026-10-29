@@ -18,8 +18,8 @@ test('tacheDePr : #n, dépôt#n, absente', () => {
 
 test('finiQuand ne garde que sa section ; cibles ne garde que hubperso.com et lit le code attendu', () => {
   const texte = finiQuand(CORPS_TACHE);
-  assert.ok(texte.includes('finance.hubperso.com'));
-  assert.ok(!texte.includes('evil'));
+  assert.deepEqual(cibles(texte).map((c) => new URL(c.url).hostname), ['finance.hubperso.com']);
+  assert.ok(!/evil/.test(texte));
   assert.deepEqual(cibles(texte), [{ url: 'https://finance.hubperso.com/', attendu: 200 }]);
   assert.deepEqual(cibles('https://hubperso.com.evil.test/ et https://user:pw@carai.hubperso.com/'), []);
 });
