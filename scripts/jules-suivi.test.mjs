@@ -27,6 +27,9 @@ test('horsPermis : seuls les chemins exacts de « Fichiers permis » passent', (
   assert.deepEqual(horsPermis(['tests/navigation.test.ts'], CORPS_TACHE), []);
   assert.deepEqual(horsPermis(['tests/navigation.test.ts', 'lib/navigation.ts'], CORPS_TACHE), ['lib/navigation.ts']);
   assert.deepEqual(horsPermis(['tests/a.test.ts'], 'pas de gabarit'), ['tests/a.test.ts']);
+  // la doc suit le code (#850, Hubperso#753) : HANDOVER.md et CHANGELOG.md ne sortent jamais de la liste, un autre fichier si
+  assert.deepEqual(horsPermis(['tests/navigation.test.ts', 'HANDOVER.md', 'CHANGELOG.md'], CORPS_TACHE), []);
+  assert.deepEqual(horsPermis(['HANDOVER.md', 'README.md', 'docs/HANDOVER.md'], CORPS_TACHE), ['README.md', 'docs/HANDOVER.md']);
 });
 
 test('corpsNettoye : retire les lignes fermantes, pose Tâche : #n, ne change rien sinon', () => {

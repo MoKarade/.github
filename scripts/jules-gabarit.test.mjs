@@ -168,6 +168,31 @@ test('refus : seulement des tests cités (les fichiers de la tâche ne se dédui
   assert.match(lancer(g2).refusees[0].raison, /plus de 5 fichiers/);
 });
 
+test('la doc suit le code (#850) : HANDOVER.md et CHANGELOG.md existants entrent dans « Fichiers permis », hors plafond ; absents ou tâche de .md seuls : rien', () => {
+  const g = github({ issues: [tache(30)], fichiers: ['app/tendances/page.tsx', 'HANDOVER.md', 'CHANGELOG.md'] });
+  assert.deepEqual(lancer(g).completees, ['FinanceAI#30']);
+  const corps = ecritures(g.appels)[0].corps.body;
+  assert.match(corps, /- `app\/tendances\/page\.tsx`\n- `tests\/tendances\.test\.ts` \(nouveau\)\n- `HANDOVER\.md`\n- `CHANGELOG\.md`/);
+  assert.deepEqual(evaluerJules({ repo: 'FinanceAI', n: 30, labels: ['niveau:tâche', 'faisable-jules'], body: corps }), { ok: true, raisons: [] });
+  assert.doesNotMatch(corps, /français, avec tous les accents/, 'la doc de suivi ne demande pas la preuve du français');
+  assert.match(corps, /Mets à jour `HANDOVER\.md` et `CHANGELOG\.md` dans la même PR \(la doc suit le code\)/);
+  // dépôt sans HANDOVER.md : rien n'est ajouté
+  const g2 = github({ issues: [tache(30)] });
+  lancer(g2);
+  assert.doesNotMatch(ecritures(g2.appels)[0].corps.body, /HANDOVER/);
+  assert.doesNotMatch(ecritures(g2.appels)[0].corps.body, /Mets à jour/);
+  // cinq fichiers de code + les deux docs : accepté (le plafond ne compte pas les docs)
+  const cinq = ['a', 'b', 'c', 'd', 'e'].map((x) => `lib/${x}.ts`);
+  const corps5 = CORPS().replace('`app/tendances/page.tsx` (blocs', `${cinq.map((f) => `\`${f}\``).join(', ')}, \`tests/z.test.ts\` (blocs`).replace('un test de rendu verrouille', 'un test (`tests/z.test.ts`) verrouille');
+  const g3 = github({ issues: [tache(31, { body: corps5 })], fichiers: [...cinq, 'tests/z.test.ts', 'HANDOVER.md'] });
+  assert.equal(lancer(g3).refusees.length, 1, 'six fichiers hors doc : refusé');
+  const quatre = cinq.slice(0, 4);
+  const corps4 = CORPS().replace('`app/tendances/page.tsx` (blocs', `${quatre.map((f) => `\`${f}\``).join(', ')}, \`tests/z.test.ts\` (blocs`).replace('un test de rendu verrouille', 'un test (`tests/z.test.ts`) verrouille');
+  const g4 = github({ issues: [tache(32, { body: corps4 })], fichiers: [...quatre, 'tests/z.test.ts', 'HANDOVER.md'] });
+  assert.deepEqual(lancer(g4).completees, ['FinanceAI#32']);
+  assert.match(ecritures(g4.appels)[0].corps.body, /- `HANDOVER\.md`/);
+});
+
 test('refus : dossier de tests introuvable', () => {
   const g = github({ issues: [tache(30)], dossiers: [] });
   assert.match(lancer(g).refusees[0].raison, /dossier tests introuvable/);
