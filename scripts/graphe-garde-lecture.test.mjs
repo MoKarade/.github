@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,7 +23,7 @@ function garde(entree, fichiers = {}) {
       env: { ...process.env, GRAPHE_VENV: join(racine, 'pas-de-venv') },
     });
     let journal = '';
-    try { journal = spawnSync('cat', [join(racine, 'graphify-out', 'usage.jsonl')], { encoding: 'utf8' }).stdout; } catch { /* journal absent */ }
+    try { journal = readFileSync(join(racine, 'graphify-out', 'usage.jsonl'), 'utf8'); } catch { /* journal absent */ }
     return { ...r, journal };
   } finally {
     rmSync(racine, { recursive: true, force: true });
